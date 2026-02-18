@@ -1,0 +1,70 @@
+import { Router } from "express";
+
+import { authenticateDoctor } from "../middleware/authMiddleware";
+import {
+  doctorLogin,
+  doctorLogout,
+  doctorRegister,
+  labManagerRegister,
+  getDoctorProfile,
+  completeDoctorForgotPassword,
+  startDoctorForgotPassword,
+  createAssistantAccount,
+  listAssistants,
+  createLabAssistantAccount,
+  listLabAssistants
+} from "../controllers/authController";
+
+const router = Router();
+
+// POST /auth/doctor/register
+router.post("/doctor/register", doctorRegister);
+
+// POST /auth/lab-manager/register (public – lab manager self-registration)
+router.post("/lab-manager/register", labManagerRegister);
+
+// POST /auth/doctor/login
+router.post("/doctor/login", doctorLogin);
+
+// POST /auth/doctor/password/forgot - send OTP over WhatsApp
+router.post("/doctor/password/forgot", startDoctorForgotPassword);
+
+// POST /auth/doctor/password/reset - verify OTP and set new password
+router.post("/doctor/password/reset", completeDoctorForgotPassword);
+
+// POST /auth/assistant (doctor-only) - create an assistant account
+router.post(
+  "/assistant",
+  authenticateDoctor,
+  createAssistantAccount
+);
+
+// GET /auth/assistants (doctor-only) - list all assistants
+router.get(
+  "/assistants",
+  authenticateDoctor,
+  listAssistants
+);
+
+// POST /auth/lab-assistant (doctor-only) - create lab assistant
+router.post(
+  "/lab-assistant",
+  authenticateDoctor,
+  createLabAssistantAccount
+);
+
+// GET /auth/lab-assistants (doctor-only) - list lab assistants created by this doctor
+router.get(
+  "/lab-assistants",
+  authenticateDoctor,
+  listLabAssistants
+);
+
+// POST /auth/doctor/logout (JWT protected – client clears token after calling)
+router.post("/doctor/logout", authenticateDoctor, doctorLogout);
+
+// GET /auth/doctor/profile (JWT protected)
+router.get("/doctor/profile", authenticateDoctor, getDoctorProfile);
+
+export default router;
+

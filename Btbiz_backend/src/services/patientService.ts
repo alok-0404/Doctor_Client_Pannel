@@ -1,0 +1,210 @@
+import mongoose from "mongoose";
+
+import { Patient } from "../models/Patient";
+import { PatientDocument } from "../models/PatientDocument";
+import { Visit } from "../models/Visit";
+import { Prescription } from "../models/Prescription";
+import { DiagnosticTest } from "../models/DiagnosticTest";
+import { Doctor } from "../models/Doctor";
+
+export const findPatientByMobile = async (mobile: string) => {
+  return Patient.findOne({ mobileNumber: mobile });
+};
+
+export interface CreatePatientPayload {
+  firstName: string;
+  lastName?: string;
+  mobileNumber: string;
+  dateOfBirth?: Date;
+  gender?: "MALE" | "FEMALE" | "OTHER";
+  address?: string;
+  bloodGroup?: string;
+  previousHealthHistory?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+}
+
+export const createPatient = async (payload: CreatePatientPayload) => {
+  const existing = await Patient.findOne({ mobileNumber: payload.mobileNumber });
+  if (existing) {
+    throw new Error("MOBILE_ALREADY_EXISTS");
+  }
+  return Patient.create(payload);
+};
+
+export const updatePatient = async (
+  patientId: string,
+  payload: Partial<CreatePatientPayload>
+) => {
+  if (!mongoose.Types.ObjectId.isValid(patientId)) {
+    throw new Error("INVALID_PATIENT_ID");
+  }
+  const patient = await Patient.findById(patientId);
+  if (!patient) {
+    throw new Error("PATIENT_NOT_FOUND");
+  }
+  if (payload.mobileNumber && payload.mobileNumber !== patient.mobileNumber) {
+    const existing = await Patient.findOne({ mobileNumber: payload.mobileNumber });
+    if (existing) {
+      throw new Error("MOBILE_ALREADY_EXISTS");
+    }
+  }
+  Object.assign(patient, payload);
+  await patient.save();
+  return patient;
+};
+
+export interface CreateVisitPayload {
+  patientId: string;
+  doctorId: string;
+  recordedById?: string;
+  visitDate?: Date;
+  reason?: string;
+  notes?: string;
+  bloodPressureSystolic?: number;
+  bloodPressureDiastolic?: number;
+  bloodSugarFasting?: number;
+  weightKg?: number;
+  temperature?: number;
+  otherVitalsNotes?: string;
+}
+
+export const createVisit = async (payload: CreateVisitPayload) => {
+  if (!mongoose.Types.ObjectId.isValid(payload.patientId)) {
+    throw new Error("INVALID_PATIENT_ID");
+  }
+  if (!mongoose.Types.ObjectId.isValid(payload.doctorId)) {
+    throw new Error("INVALID_DOCTOR_ID");
+  }
+  const [patient, doctor] = await Promise.all([
+    Patient.findById(payload.patientId),
+    Doctor.findById(payload.doctorId)
+  ]);
+  if (!patient) throw new Error("PATIENT_NOT_FOUND");
+  if (!doctor) throw new Error("DOCTOR_NOT_FOUND");
+  return Visit.create({
+    patient: patient._id,
+    doctor: doctor._id,
+    recordedBy: payload.recordedById
+      ? new mongoose.Types.ObjectId(payload.recordedById)
+      : undefined,
+    visitDate: payload.visitDate ? new Date(payload.visitDate) : new Date(),
+    reason: payload.reason,
+    notes: payload.notes,
+    bloodPressureSystolic: payload.bloodPressureSystolic,
+    bloodPressureDiastolic: payload.bloodPressureDiastolic,
+    bloodSugarFasting: payload.bloodSugarFasting,
+    weightKg: payload.weightKg,
+    temperature: payload.temperature,
+    otherVitalsNotes: payload.otherVitalsNotes
+  });
+};
+
+export const getFullPatientHistory = async (patientId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(patientId)) {
+    throw new Error("INVALID_PATIENT_ID");
+  }
+
+  const patient = await Patient.findById(patientId);
+  if (!patient) {
+    throw new Error("PATIENT_NOT_FOUND");
+  }
+
+  const visits = await Visit.find({ patient: patient._id })
+    .sort({ visitDate: -1 })
+    .populate("doctor", "_id name email")
+    .lean();
+
+  const visitIds = visits.map((v) => v._id);
+
+  const [prescriptions, diagnosticTests] = await Promise.all([
+    Prescription.find({ visit: { $in: visitIds } })
+      .populate("medicines")
+      .lean(),
+    DiagnosticTest.find({ visit: { $in: visitIds } }).lean()
+  ]);
+
+  const prescriptionsByVisit = new Map<string, unknown[]>();
+  prescriptions.forEach((p) => {
+    const key = p.visit.toString();
+    const current = prescriptionsByVisit.get(key) ?? [];
+    current.push(p);
+    prescriptionsByVisit.set(key, current);
+  });
+
+  const testsByVisit = new Map<string, unknown[]>();
+  diagnosticTests.forEach((t) => {
+    const key = t.visit.toString();
+    const current = testsByVisit.get(key) ?? [];
+    current.push({
+      ...t,
+      hasReport: !!(t as any).reportPath,
+      reportFileName: (t as any).reportFileName,
+      reportUploadedAt: (t as any).reportUploadedAt
+    });
+    testsByVisit.set(key, current);
+  });
+
+  const visitsWithDetails = visits.map((visit) => {
+    const key = visit._id.toString();
+    return {
+      ...visit,
+      prescriptions: prescriptionsByVisit.get(key) ?? [],
+      diagnosticTests: testsByVisit.get(key) ?? []
+    };
+  });
+
+  const documents = await PatientDocument.find({ patient: patient._id })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return {
+    patient,
+    visits: visitsWithDetails,
+    documents: documents.map((d) => ({
+      id: d._id.toString(),
+      originalName: d.originalName,
+      mimeType: d.mimeType,
+      uploadedAt: d.createdAt,
+      ocrText: (d as any).ocrText,
+      ocrConfidence: (d as any).ocrConfidence
+    }))
+  };
+};
+
+export const addDiagnosticTestsToVisit = async (
+  patientId: string,
+  visitId: string,
+  testNames: string[]
+): Promise<void> => {
+  if (!mongoose.Types.ObjectId.isValid(patientId)) {
+    throw new Error("INVALID_PATIENT_ID");
+  }
+  if (!mongoose.Types.ObjectId.isValid(visitId)) {
+    throw new Error("INVALID_VISIT_ID");
+  }
+  if (!Array.isArray(testNames) || testNames.length === 0) {
+    throw new Error("TEST_NAMES_REQUIRED");
+  }
+
+  const visit = await Visit.findById(visitId).lean();
+  if (!visit) {
+    throw new Error("VISIT_NOT_FOUND");
+  }
+  if (visit.patient.toString() !== patientId) {
+    throw new Error("VISIT_DOES_NOT_BELONG_TO_PATIENT");
+  }
+
+  const validNames = testNames.filter((n) => typeof n === "string" && n.trim().length > 0);
+  if (validNames.length === 0) {
+    throw new Error("TEST_NAMES_REQUIRED");
+  }
+
+  await DiagnosticTest.insertMany(
+    validNames.map((testName) => ({
+      visit: new mongoose.Types.ObjectId(visitId),
+      testName: testName.trim()
+    }))
+  );
+};
+

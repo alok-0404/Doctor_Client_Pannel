@@ -1,0 +1,444 @@
+import { useState, type FC, type ReactNode } from 'react'
+import { patientService } from '../services/api'
+
+interface TagProps {
+  variant?: 'worked' | 'notWorked'
+  children: ReactNode
+}
+
+const PillTag: FC<TagProps> = ({ variant = 'worked', children }) => {
+  const variantClass = variant === 'worked' ? 'pill-tag pill-tag-worked' : 'pill-tag pill-tag-not-worked'
+
+  return (
+    <span className={variantClass}>
+      {children}
+    </span>
+  )
+}
+
+const DocumentViewButton: FC<{ patientId: string; documentId: string; label: string }> = ({ patientId, documentId, label }) => {
+  const [loading, setLoading] = useState(false)
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (loading) return
+    setLoading(true)
+    try {
+      await patientService.openDocument(patientId, documentId)
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={loading}
+      className="ui-button ui-button-primary"
+      style={{ fontSize: 12, padding: '4px 10px' }}
+    >
+      {loading ? 'Opening…' : label}
+    </button>
+  )
+}
+
+export interface MedicineItem {
+  name: string
+  dosage?: string
+  worked?: boolean
+}
+
+export interface VisitItem {
+  date: string
+  reason: string
+  notes?: string
+}
+
+export interface PrescriptionItem {
+  date: string
+  summary: string
+}
+
+export interface DiagnosticTestItem {
+  name: string
+  status: string
+  hasReport?: boolean
+  testId?: string
+  visitId?: string
+}
+
+export interface DocumentItem {
+  id: string
+  originalName: string
+  uploadedAt: string
+  ocrText?: string
+}
+
+export interface PatientDetailsData {
+  id: string
+  name: string
+  age: number
+  gender: string
+  mobile: string
+  lastVisit?: string
+  basicInfo?: string
+  heightCm?: number
+  weightKg?: number
+  bloodGroup?: string
+  primaryDisease?: string
+  lifestyle?: string
+  exerciseRoutine?: string
+  dietType?: string
+  geneticConditions?: string
+  emergencyContact?: {
+    name: string
+    relation?: string
+    phone: string
+  }
+  visits: VisitItem[]
+  prescriptions: PrescriptionItem[]
+  medicines: MedicineItem[]
+  tests: DiagnosticTestItem[]
+  documents?: DocumentItem[]
+}
+
+interface PatientCardProps {
+  data: PatientDetailsData
+  patientId: string
+}
+
+type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'tests' | 'documents'
+
+export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
+  const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
+    patient: false,
+    visitHistory: false,
+    prescriptions: false,
+    medicines: false,
+    tests: false,
+    documents: false,
+  })
+
+  const toggleSection = (key: SectionKey) => (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.stopPropagation()
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const openPatient = openSections.patient
+  const openVisitHistory = openSections.visitHistory
+  const openPrescriptions = openSections.prescriptions
+  const openMedicines = openSections.medicines
+  const openTests = openSections.tests
+  const openDocuments = openSections.documents
+
+  return (
+    <div className="patient-layout">
+      {/* Left column – patient summary */}
+      <section
+        className={`patient-summary-card patient-collapsible ${openPatient ? 'patient-collapsible-open' : ''}`}
+        onClick={toggleSection('patient')}
+        onKeyDown={(e) => e.key === 'Enter' && toggleSection('patient')(e)}
+        role="button"
+        tabIndex={0}
+      >
+        <h2 className="dashboard-kicker">
+          Patient
+        </h2>
+        {openPatient && (
+          <>
+            <p className="patient-name">
+              {data.name}
+            </p>
+            <p className="patient-meta">
+              {data.age} yrs • {data.gender}
+            </p>
+            <dl className="patient-summary-list">
+              <div className="patient-summary-row">
+                <dt>Mobile</dt>
+                <dd>{data.mobile}</dd>
+              </div>
+              {data.heightCm && data.weightKg && (
+                <div className="patient-summary-row">
+                  <dt>Height / Weight</dt>
+                  <dd>
+                    {data.heightCm} cm • {data.weightKg} kg
+                  </dd>
+                </div>
+              )}
+              {data.bloodGroup && (
+                <div className="patient-summary-row">
+                  <dt>Blood group</dt>
+                  <dd>{data.bloodGroup}</dd>
+                </div>
+              )}
+              {data.primaryDisease && (
+                <div className="patient-summary-row">
+                  <dt>Main condition</dt>
+                  <dd>{data.primaryDisease}</dd>
+                </div>
+              )}
+              {data.lastVisit && (
+                <div className="patient-summary-row">
+                  <dt>Last visit</dt>
+                  <dd>{data.lastVisit}</dd>
+                </div>
+              )}
+            </dl>
+            {(data.basicInfo ||
+              data.lifestyle ||
+              data.exerciseRoutine ||
+              data.dietType ||
+              data.geneticConditions ||
+              data.emergencyContact) && (
+              <div className="patient-note">
+                {data.basicInfo && (
+                  <p style={{ margin: 0 }}>
+                    {data.basicInfo}
+                  </p>
+                )}
+                {data.lifestyle && (
+                  <p style={{ margin: '6px 0 0' }}>
+                    <strong>Lifestyle:</strong> {data.lifestyle}
+                  </p>
+                )}
+                {data.exerciseRoutine && (
+                  <p style={{ margin: '4px 0 0' }}>
+                    <strong>Routine exercise:</strong> {data.exerciseRoutine}
+                  </p>
+                )}
+                {data.dietType && (
+                  <p style={{ margin: '4px 0 0' }}>
+                    <strong>Eating habits:</strong> {data.dietType}
+                  </p>
+                )}
+                {data.geneticConditions && (
+                  <p style={{ margin: '4px 0 0' }}>
+                    <strong>Genetic disease:</strong> {data.geneticConditions}
+                  </p>
+                )}
+                {data.emergencyContact && (
+                  <p style={{ margin: '6px 0 0' }}>
+                    <strong>Emergency contact:</strong>{' '}
+                    {data.emergencyContact.name}
+                    {data.emergencyContact.relation
+                      ? ` (${data.emergencyContact.relation})`
+                      : ''}
+                    {` • ${data.emergencyContact.phone}`}
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* Right column – history, prescriptions, etc. */}
+      <section className="patient-right">
+        <div className="patient-grid">
+          <div
+            className={`patient-section-card patient-collapsible ${openVisitHistory ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('visitHistory')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('visitHistory')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Visit History
+            </h3>
+            {openVisitHistory && (
+              <ul className="patient-list">
+                {data.visits.map((visit) => (
+                  <li
+                    key={`${visit.date}-${visit.reason}`}
+                    className="patient-list-item">
+                    <div className="patient-list-copy">
+                      <p className="patient-list-primary">
+                        {visit.reason}
+                      </p>
+                      {visit.notes && (
+                        <p className="patient-list-secondary">
+                          {visit.notes}
+                        </p>
+                      )}
+                    </div>
+                    <span className="patient-list-meta">
+                      {visit.date}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            className={`patient-section-card patient-collapsible ${openPrescriptions ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('prescriptions')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('prescriptions')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Prescriptions
+            </h3>
+            {openPrescriptions && (
+              <ul className="patient-list">
+                {data.prescriptions.map((p) => (
+                  <li
+                    key={`${p.date}-${p.summary}`}
+                    className="patient-list-item">
+                    <p className="patient-list-meta">
+                      {p.date}
+                    </p>
+                    <p className="patient-list-primary">
+                      {p.summary}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="patient-grid">
+          <div
+            className={`patient-section-card patient-collapsible ${openMedicines ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('medicines')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('medicines')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Medicines
+            </h3>
+            {openMedicines && (
+              <ul className="patient-list">
+                {data.medicines.map((m) => (
+                  <li
+                    key={`${m.name}-${m.dosage}`}
+                    className="patient-list-item">
+                    <div className="patient-list-copy">
+                      <p className="patient-list-primary">
+                        {m.name}
+                      </p>
+                      {m.dosage && (
+                        <p className="patient-list-secondary">
+                          {m.dosage}
+                        </p>
+                      )}
+                    </div>
+                    <PillTag variant={m.worked ? 'worked' : 'notWorked'}>
+                      {m.worked ? 'Worked' : 'Not worked'}
+                    </PillTag>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            className={`patient-section-card patient-collapsible ${openTests ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('tests')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('tests')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Diagnostic Tests
+            </h3>
+            {openTests && (
+              <ul className="patient-list">
+                {data.tests.map((t, idx) => (
+                  <li
+                    key={`test-${idx}-${t.name}`}
+                    className="patient-list-item"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <p className="patient-list-primary">
+                        {t.name}
+                      </p>
+                      <span className="patient-list-meta">
+                        {t.status}
+                      </span>
+                    </div>
+                    {t.hasReport && t.testId && t.visitId ? (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            await patientService.openDiagnosticTestReport(patientId, t.visitId!, t.testId!)
+                          } catch {
+                            alert('Failed to open report')
+                          }
+                        }}
+                        className="ui-button ui-button-primary"
+                        style={{ fontSize: 12, padding: '4px 10px' }}
+                      >
+                        View
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, color: '#627d98', fontStyle: 'italic' }}>
+                        Waiting
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            className={`patient-section-card patient-collapsible ${openDocuments ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('documents')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('documents')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Uploaded Documents
+            </h3>
+            {openDocuments && (
+              <>
+                {(!data.documents || data.documents.length === 0) ? (
+                  <p className="patient-list-secondary" style={{ margin: 0 }}>
+                    No documents uploaded yet.
+                  </p>
+                ) : (
+                  <ul className="patient-list">
+                    {data.documents.map((doc) => (
+                      <li
+                        key={doc.id}
+                        className="patient-list-item"
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+                      >
+                        <div>
+                          <p className="patient-list-primary">
+                            {doc.originalName}
+                          </p>
+                          <span className="patient-list-meta">
+                            {new Date(doc.uploadedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {doc.ocrText && (
+                            <p className="patient-list-secondary" style={{ marginTop: 4, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {doc.ocrText}
+                            </p>
+                          )}
+                        </div>
+                        <DocumentViewButton
+                          patientId={patientId}
+                          documentId={doc.id}
+                          label="View"
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+

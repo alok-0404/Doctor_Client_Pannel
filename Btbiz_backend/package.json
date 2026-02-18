@@ -1,0 +1,37 @@
+{
+  "name": "btbiz-doctor-backend",
+  "version": "1.0.0",
+  "description": "Production-ready doctor admin backend with JWT auth, Express, TypeScript, and MongoDB.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/multer": "^2.0.0",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.7.0",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "socket.io": "^4.8.3",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^22.10.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  }
+}
