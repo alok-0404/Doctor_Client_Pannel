@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
 export type NotificationStatus = "unread" | "dismissed" | "read";
+export type NotificationSource = "ASSISTANT_REFERRAL" | "ONLINE_APPOINTMENT";
 
 export interface IDoctorNotification extends Document {
   doctor: Types.ObjectId;
@@ -8,6 +9,7 @@ export interface IDoctorNotification extends Document {
   patientName: string;
   visit: Types.ObjectId;
   status: NotificationStatus;
+  source: NotificationSource;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,6 +39,13 @@ const DoctorNotificationSchema = new Schema<IDoctorNotification>(
       type: String,
       enum: ["unread", "dismissed", "read"],
       default: "unread",
+      required: true,
+      index: true
+    },
+    source: {
+      type: String,
+      enum: ["ASSISTANT_REFERRAL", "ONLINE_APPOINTMENT"],
+      default: "ASSISTANT_REFERRAL",
       required: true,
       index: true
     }

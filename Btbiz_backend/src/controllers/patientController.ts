@@ -217,7 +217,8 @@ export const createVisit = async (
       patient: visit.patient,
       patientName,
       visit: visit._id,
-      status: "unread"
+      status: "unread",
+      source: "ASSISTANT_REFERRAL"
     });
 
     const io = getIo();

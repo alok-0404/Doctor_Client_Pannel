@@ -153,6 +153,7 @@ body {
   max-width: 1120px;
   margin: 0 auto;
   padding: 24px 24px 32px;
+  align-items: flex-start;
 }
 
 .dashboard-left {

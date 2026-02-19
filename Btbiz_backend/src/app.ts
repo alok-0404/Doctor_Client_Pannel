@@ -8,6 +8,7 @@ import patientRoutes from "./routes/patientRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import ocrRoutes from "./routes/ocr";
 import publicRoutes from "./routes/publicRoutes";
+import appointmentRoutes from "./routes/appointmentRoutes";
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/patients", patientRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/api/ocr", ocrRoutes);
 app.use("/public", publicRoutes);
+app.use("/appointments", appointmentRoutes);
 
 // Fallback 404
 app.use((_req, res) => {

@@ -3,7 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
-import { authService, notificationService, type AssistantSummary, type DoctorNotificationItem } from '../services/api'
+import {
+  authService,
+  notificationService,
+  appointmentService,
+  type AssistantSummary,
+  type DoctorNotificationItem,
+  type DoctorAppointmentItem,
+} from '../services/api'
 import { authStorage } from '../utils/authStorage'
 
 export const Dashboard = () => {
@@ -34,6 +41,9 @@ export const Dashboard = () => {
   const [labAssistants, setLabAssistants] = useState<AssistantSummary[]>([])
   const [labAssistantsOpen, setLabAssistantsOpen] = useState(false)
 
+  const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false)
+
   const loadAssistants = async () => {
     try {
       const list = await authService.listAssistants()
@@ -52,6 +62,18 @@ export const Dashboard = () => {
     }
   }
 
+  const loadTodayAppointments = async () => {
+    try {
+      setAppointmentsLoading(true)
+      const list = await appointmentService.getTodayAppointments()
+      setTodayAppointments(list)
+    } catch {
+      // ignore for now
+    } finally {
+      setAppointmentsLoading(false)
+    }
+  }
+
   const loadNotifications = async () => {
     try {
       const list = await notificationService.getNotifications()
@@ -65,6 +87,7 @@ export const Dashboard = () => {
     void loadAssistants()
     void loadLabAssistants()
     void loadNotifications()
+    void loadTodayAppointments()
   }, [])
 
   useEffect(() => {
@@ -79,6 +102,9 @@ export const Dashboard = () => {
   }, [])
 
   const pendingNotifications = notifications.filter((n) => n.status === 'unread' || n.status === 'dismissed')
+  const referralNotifications = pendingNotifications.filter(
+    (n) => n.source === 'ASSISTANT_REFERRAL' || !n.source
+  )
   const handleNotificationClick = async (n: DoctorNotificationItem) => {
     if (n.status !== 'read') {
       try {
@@ -194,9 +220,67 @@ export const Dashboard = () => {
             </p>
           </Card>
 
-          {pendingNotifications.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <Card className="dashboard-overview-card">
+          <div style={{ marginTop: 16 }}>
+            <Card className="dashboard-overview-card">
+              <p className="dashboard-kicker">Today's appointments</p>
+              {appointmentsLoading ? (
+                <p className="dashboard-body" style={{ marginTop: 8 }}>
+                  Loading appointments…
+                </p>
+              ) : (
+                <>
+                  {todayAppointments.length === 0 && (
+                    <p className="dashboard-body" style={{ marginTop: 8 }}>
+                      No appointments scheduled for today.
+                    </p>
+                  )}
+                  {todayAppointments.length > 0 && (
+                    <ul
+                      style={{
+                        listStyle: 'none',
+                        padding: 0,
+                        marginTop: 10,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}
+                    >
+                      {todayAppointments.map((a) => (
+                        <li
+                          key={a.id}
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 10,
+                            backgroundColor: '#f5f9fc',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            fontSize: 13,
+                          }}
+                        >
+                          <div>
+                            <strong>{a.patientName}</strong>
+                            <div style={{ color: '#607d8b' }}>
+                              {a.reason || 'Appointment'}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', color: '#9fb3c8', fontSize: 12 }}>
+                            {new Date(a.visitDate).toLocaleTimeString('en-IN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </Card>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <Card className="dashboard-overview-card">
                 <button
                   type="button"
                   onClick={() => setNotificationsOpen((o) => !o)}
@@ -231,9 +315,18 @@ export const Dashboard = () => {
                   </span>
                 </button>
                 {notificationsOpen && (
-                  <ul style={{ listStyle: 'none', padding: 0, marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {pendingNotifications.map((n) => (
-                      <li key={n.id}>
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p className="dashboard-body" style={{ margin: 0, fontSize: 12, color: '#627d98' }}>
+                      Assistant referrals
+                    </p>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {referralNotifications.length === 0 && (
+                        <li>
+                          <span style={{ fontSize: 12, color: '#9fb3c8' }}>No referred patients yet.</span>
+                        </li>
+                      )}
+                      {referralNotifications.map((n) => (
+                        <li key={n.id}>
                         <button
                           type="button"
                           onClick={() => handleNotificationClick(n)}
@@ -268,12 +361,12 @@ export const Dashboard = () => {
                           </span>
                         </button>
                       </li>
-                    ))}
-                  </ul>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </Card>
             </div>
-          )}
 
           <div style={{ marginTop: 8 }}>
             <Card className="dashboard-overview-card">

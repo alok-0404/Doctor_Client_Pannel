@@ -155,8 +155,9 @@ export const BookAppointment = () => {
       }
       setAppointmentId(res.appointmentId)
       setStep('confirm')
-    } catch {
-      setError('Failed to confirm appointment. Please try again.')
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to confirm appointment. Please try again.')
     } finally {
       setSubmitting(false)
     }

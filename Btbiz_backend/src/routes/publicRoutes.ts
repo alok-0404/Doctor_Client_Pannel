@@ -116,25 +116,6 @@ router.post("/appointments/old", async (req, res) => {
       notes: notesParts.join(". ")
     });
 
-    const patientName =
-      [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient";
-    const notification = await DoctorNotification.create({
-      doctor: new mongoose.Types.ObjectId(body.consultantId),
-      patient: visit.patient,
-      patientName,
-      visit: visit._id,
-      status: "unread"
-    });
-    const io = getIo();
-    if (io) {
-      io.to(`doctor:${body.consultantId}`).emit("patientReferred", {
-        notificationId: notification._id.toString(),
-        patientId: visit.patient.toString(),
-        patientName,
-        visitId: visit._id.toString()
-      });
-    }
-
     res.status(201).json({
       appointmentId: (visit as any)._id.toString(),
       patientId: (patient as any)._id.toString()
@@ -142,6 +123,16 @@ router.post("/appointments/old", async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /appointments/old error:", error);
+    if (error instanceof Error) {
+      if (error.message === "DOCTOR_NOT_FOUND" || error.message === "INVALID_DOCTOR_ID") {
+        res.status(400).json({ message: "Selected consultant is invalid. Please try again." });
+        return;
+      }
+      if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
+        res.status(404).json({ message: "Patient not found. Please check the mobile number." });
+        return;
+      }
+    }
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -166,12 +157,27 @@ router.post("/appointments/new", async (req, res) => {
       return;
     }
 
-    const patient = await createPatientService({
-      firstName: body.patientName,
-      mobileNumber: body.mobileNumber,
-      address: body.address,
-      gender: body.gender as "MALE" | "FEMALE" | "OTHER" | undefined
-    });
+    let patient: any;
+    try {
+      patient = await createPatientService({
+        firstName: body.patientName,
+        mobileNumber: body.mobileNumber,
+        address: body.address,
+        gender: body.gender as "MALE" | "FEMALE" | "OTHER" | undefined
+      });
+    } catch (createErr) {
+      if (createErr instanceof Error && createErr.message === "MOBILE_ALREADY_EXISTS") {
+        patient = await findPatientByMobile(body.mobileNumber!);
+        if (!patient) {
+          res.status(409).json({
+            message: "This mobile number is already registered. Please use Old Patient and enter this number to book."
+          });
+          return;
+        }
+      } else {
+        throw createErr;
+      }
+    }
 
     const visitDate = new Date(body.appointmentDate);
     const notesParts = [`City: ${body.city || ""}`];
@@ -185,24 +191,6 @@ router.post("/appointments/new", async (req, res) => {
       notes: notesParts.join(". ")
     });
 
-    const patientName = body.patientName?.trim() || "Patient";
-    const notification = await DoctorNotification.create({
-      doctor: new mongoose.Types.ObjectId(body.consultantId),
-      patient: visit.patient,
-      patientName,
-      visit: visit._id,
-      status: "unread"
-    });
-    const io = getIo();
-    if (io) {
-      io.to(`doctor:${body.consultantId}`).emit("patientReferred", {
-        notificationId: notification._id.toString(),
-        patientId: visit.patient.toString(),
-        patientName,
-        visitId: visit._id.toString()
-      });
-    }
-
     res.status(201).json({
       appointmentId: (visit as any)._id.toString(),
       patientId: (patient as any)._id.toString()
@@ -210,6 +198,16 @@ router.post("/appointments/new", async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /appointments/new error:", error);
+    if (error instanceof Error) {
+      if (error.message === "DOCTOR_NOT_FOUND" || error.message === "INVALID_DOCTOR_ID") {
+        res.status(400).json({ message: "Selected consultant is invalid. Please try again." });
+        return;
+      }
+      if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
+        res.status(400).json({ message: "Could not create or find patient. Please try again." });
+        return;
+      }
+    }
     res.status(500).json({ message: "Internal server error" });
   }
 });

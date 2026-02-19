@@ -33,6 +33,7 @@ export const getNotifications = async (
         patientName: n.patientName,
         visitId: (n.visit as mongoose.Types.ObjectId).toString(),
         status: n.status,
+        source: n.source,
         createdAt: (n as { createdAt: Date }).createdAt
       }))
     });

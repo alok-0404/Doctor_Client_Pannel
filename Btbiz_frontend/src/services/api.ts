@@ -157,7 +157,17 @@ export interface DoctorNotificationItem {
   patientName: string
   visitId: string
   status: 'unread' | 'dismissed' | 'read'
+  source: 'ASSISTANT_REFERRAL' | 'ONLINE_APPOINTMENT'
   createdAt: string
+}
+
+export interface DoctorAppointmentItem {
+  id: string
+  patientId: string
+  patientName: string
+  visitDate: string
+  reason?: string
+  notes?: string
 }
 
 export const notificationService = {
@@ -172,6 +182,14 @@ export const notificationService = {
     status: 'read' | 'dismissed'
   ): Promise<void> {
     await api.patch(`/notifications/${notificationId}`, { status })
+  },
+}
+
+export const appointmentService = {
+  async getTodayAppointments(): Promise<DoctorAppointmentItem[]> {
+    const res = await api.get('/appointments/doctor/today')
+    const data = res.data as { appointments: DoctorAppointmentItem[] }
+    return data.appointments
   },
 }
 
