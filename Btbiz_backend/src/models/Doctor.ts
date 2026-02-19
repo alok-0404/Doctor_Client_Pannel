@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
 export type DoctorRole = "DOCTOR" | "ASSISTANT" | "LAB_ASSISTANT" | "LAB_MANAGER";
+export type AvailabilityStatus = "available" | "unavailable" | "busy";
 
 export interface IDoctor extends Document {
   name: string;
@@ -10,6 +11,9 @@ export interface IDoctor extends Document {
   role: DoctorRole;
   status: boolean;
   createdByDoctorId?: Types.ObjectId;
+  availabilityStatus?: AvailabilityStatus;
+  unavailableReason?: string;
+  unavailableUntil?: Date;
   resetOtpHash?: string;
   resetOtpExpiresAt?: Date;
   createdAt: Date;
@@ -37,6 +41,13 @@ const DoctorSchema = new Schema<IDoctor>(
       type: Schema.Types.ObjectId,
       ref: "Doctor"
     },
+    availabilityStatus: {
+      type: String,
+      enum: ["available", "unavailable", "busy"],
+      default: "available"
+    },
+    unavailableReason: { type: String },
+    unavailableUntil: { type: Date },
     resetOtpHash: {
       type: String
     },

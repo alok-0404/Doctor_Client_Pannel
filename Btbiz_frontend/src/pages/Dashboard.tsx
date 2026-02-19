@@ -44,6 +44,11 @@ export const Dashboard = () => {
   const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
   const [appointmentsLoading, setAppointmentsLoading] = useState(false)
 
+  const [availabilityStatus, setAvailabilityStatus] = useState<'available' | 'unavailable' | 'busy'>('available')
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const [availabilityUpdating, setAvailabilityUpdating] = useState(false)
+  const [unavailableReason, setUnavailableReason] = useState('')
+
   const loadAssistants = async () => {
     try {
       const list = await authService.listAssistants()
@@ -83,11 +88,41 @@ export const Dashboard = () => {
     }
   }
 
+  const loadProfileAvailability = async () => {
+    if (authStorage.getRole() !== 'DOCTOR') return
+    setAvailabilityLoading(true)
+    try {
+      const { doctor } = await authService.getProfile()
+      if (doctor.availabilityStatus) setAvailabilityStatus(doctor.availabilityStatus as 'available' | 'unavailable' | 'busy')
+      if (doctor.unavailableReason) setUnavailableReason(doctor.unavailableReason)
+    } catch {
+      // ignore
+    } finally {
+      setAvailabilityLoading(false)
+    }
+  }
+
+  const handleSetAvailability = async (status: 'available' | 'unavailable' | 'busy') => {
+    setAvailabilityUpdating(true)
+    try {
+      await authService.updateDoctorAvailability({
+        availabilityStatus: status,
+        unavailableReason: status !== 'available' ? unavailableReason : undefined,
+      })
+      setAvailabilityStatus(status)
+    } catch {
+      // ignore
+    } finally {
+      setAvailabilityUpdating(false)
+    }
+  }
+
   useEffect(() => {
     void loadAssistants()
     void loadLabAssistants()
     void loadNotifications()
     void loadTodayAppointments()
+    void loadProfileAvailability()
   }, [])
 
   useEffect(() => {
@@ -273,6 +308,83 @@ export const Dashboard = () => {
                         </li>
                       ))}
                     </ul>
+                  )}
+                </>
+              )}
+            </Card>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <Card className="dashboard-overview-card">
+              <p className="dashboard-kicker">Your availability</p>
+              <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
+                Mark yourself unavailable or busy so your assistant can inform patients in real time.
+              </p>
+              {availabilityLoading ? (
+                <p className="dashboard-body" style={{ marginTop: 8 }}>Loading…</p>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {(['available', 'unavailable', 'busy'] as const).map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        disabled={availabilityUpdating}
+                        onClick={() => handleSetAvailability(status)}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: 8,
+                          border: availabilityStatus === status ? '2px solid #0d47a1' : '1px solid #e2e8f0',
+                          background: availabilityStatus === status
+                            ? (status === 'unavailable' ? '#fff3e0' : status === 'busy' ? '#fce4ec' : '#e3f2fd')
+                            : '#fff',
+                          color: availabilityStatus === status ? '#0d47a1' : '#334155',
+                          fontWeight: availabilityStatus === status ? 600 : 400,
+                          cursor: availabilityUpdating ? 'not-allowed' : 'pointer',
+                          fontSize: 13,
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                  {(availabilityStatus === 'unavailable' || availabilityStatus === 'busy') && (
+                    <div style={{ marginTop: 8 }}>
+                      <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                        Reason (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={unavailableReason}
+                        onChange={(e) => setUnavailableReason(e.target.value)}
+                        placeholder="e.g. Emergency, in surgery"
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          fontSize: 13,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={availabilityUpdating}
+                        onClick={() => handleSetAvailability(availabilityStatus)}
+                        style={{
+                          marginTop: 8,
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          border: '1px solid #0d47a1',
+                          background: '#0d47a1',
+                          color: '#fff',
+                          cursor: availabilityUpdating ? 'not-allowed' : 'pointer',
+                          fontSize: 12,
+                        }}
+                      >
+                        Update reason
+                      </button>
+                    </div>
                   )}
                 </>
               )}

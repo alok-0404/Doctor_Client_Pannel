@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 
+import { getIo } from "../socket";
 import { Doctor } from "../models/Doctor";
 import {
   completeDoctorPasswordReset,
@@ -204,6 +205,9 @@ export const getDoctorProfile = async (
     role: string;
     createdByDoctorId?: string;
     referredToDoctorName?: string;
+    availabilityStatus?: string;
+    unavailableReason?: string;
+    unavailableUntil?: string;
   } = {
     id: req.doctor._id.toString(),
     name: req.doctor.name,
@@ -214,11 +218,24 @@ export const getDoctorProfile = async (
   if (req.doctor.role === "ASSISTANT" || req.doctor.role === "LAB_ASSISTANT") {
     const assistant = await Doctor.findById(req.doctor._id)
       .select("createdByDoctorId")
-      .populate("createdByDoctorId", "name")
+      .populate("createdByDoctorId", "name availabilityStatus unavailableReason unavailableUntil")
       .lean();
     if (assistant?.createdByDoctorId) {
-      payload.createdByDoctorId = (assistant.createdByDoctorId as any)._id.toString();
-      payload.referredToDoctorName = (assistant.createdByDoctorId as any).name;
+      const doc = assistant.createdByDoctorId as any;
+      payload.createdByDoctorId = doc._id.toString();
+      payload.referredToDoctorName = doc.name;
+      payload.availabilityStatus = doc.availabilityStatus ?? "available";
+      payload.unavailableReason = doc.unavailableReason;
+      payload.unavailableUntil = doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined;
+    }
+  } else if (req.doctor.role === "DOCTOR") {
+    const doc = await Doctor.findById(req.doctor._id)
+      .select("availabilityStatus unavailableReason unavailableUntil")
+      .lean();
+    if (doc) {
+      payload.availabilityStatus = doc.availabilityStatus ?? "available";
+      payload.unavailableReason = doc.unavailableReason;
+      payload.unavailableUntil = doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined;
     }
   }
 
@@ -381,6 +398,78 @@ export const listLabAssistants = async (
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("listLabAssistants error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// --- Doctor availability (for "mark unavailable/busy") ---
+
+export const updateDoctorAvailability = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  if (!req.doctor) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can update availability" });
+    return;
+  }
+
+  const doctorId = req.doctor._id?.toString();
+  if (!doctorId) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  const { availabilityStatus, unavailableReason, unavailableUntil } = req.body as {
+    availabilityStatus?: "available" | "unavailable" | "busy";
+    unavailableReason?: string;
+    unavailableUntil?: string;
+  };
+
+  if (!availabilityStatus || !["available", "unavailable", "busy"].includes(availabilityStatus)) {
+    res.status(400).json({ message: "availabilityStatus must be one of: available, unavailable, busy" });
+    return;
+  }
+
+  try {
+    const update: Record<string, unknown> = {
+      availabilityStatus,
+      unavailableReason: unavailableReason ?? null,
+      unavailableUntil: unavailableUntil ? new Date(unavailableUntil) : null
+    };
+    const doc = await Doctor.findByIdAndUpdate(
+      doctorId,
+      { $set: update },
+      { new: true }
+    ).select("name availabilityStatus unavailableReason unavailableUntil").lean();
+
+    if (!doc) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+
+    const io = getIo();
+    if (io) {
+      io.to(`assistants-of-doctor:${doctorId}`).emit("doctorAvailabilityChanged", {
+        doctorId,
+        doctorName: doc.name,
+        availabilityStatus: doc.availabilityStatus,
+        unavailableReason: doc.unavailableReason ?? undefined,
+        unavailableUntil: doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined
+      });
+    }
+
+    res.status(200).json({
+      availabilityStatus: doc.availabilityStatus,
+      unavailableReason: doc.unavailableReason ?? undefined,
+      unavailableUntil: doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("updateDoctorAvailability error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

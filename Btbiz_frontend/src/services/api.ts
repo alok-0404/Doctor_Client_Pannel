@@ -144,10 +144,22 @@ export const authService = {
       role: string
       createdByDoctorId?: string
       referredToDoctorName?: string
+      availabilityStatus?: 'available' | 'unavailable' | 'busy'
+      unavailableReason?: string
+      unavailableUntil?: string
     }
   }> {
     const res = await api.get('/auth/doctor/profile')
     return res.data as any
+  },
+
+  async updateDoctorAvailability(payload: {
+    availabilityStatus: 'available' | 'unavailable' | 'busy'
+    unavailableReason?: string
+    unavailableUntil?: string
+  }): Promise<{ availabilityStatus: string; unavailableReason?: string; unavailableUntil?: string }> {
+    const res = await api.patch('/auth/doctor/availability', payload)
+    return res.data
   },
 }
 
@@ -165,6 +177,7 @@ export interface DoctorAppointmentItem {
   id: string
   patientId: string
   patientName: string
+  patientMobile?: string
   visitDate: string
   reason?: string
   notes?: string
@@ -190,6 +203,13 @@ export const appointmentService = {
     const res = await api.get('/appointments/doctor/today')
     const data = res.data as { appointments: DoctorAppointmentItem[] }
     return data.appointments
+  },
+
+  /** For assistant: linked doctor's today appointments (with patient mobile for calling/messaging). */
+  async getAssistantDoctorTodayAppointments(): Promise<{ doctorId: string; appointments: DoctorAppointmentItem[] }> {
+    const res = await api.get('/appointments/assistant/doctor-today')
+    const data = res.data as { doctorId: string; appointments: DoctorAppointmentItem[] }
+    return data
   },
 }
 

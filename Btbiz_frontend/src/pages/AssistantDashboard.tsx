@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
+import { io } from 'socket.io-client'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
-import { authService, patientService, type PatientSummary } from '../services/api'
+import { API_BASE_URL, authService, patientService, appointmentService, type PatientSummary, type DoctorAppointmentItem } from '../services/api'
 
 type Step = 'search' | 'new_patient' | 'checkin'
+type AvailabilityStatus = 'available' | 'unavailable' | 'busy'
 
 export const AssistantDashboard = () => {
   const name = authStorage.getName() ?? 'Assistant'
@@ -42,6 +44,11 @@ export const AssistantDashboard = () => {
   const [notesForDoctor, setNotesForDoctor] = useState('')
   const [referredToDoctorName, setReferredToDoctorName] = useState<string | null>(null)
 
+  // Doctor availability (real-time for assistant)
+  const [doctorAvailabilityStatus, setDoctorAvailabilityStatus] = useState<AvailabilityStatus>('available')
+  const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
+  const [todayPatientsLoading, setTodayPatientsLoading] = useState(false)
+
   // File upload for reports / prescriptions
   const [docFile, setDocFile] = useState<File | null>(null)
   const [docUploadLoading, setDocUploadLoading] = useState(false)
@@ -58,8 +65,21 @@ export const AssistantDashboard = () => {
     try {
       const { doctor } = await authService.getProfile()
       if (doctor.referredToDoctorName) setReferredToDoctorName(doctor.referredToDoctorName)
+      if (doctor.availabilityStatus) setDoctorAvailabilityStatus(doctor.availabilityStatus as AvailabilityStatus)
     } catch {
       // ignore
+    }
+  }
+
+  const loadTodayPatientsForDoctor = async () => {
+    setTodayPatientsLoading(true)
+    try {
+      const { appointments } = await appointmentService.getAssistantDoctorTodayAppointments()
+      setTodayPatientsToContact(appointments)
+    } catch {
+      setTodayPatientsToContact([])
+    } finally {
+      setTodayPatientsLoading(false)
     }
   }
 
@@ -331,6 +351,43 @@ export const AssistantDashboard = () => {
     void loadProfile()
   }, [])
 
+  // Load today's patients when doctor is unavailable/busy (for contact list)
+  useEffect(() => {
+    if (doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') {
+      void loadTodayPatientsForDoctor()
+    } else {
+      setTodayPatientsToContact([])
+    }
+  }, [doctorAvailabilityStatus])
+
+  // Socket: real-time doctor availability updates for assistant
+  useEffect(() => {
+    if (!API_BASE_URL) return
+    let socket: ReturnType<typeof io> | null = null
+    let mounted = true
+    const connect = async () => {
+      try {
+        const { doctor } = await authService.getProfile()
+        const userId = doctor?.id
+        if (!userId || !mounted) return
+        socket = io(API_BASE_URL, {
+          query: { doctorId: userId },
+          transports: ['websocket', 'polling']
+        })
+        socket.on('doctorAvailabilityChanged', (data: { availabilityStatus: AvailabilityStatus }) => {
+          if (mounted && data.availabilityStatus) setDoctorAvailabilityStatus(data.availabilityStatus)
+        })
+      } catch {
+        // ignore
+      }
+    }
+    void connect()
+    return () => {
+      mounted = false
+      if (socket) socket.disconnect()
+    }
+  }, [])
+
   // Auto-hide document upload success message after a few seconds
   useEffect(() => {
     if (!docUploadSuccess) return
@@ -344,8 +401,75 @@ export const AssistantDashboard = () => {
     <div className="app-shell">
       <Header clinicName="Check‑in desk" doctorName={name} />
       <main className="search-main" style={{ padding: 24, maxWidth: '100%', width: '100%' }}>
+        {referredToDoctorName && (
+          <div style={{ marginBottom: 32, marginRight: 48 }}>
+          <Card className="dashboard-overview-card assistant-availability-card">
+            <p className="dashboard-kicker">Your doctor&apos;s availability</p>
+            <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8 }}>
+              {referredToDoctorName} is currently{' '}
+              <strong
+                style={{
+                  color:
+                    doctorAvailabilityStatus === 'available'
+                      ? '#2e7d32'
+                      : doctorAvailabilityStatus === 'busy'
+                        ? '#ed6c02'
+                        : '#c62828'
+                }}
+              >
+                {doctorAvailabilityStatus}
+              </strong>
+              .
+            </p>
+            {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (
+              <div style={{ marginTop: 12 }}>
+                <p className="dashboard-body" style={{ fontSize: 13, color: '#334155', marginBottom: 8 }}>
+                  Call or message these patients to inform that the doctor is not available. We will update when the doctor is available.
+                </p>
+                {todayPatientsLoading ? (
+                  <p className="dashboard-body" style={{ fontSize: 13 }}>Loading today&apos;s appointments…</p>
+                ) : todayPatientsToContact.length === 0 ? (
+                  <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>
+                    No appointments scheduled for today.
+                  </p>
+                ) : (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {todayPatientsToContact.map((a) => (
+                      <li
+                        key={a.id}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          backgroundColor: '#f5f9fc',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: 8,
+                          fontSize: 13
+                        }}
+                      >
+                        <div>
+                          <strong>{a.patientName}</strong>
+                          {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
+                        </div>
+                        {a.patientMobile && (
+                          <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                            {a.patientMobile}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </Card>
+          </div>
+        )}
+
         {step === 'search' && (
-          <Card className="search-card">
+          <Card className="search-card assistant-workspace-card">
             <header className="search-header">
               <p className="dashboard-kicker">Assistant workspace</p>
               <h2 className="search-title">Find or register patient</h2>
@@ -377,7 +501,7 @@ export const AssistantDashboard = () => {
 
         {step === 'new_patient' && (
           <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <Card className="search-card">
+            <Card className="search-card assistant-workspace-card">
               <header className="search-header">
                 <p className="dashboard-kicker">New patient</p>
                 <h2 className="search-title">Register patient</h2>
@@ -428,7 +552,7 @@ export const AssistantDashboard = () => {
         )}
 
         {step === 'checkin' && patientId && (
-          <Card className="search-card">
+          <Card className="search-card assistant-workspace-card">
             <header className="search-header">
               <p className="dashboard-kicker">Check-in & refer to doctor</p>
               <h2 className="search-title">

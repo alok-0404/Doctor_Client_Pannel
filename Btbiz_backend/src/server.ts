@@ -5,6 +5,7 @@ import { Server as SocketServer } from "socket.io";
 import app from "./app";
 import { connectDatabase } from "./config/db";
 import { env } from "./config/env";
+import { Doctor } from "./models/Doctor";
 import { setIo } from "./socket";
 
 const startServer = async (): Promise<void> => {
@@ -21,6 +22,16 @@ const startServer = async (): Promise<void> => {
     if (doctorId) {
       doctorId = Array.isArray(doctorId) ? doctorId[0] : doctorId;
       socket.join(`doctor:${doctorId}`);
+      // If this user is an assistant, also join room for their doctor's availability updates
+      void Doctor.findById(doctorId)
+        .select("createdByDoctorId")
+        .lean()
+        .then((user) => {
+          const createdBy = (user as any)?.createdByDoctorId?.toString();
+          if (createdBy) {
+            socket.join(`assistants-of-doctor:${createdBy}`);
+          }
+        });
     }
   });
 
