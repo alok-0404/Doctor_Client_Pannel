@@ -10,6 +10,7 @@ import {
   loginDoctor,
   registerDoctor,
   registerLabManager,
+  registerPharmacy,
   startDoctorPasswordReset
 } from "../services/authService";
 
@@ -85,6 +86,44 @@ export const labManagerRegister = async (req: Request, res: Response): Promise<v
 
     // eslint-disable-next-line no-console
     console.error("labManagerRegister error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const pharmacyRegister = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, email, password, phone } = req.body as {
+      name?: string;
+      email?: string;
+      password?: string;
+      phone?: string;
+    };
+
+    if (!name || !email || !password || !phone) {
+      res.status(400).json({ message: "Name, email, phone and password are required" });
+      return;
+    }
+
+    const authResponse = await registerPharmacy({ name, email, password, phone });
+
+    res.status(201).json({
+      message: "Medicine / Pharmacy registration successful",
+      accessToken: authResponse.accessToken,
+      doctor: authResponse.doctor
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "EMAIL_ALREADY_EXISTS") {
+      res.status(409).json({ message: "Email or phone already registered" });
+      return;
+    }
+
+    if (error instanceof Error && error.message === "INVALID_PHONE") {
+      res.status(400).json({ message: "Invalid phone format" });
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.error("pharmacyRegister error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

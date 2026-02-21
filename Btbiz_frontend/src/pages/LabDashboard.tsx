@@ -44,12 +44,25 @@ export const LabDashboard = () => {
   const [addTestError, setAddTestError] = useState<string | null>(null)
   const [uploadingReportForTestId, setUploadingReportForTestId] = useState<string | null>(null)
 
+  const [showReceipt, setShowReceipt] = useState(false)
+  const [receiptData, setReceiptData] = useState<{
+    patient: { name: string; mobile: string }
+    visit: { visitDate: string; reason?: string }
+    tests: Array<{ testName: string; price: number }>
+    total: number
+    paidAmount: number
+    paymentStatus: string
+    paidAt?: string
+  } | null>(null)
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setSearchError(null)
     setHistory(null)
     setSelectedVisitId(null)
     setAddTestError(null)
+    setShowReceipt(false)
+    setReceiptData(null)
     const digits = mobileSearch.replace(/\D/g, '')
     if (digits.length < 10) {
       setSearchError('Enter a valid 10-digit mobile number.')
@@ -424,6 +437,102 @@ export const LabDashboard = () => {
           )}
         </section>
       </main>
+
+      {/* Receipt modal - print-friendly */}
+      {showReceipt && receiptData && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 24,
+          }}
+          onClick={() => setShowReceipt(false)}
+        >
+          <div
+            id="lab-receipt"
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              maxWidth: 420,
+              width: '100%',
+              maxHeight: '90vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+              padding: 24,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>Lab Receipt</h2>
+              <button
+                type="button"
+                onClick={() => setShowReceipt(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  padding: 4,
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ margin: '0 0 4px', fontSize: 13, color: '#64748b' }}>Patient: <strong>{receiptData.patient.name}</strong></p>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b' }}>Mobile: {receiptData.patient.mobile}</p>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#94a3b8' }}>
+              Visit: {new Date(receiptData.visit.visitDate).toLocaleDateString('en-IN')}
+              {receiptData.visit.reason ? ` – ${receiptData.visit.reason}` : ''}
+            </p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12, marginBottom: 12, fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 0' }}>Test</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0' }}>Price (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receiptData.tests.map((t, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '6px 0' }}>{t.testName}</td>
+                    <td style={{ textAlign: 'right', padding: '6px 0' }}>₹{t.price}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ margin: '8px 0 4px', fontSize: 14, fontWeight: 600 }}>Total: ₹{receiptData.total}</p>
+            <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Paid: ₹{receiptData.paidAmount} · Status: {receiptData.paymentStatus}</p>
+            {receiptData.paidAt && (
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                Paid on: {new Date(receiptData.paidAt).toLocaleString('en-IN')}
+              </p>
+            )}
+            <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
+              <Button
+                type="button"
+                onClick={() => window.print()}
+              >
+                Print / Save as PDF
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowReceipt(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

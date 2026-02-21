@@ -6,6 +6,7 @@ import { Visit } from "../models/Visit";
 import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
+import { PharmacyDispensation } from "../models/PharmacyDispensation";
 
 export const findPatientByMobile = async (mobile: string) => {
   return Patient.findOne({ mobileNumber: mobile });
@@ -154,13 +155,30 @@ export const getFullPatientHistory = async (patientId: string) => {
     };
   });
 
-  const documents = await PatientDocument.find({ patient: patient._id })
-    .sort({ createdAt: -1 })
-    .lean();
+  const [documents, pharmacyDispensations] = await Promise.all([
+    PatientDocument.find({ patient: patient._id }).sort({ createdAt: -1 }).lean(),
+    PharmacyDispensation.find({ patient: patient._id })
+      .sort({ createdAt: -1 })
+      .populate("dispensedBy", "name")
+      .lean()
+  ]);
 
   return {
     patient,
     visits: visitsWithDetails,
+    pharmacyDispensations: pharmacyDispensations.map((d) => ({
+      id: (d as any)._id.toString(),
+      dispensedBy: (d as any).dispensedBy?.name ?? "Pharmacy",
+      items: (d as any).items ?? [],
+      subtotal: (d as any).subtotal ?? 0,
+      totalDiscount: (d as any).totalDiscount ?? 0,
+      totalAmount: (d as any).totalAmount ?? 0,
+      paidAmount: (d as any).paidAmount ?? 0,
+      paymentStatus: (d as any).paymentStatus ?? "UNPAID",
+      paidAt: (d as any).paidAt,
+      receiptNumber: (d as any).receiptNumber,
+      createdAt: (d as any).createdAt
+    })),
     documents: documents.map((d) => ({
       id: d._id.toString(),
       originalName: d.originalName,

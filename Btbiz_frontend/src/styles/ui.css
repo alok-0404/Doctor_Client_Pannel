@@ -909,3 +909,21 @@ body {
   border: 1px solid #ffcdd2;
 }
 
+@media print {
+  #pharmacy-receipt,
+  #pharmacy-receipt * {
+    visibility: visible;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #pharmacy-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    max-width: none;
+    box-shadow: none;
+    padding: 16px;
+  }
+}
+

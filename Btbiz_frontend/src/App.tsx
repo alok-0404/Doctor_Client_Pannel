@@ -5,6 +5,8 @@ import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { RegisterLabManager } from './pages/RegisterLabManager'
+import { RegisterMedicine } from './pages/RegisterMedicine'
+import { MedicineDashboard } from './pages/MedicineDashboard'
 import { Dashboard } from './pages/Dashboard'
 import { AssistantDashboard } from './pages/AssistantDashboard.tsx'
 import { LabDashboard } from './pages/LabDashboard'
@@ -43,6 +45,18 @@ export const App = () => {
       <Route
         path="/register-lab-manager"
         element={<RegisterLabManager />}
+      />
+      <Route
+        path="/register-medicine"
+        element={<RegisterMedicine />}
+      />
+      <Route
+        path="/medicine"
+        element={(
+          <ProtectedRoute allowedRoles={['PHARMACY']}>
+            <MedicineDashboard />
+          </ProtectedRoute>
+        )}
       />
       <Route
         path="/dashboard"

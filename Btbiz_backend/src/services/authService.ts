@@ -181,6 +181,53 @@ export const registerLabManager = async (
   };
 };
 
+export interface RegisterPharmacyPayload {
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+}
+
+export const registerPharmacy = async (
+  payload: RegisterPharmacyPayload
+): Promise<AuthTokenResponse> => {
+  const { name, email, password, phone } = payload;
+
+  const trimmedName = name.trim();
+  const normalizedPhone = normalizeIndianPhone(phone);
+
+  const existing = await Doctor.findOne({
+    $or: [{ email }, { phone: normalizedPhone }]
+  });
+  if (existing) {
+    throw new Error("EMAIL_ALREADY_EXISTS");
+  }
+
+  const saltRounds = 10;
+  const passwordHash = await bcrypt.hash(password, saltRounds);
+
+  const pharmacy = await Doctor.create({
+    name: trimmedName,
+    email,
+    phone: normalizedPhone,
+    passwordHash,
+    role: "PHARMACY",
+    status: false
+  });
+
+  const token = generateDoctorToken(pharmacy);
+
+  return {
+    accessToken: token,
+    doctor: {
+      id: pharmacy._id.toString(),
+      name: pharmacy.name,
+      email: pharmacy.email,
+      role: pharmacy.role
+    }
+  };
+};
+
 export const generateDoctorToken = (doctor: IDoctor): string => {
   const payload = {
     doctorId: doctor._id.toString(),

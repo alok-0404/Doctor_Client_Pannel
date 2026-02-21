@@ -90,6 +90,19 @@ export const authService = {
     }
   },
 
+  async registerPharmacy(payload: DoctorRegisterPayload): Promise<DoctorLoginResponse> {
+    const res = await api.post('/auth/pharmacy/register', payload)
+    const data = res.data as {
+      accessToken: string
+      doctor: { name: string; role: DoctorRole }
+    }
+    return {
+      token: data.accessToken,
+      doctorName: data.doctor.name,
+      role: data.doctor.role,
+    }
+  },
+
   async logout(): Promise<void> {
     try {
       await api.post('/auth/doctor/logout')
@@ -247,6 +260,53 @@ export interface DiagnosticTestItem {
   reportUploadedAt?: string
 }
 
+export interface PharmacyDispensationSummary {
+  id: string
+  dispensedBy: string
+  items: Array<{ medicineName: string; mrp: number; discount: number; quantity: number; amount: number }>
+  subtotal: number
+  totalDiscount: number
+  totalAmount: number
+  paidAmount: number
+  paymentStatus: string
+  paidAt?: string
+  receiptNumber?: string
+  createdAt: string
+}
+
+export interface PharmacyReceipt {
+  id: string
+  receiptNumber: string
+  patient: { id: string; name: string; mobile: string }
+  dispensedBy: string
+  items: Array<{ medicineName: string; mrp: number; discount: number; quantity: number; amount: number }>
+  subtotal: number
+  totalDiscount: number
+  totalAmount: number
+  paidAmount: number
+  paymentStatus: string
+  paidAt?: string
+  createdAt: string
+}
+
+export const pharmacyService = {
+  async createDispensation(
+    patientId: string,
+    items: Array<{ medicineName: string; mrp: number; discount?: number; quantity?: number }>
+  ): Promise<{ id: string; receiptNumber: string; subtotal: number; totalDiscount: number; totalAmount: number }> {
+    const res = await api.post('/pharmacy/dispense', { patientId, items })
+    return res.data as any
+  },
+  async recordPayment(dispensationId: string, paidAmount: number): Promise<{ paidAmount: number; paymentStatus: string }> {
+    const res = await api.patch(`/pharmacy/dispense/${dispensationId}/payment`, { paidAmount })
+    return res.data as any
+  },
+  async getReceipt(dispensationId: string): Promise<PharmacyReceipt> {
+    const res = await api.get(`/pharmacy/dispense/${dispensationId}/receipt`)
+    return res.data as PharmacyReceipt
+  },
+}
+
 export interface FullPatientHistory {
   patient: PatientSummary & { _id: string }
   visits: Array<{
@@ -261,8 +321,12 @@ export interface FullPatientHistory {
     temperature?: number
     otherVitalsNotes?: string
     doctor?: { name: string }
+    labPaidAmount?: number
+    labPaymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID'
+    labPaidAt?: string
     diagnosticTests?: DiagnosticTestItem[]
   }>
+  pharmacyDispensations?: PharmacyDispensationSummary[]
   documents: Array<{
     id: string
     originalName: string

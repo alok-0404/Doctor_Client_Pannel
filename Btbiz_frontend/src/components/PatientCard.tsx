@@ -73,6 +73,20 @@ export interface DocumentItem {
   ocrText?: string
 }
 
+export interface PharmacyDispensationItem {
+  id: string
+  dispensedBy: string
+  items: Array<{ medicineName: string; mrp: number; discount: number; quantity: number; amount: number }>
+  subtotal: number
+  totalDiscount: number
+  totalAmount: number
+  paidAmount: number
+  paymentStatus: string
+  paidAt?: string
+  receiptNumber?: string
+  createdAt: string
+}
+
 export interface PatientDetailsData {
   id: string
   name: string
@@ -97,6 +111,7 @@ export interface PatientDetailsData {
   visits: VisitItem[]
   prescriptions: PrescriptionItem[]
   medicines: MedicineItem[]
+  pharmacyDispensations?: PharmacyDispensationItem[]
   tests: DiagnosticTestItem[]
   documents?: DocumentItem[]
 }
@@ -106,7 +121,7 @@ interface PatientCardProps {
   patientId: string
 }
 
-type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'tests' | 'documents'
+type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'pharmacyDispensations' | 'tests' | 'documents'
 
 export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
@@ -127,6 +142,7 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const openVisitHistory = openSections.visitHistory
   const openPrescriptions = openSections.prescriptions
   const openMedicines = openSections.medicines
+  const openPharmacyDispensations = openSections.pharmacyDispensations
   const openTests = openSections.tests
   const openDocuments = openSections.documents
 
@@ -331,6 +347,46 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+
+          <div
+            className={`patient-section-card patient-collapsible ${openPharmacyDispensations ? 'patient-collapsible-open' : ''}`}
+            onClick={toggleSection('pharmacyDispensations')}
+            onKeyDown={(e) => e.key === 'Enter' && toggleSection('pharmacyDispensations')(e)}
+            role="button"
+            tabIndex={0}
+          >
+            <h3 className="patient-section-title">
+              Pharmacy (Medicine dispensed)
+            </h3>
+            {openPharmacyDispensations && (
+              <>
+                {(!data.pharmacyDispensations || data.pharmacyDispensations.length === 0) ? (
+                  <p className="patient-list-secondary" style={{ margin: 0 }}>
+                    No medicine dispensation recorded yet.
+                  </p>
+                ) : (
+                  <ul className="patient-list">
+                    {data.pharmacyDispensations.map((d) => (
+                      <li key={d.id} className="patient-list-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <span className="patient-list-primary">
+                            {new Date(d.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            {d.receiptNumber && ` · ${d.receiptNumber}`}
+                          </span>
+                          <span className="patient-list-meta">
+                            {d.paymentStatus} · ₹{d.paidAmount} / ₹{d.totalAmount}
+                          </span>
+                        </div>
+                        <p className="patient-list-secondary" style={{ margin: 0, fontSize: 12 }}>
+                          By {d.dispensedBy}. Items: {d.items.map((i) => i.medicineName).join(', ')}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
           </div>
 

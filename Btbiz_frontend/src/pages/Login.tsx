@@ -40,6 +40,8 @@ export const Login = () => {
         navigate('/lab')
       } else if (result.role === 'LAB_MANAGER') {
         navigate('/lab-manager')
+      } else if (result.role === 'PHARMACY') {
+        navigate('/medicine')
       } else {
         navigate('/dashboard')
       }

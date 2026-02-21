@@ -6,6 +6,7 @@ import {
   doctorLogout,
   doctorRegister,
   labManagerRegister,
+  pharmacyRegister,
   getDoctorProfile,
   completeDoctorForgotPassword,
   startDoctorForgotPassword,
@@ -23,6 +24,9 @@ router.post("/doctor/register", doctorRegister);
 
 // POST /auth/lab-manager/register (public – lab manager self-registration)
 router.post("/lab-manager/register", labManagerRegister);
+
+// POST /auth/pharmacy/register (public – medicine/pharmacy self-registration)
+router.post("/pharmacy/register", pharmacyRegister);
 
 // POST /auth/doctor/login
 router.post("/doctor/login", doctorLogin);

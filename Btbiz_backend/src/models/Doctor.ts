@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
-export type DoctorRole = "DOCTOR" | "ASSISTANT" | "LAB_ASSISTANT" | "LAB_MANAGER";
+export type DoctorRole = "DOCTOR" | "ASSISTANT" | "LAB_ASSISTANT" | "LAB_MANAGER" | "PHARMACY";
 export type AvailabilityStatus = "available" | "unavailable" | "busy";
 
 export interface IDoctor extends Document {
@@ -28,7 +28,7 @@ const DoctorSchema = new Schema<IDoctor>(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ["DOCTOR", "ASSISTANT", "LAB_ASSISTANT", "LAB_MANAGER"],
+      enum: ["DOCTOR", "ASSISTANT", "LAB_ASSISTANT", "LAB_MANAGER", "PHARMACY"],
       default: "DOCTOR",
       required: true
     },
