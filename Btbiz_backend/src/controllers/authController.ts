@@ -283,6 +283,23 @@ export const getDoctorProfile = async (
   });
 };
 
+export const updateDoctorClinic = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  if (!req.doctor || req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can update clinic location" });
+    return;
+  }
+  const body = req.body as { clinicLatitude?: number; clinicLongitude?: number; clinicAddress?: string };
+  await Doctor.findByIdAndUpdate(req.doctor._id, {
+    ...(typeof body.clinicLatitude === "number" && { clinicLatitude: body.clinicLatitude }),
+    ...(typeof body.clinicLongitude === "number" && { clinicLongitude: body.clinicLongitude }),
+    ...(body.clinicAddress !== undefined && { clinicAddress: body.clinicAddress })
+  });
+  res.status(200).json({ message: "Clinic location updated" });
+};
+
 export const createAssistantAccount = async (
   req: Request,
   res: Response

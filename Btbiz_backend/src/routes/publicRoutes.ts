@@ -13,17 +13,20 @@ import { getIo } from "../socket";
 
 const router = Router();
 
-// GET /public/doctors - list consultants for appointment dropdown
+// GET /public/doctors - list consultants for appointment dropdown (with clinic location for distance)
 router.get("/doctors", async (_req, res) => {
   try {
     const doctors = await Doctor.find({ role: "DOCTOR" })
-      .select("_id name")
+      .select("_id name clinicLatitude clinicLongitude clinicAddress")
       .sort({ name: 1 })
       .lean();
     res.status(200).json({
       doctors: doctors.map((d) => ({
-        id: d._id.toString(),
-        name: d.name
+        id: (d as any)._id.toString(),
+        name: (d as any).name,
+        clinicLatitude: (d as any).clinicLatitude,
+        clinicLongitude: (d as any).clinicLongitude,
+        clinicAddress: (d as any).clinicAddress
       }))
     });
   } catch (error) {
@@ -77,6 +80,8 @@ router.post("/appointments/old", async (req, res) => {
       patientName?: string;
       gender?: string;
       address?: string;
+      patientLatitude?: number;
+      patientLongitude?: number;
     };
 
     if (!body.mobileNumber || !body.consultationType || !body.consultantId || !body.opdNumber || !body.appointmentDate) {
@@ -113,7 +118,9 @@ router.post("/appointments/old", async (req, res) => {
       doctorId: body.consultantId,
       visitDate,
       reason: body.consultationType,
-      notes: notesParts.join(". ")
+      notes: notesParts.join(". "),
+      patientLatitude: body.patientLatitude,
+      patientLongitude: body.patientLongitude
     });
 
     res.status(201).json({
@@ -150,6 +157,8 @@ router.post("/appointments/new", async (req, res) => {
       address?: string;
       appointmentDate?: string;
       preferredSlot?: string;
+      patientLatitude?: number;
+      patientLongitude?: number;
     };
 
     if (!body.consultantId || !body.patientName || !body.mobileNumber || !body.gender || !body.appointmentDate) {
@@ -188,7 +197,9 @@ router.post("/appointments/new", async (req, res) => {
       doctorId: body.consultantId,
       visitDate,
       reason: "New appointment",
-      notes: notesParts.join(". ")
+      notes: notesParts.join(". "),
+      patientLatitude: body.patientLatitude,
+      patientLongitude: body.patientLongitude
     });
 
     res.status(201).json({

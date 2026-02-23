@@ -63,6 +63,43 @@ router.get("/doctor/today", async (req, res) => {
   }
 });
 
+// GET /appointments/doctor/upcoming - future appointments (after today) for logged-in doctor
+router.get("/doctor/upcoming", async (req, res) => {
+  try {
+    const doctorId = req.doctor?._id?.toString();
+    if (!doctorId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    if (req.doctor?.role !== "DOCTOR") {
+      res.status(403).json({ message: "Only doctors can view their appointments" });
+      return;
+    }
+
+    const now = new Date();
+    const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+
+    const visits = await Visit.find({
+      doctor: new mongoose.Types.ObjectId(doctorId),
+      visitDate: { $gte: startOfTomorrow }
+    })
+      .sort({ visitDate: 1 })
+      .limit(100)
+      .populate("patient", "firstName lastName mobileNumber")
+      .lean();
+
+    res.status(200).json({
+      appointments: visits.map(mapVisitToAppointment),
+      total: visits.length
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("appointments/doctor/upcoming error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // GET /appointments/assistant/doctor-today - for assistant: linked doctor's today appointments (with patient mobile for calling/messaging)
 router.get("/assistant/doctor-today", async (req, res) => {
   try {

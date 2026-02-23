@@ -10,13 +10,15 @@ import { PatientDocument } from "../models/PatientDocument";
 import ocrService from "../ocrService";
 import { getIo } from "../socket";
 // import path from "path";
+import { Visit } from "../models/Visit";
 import {
   addDiagnosticTestsToVisit,
   createPatient as createPatientService,
   createVisit as createVisitService,
   findPatientByMobile,
   getFullPatientHistory,
-  updatePatient as updatePatientService
+  updatePatient as updatePatientService,
+  updateVisitVitals
 } from "../services/patientService";
 
 const patientToJson = (p: {
@@ -264,6 +266,104 @@ export const createVisit = async (
   }
 };
 
+export const recordVitalsAndReferForExistingVisit = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { patientId, visitId } = req.params;
+    const body = req.body as {
+      reason?: string;
+      notes?: string;
+      bloodPressureSystolic?: number;
+      bloodPressureDiastolic?: number;
+      bloodSugarFasting?: number;
+      weightKg?: number;
+      temperature?: number;
+      otherVitalsNotes?: string;
+    };
+
+    if (req.doctor?.role !== "ASSISTANT") {
+      res.status(403).json({ message: "Only assistants can refer for an existing visit." });
+      return;
+    }
+
+    const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+    if (!assistant?.createdByDoctorId) {
+      res.status(400).json({ message: "Assistant is not linked to a doctor. Cannot refer patient." });
+      return;
+    }
+    const doctorId = (assistant.createdByDoctorId as any).toString();
+
+    const visit = await Visit.findById(visitId).lean();
+    if (!visit) {
+      res.status(404).json({ message: "Visit not found." });
+      return;
+    }
+    if (visit.patient.toString() !== patientId || visit.doctor.toString() !== doctorId) {
+      res.status(403).json({ message: "This visit does not belong to this patient or your doctor." });
+      return;
+    }
+
+    const sys = body.bloodPressureSystolic;
+    const dia = body.bloodPressureDiastolic;
+    if (sys === undefined || dia === undefined || Number.isNaN(sys) || Number.isNaN(dia)) {
+      res.status(400).json({ message: "Blood pressure (systolic and diastolic) is mandatory." });
+      return;
+    }
+
+    await updateVisitVitals(visitId, {
+      reason: body.reason,
+      notes: body.notes,
+      bloodPressureSystolic: sys,
+      bloodPressureDiastolic: dia,
+      bloodSugarFasting: body.bloodSugarFasting,
+      weightKg: body.weightKg,
+      temperature: body.temperature,
+      otherVitalsNotes: body.otherVitalsNotes
+    });
+
+    const patient = await Patient.findById(patientId).select("firstName lastName").lean();
+    const patientName = patient
+      ? [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient"
+      : "Patient";
+
+    const notification = await DoctorNotification.create({
+      doctor: visit.doctor,
+      patient: visit.patient,
+      patientName,
+      visit: visit._id,
+      status: "unread",
+      source: "ASSISTANT_REFERRAL"
+    });
+
+    const io = getIo();
+    if (io) {
+      io.to(`doctor:${doctorId}`).emit("patientReferred", {
+        notificationId: notification._id.toString(),
+        patientId: visit.patient.toString(),
+        patientName,
+        visitId: visit._id.toString()
+      });
+    }
+
+    res.status(200).json({
+      message: "Patient referred to doctor.",
+      notificationId: notification._id.toString()
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === "VISIT_NOT_FOUND" || error.message === "INVALID_VISIT_ID") {
+        res.status(404).json({ message: "Visit not found." });
+        return;
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.error("recordVitalsAndReferForExistingVisit error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const getPatientFullHistory = async (
   req: Request,
   res: Response
@@ -416,24 +516,40 @@ export const addDiagnosticTests = async (
     }
 
     const { patientId, visitId } = req.params;
-    const body = req.body as { testNames?: string[] };
+    const body = (req.body || {}) as { testNames?: string[]; tests?: Array<{ testName?: string; testname?: string; price?: number }> };
 
     if (!patientId || !visitId) {
       res.status(400).json({ message: "patientId and visitId are required" });
       return;
     }
 
-    const testNames = Array.isArray(body.testNames) ? body.testNames : [];
-    if (testNames.length === 0) {
-      res.status(400).json({ message: "At least one test name is required" });
+    let tests: Array<{ testName: string; price?: number }>;
+    if (Array.isArray(body.tests) && body.tests.length > 0) {
+      tests = body.tests
+        .map((t) => ({
+          testName: typeof t === "string" ? t : String((t as any).testName ?? (t as any).testname ?? "").trim(),
+          price: typeof (t as any).price === "number" && (t as any).price >= 0 ? (t as any).price : undefined
+        }))
+        .filter((t) => t.testName.length > 0);
+    } else if (Array.isArray(body.testNames) && body.testNames.length > 0) {
+      tests = body.testNames
+        .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+        .map((name) => ({ testName: name.trim() }));
+    } else {
+      res.status(400).json({ message: "At least one test name is required." });
       return;
     }
 
-    await addDiagnosticTestsToVisit(patientId, visitId, testNames);
+    if (tests.length === 0) {
+      res.status(400).json({ message: "At least one test name is required." });
+      return;
+    }
+
+    await addDiagnosticTestsToVisit(patientId, visitId, tests);
 
     res.status(201).json({
       message: "Diagnostic tests added",
-      added: testNames.length
+      added: tests.length
     });
   } catch (error) {
     if (error instanceof Error) {

@@ -3,6 +3,8 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IDiagnosticTest extends Document {
   visit: mongoose.Types.ObjectId;
   testName: string;
+  /** Rate/price in INR for billing and receipt */
+  price?: number;
   result?: string;
   notes?: string;
   reportPath?: string;
@@ -21,6 +23,7 @@ const DiagnosticTestSchema = new Schema<IDiagnosticTest>(
       index: true
     },
     testName: { type: String, required: true },
+    price: { type: Number },
     result: { type: String },
     notes: { type: String },
     reportPath: { type: String },

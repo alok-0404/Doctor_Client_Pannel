@@ -14,7 +14,20 @@ const startServer = async (): Promise<void> => {
   const server = http.createServer(app);
 
   const io = new SocketServer(server, {
-    cors: { origin: "*" }
+    cors: {
+      origin: (origin, callback) => {
+        if (
+          !origin ||
+          origin === "http://localhost:3000" ||
+          origin === "http://localhost:5173" ||
+          origin.endsWith(".trycloudflare.com")
+        ) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"), false);
+        }
+      },
+    },
   });
 
   io.on("connection", (socket) => {

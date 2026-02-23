@@ -68,6 +68,8 @@ export interface CreateVisitPayload {
   weightKg?: number;
   temperature?: number;
   otherVitalsNotes?: string;
+  patientLatitude?: number;
+  patientLongitude?: number;
 }
 
 export const createVisit = async (payload: CreateVisitPayload) => {
@@ -97,8 +99,48 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     bloodSugarFasting: payload.bloodSugarFasting,
     weightKg: payload.weightKg,
     temperature: payload.temperature,
-    otherVitalsNotes: payload.otherVitalsNotes
+    otherVitalsNotes: payload.otherVitalsNotes,
+    patientLatitude: payload.patientLatitude,
+    patientLongitude: payload.patientLongitude
   });
+};
+
+export interface UpdateVisitVitalsPayload {
+  reason?: string;
+  notes?: string;
+  bloodPressureSystolic?: number;
+  bloodPressureDiastolic?: number;
+  bloodSugarFasting?: number;
+  weightKg?: number;
+  temperature?: number;
+  otherVitalsNotes?: string;
+}
+
+export const updateVisitVitals = async (
+  visitId: string,
+  payload: UpdateVisitVitalsPayload
+) => {
+  if (!mongoose.Types.ObjectId.isValid(visitId)) {
+    throw new Error("INVALID_VISIT_ID");
+  }
+  const visit = await Visit.findByIdAndUpdate(
+    visitId,
+    {
+      $set: {
+        ...(payload.reason !== undefined && { reason: payload.reason }),
+        ...(payload.notes !== undefined && { notes: payload.notes }),
+        ...(payload.bloodPressureSystolic !== undefined && { bloodPressureSystolic: payload.bloodPressureSystolic }),
+        ...(payload.bloodPressureDiastolic !== undefined && { bloodPressureDiastolic: payload.bloodPressureDiastolic }),
+        ...(payload.bloodSugarFasting !== undefined && { bloodSugarFasting: payload.bloodSugarFasting }),
+        ...(payload.weightKg !== undefined && { weightKg: payload.weightKg }),
+        ...(payload.temperature !== undefined && { temperature: payload.temperature }),
+        ...(payload.otherVitalsNotes !== undefined && { otherVitalsNotes: payload.otherVitalsNotes })
+      }
+    },
+    { new: true }
+  );
+  if (!visit) throw new Error("VISIT_NOT_FOUND");
+  return visit;
 };
 
 export const getFullPatientHistory = async (patientId: string) => {
@@ -139,6 +181,7 @@ export const getFullPatientHistory = async (patientId: string) => {
     const current = testsByVisit.get(key) ?? [];
     current.push({
       ...t,
+      price: (t as any).price,
       hasReport: !!(t as any).reportPath,
       reportFileName: (t as any).reportFileName,
       reportUploadedAt: (t as any).reportUploadedAt
@@ -190,10 +233,15 @@ export const getFullPatientHistory = async (patientId: string) => {
   };
 };
 
+export interface AddDiagnosticTestItem {
+  testName: string;
+  price?: number;
+}
+
 export const addDiagnosticTestsToVisit = async (
   patientId: string,
   visitId: string,
-  testNames: string[]
+  tests: AddDiagnosticTestItem[]
 ): Promise<void> => {
   if (!mongoose.Types.ObjectId.isValid(patientId)) {
     throw new Error("INVALID_PATIENT_ID");
@@ -201,7 +249,7 @@ export const addDiagnosticTestsToVisit = async (
   if (!mongoose.Types.ObjectId.isValid(visitId)) {
     throw new Error("INVALID_VISIT_ID");
   }
-  if (!Array.isArray(testNames) || testNames.length === 0) {
+  if (!Array.isArray(tests) || tests.length === 0) {
     throw new Error("TEST_NAMES_REQUIRED");
   }
 
@@ -213,15 +261,21 @@ export const addDiagnosticTestsToVisit = async (
     throw new Error("VISIT_DOES_NOT_BELONG_TO_PATIENT");
   }
 
-  const validNames = testNames.filter((n) => typeof n === "string" && n.trim().length > 0);
-  if (validNames.length === 0) {
+  const validTests = tests
+    .filter((t) => t && typeof t.testName === "string" && t.testName.trim().length > 0)
+    .map((t) => ({
+      testName: t.testName.trim(),
+      price: typeof t.price === "number" && t.price >= 0 ? t.price : undefined
+    }));
+  if (validTests.length === 0) {
     throw new Error("TEST_NAMES_REQUIRED");
   }
 
   await DiagnosticTest.insertMany(
-    validNames.map((testName) => ({
+    validTests.map(({ testName, price }) => ({
       visit: new mongoose.Types.ObjectId(visitId),
-      testName: testName.trim()
+      testName,
+      ...(price !== undefined && { price })
     }))
   );
 };

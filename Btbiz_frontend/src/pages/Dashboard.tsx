@@ -43,11 +43,18 @@ export const Dashboard = () => {
 
   const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
   const [appointmentsLoading, setAppointmentsLoading] = useState(false)
+  const [upcomingAppointments, setUpcomingAppointments] = useState<DoctorAppointmentItem[]>([])
+  const [upcomingAppointmentsLoading, setUpcomingAppointmentsLoading] = useState(false)
 
   const [availabilityStatus, setAvailabilityStatus] = useState<'available' | 'unavailable' | 'busy'>('available')
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false)
   const [unavailableReason, setUnavailableReason] = useState('')
+  const [unavailableDuration, setUnavailableDuration] = useState<string>('') // '0.5' | '1' | '2' | '3' | '4' | 'custom'
+  const [unavailableUntilCustom, setUnavailableUntilCustom] = useState('') // for custom: datetime-local string
+  const [unavailableUntil, setUnavailableUntil] = useState<string | null>(null) // from API, to show "Until ..."
+  const [availabilityUpdateSuccess, setAvailabilityUpdateSuccess] = useState<string | null>(null)
+  const [availabilityUpdateError, setAvailabilityUpdateError] = useState<string | null>(null)
 
   const loadAssistants = async () => {
     try {
@@ -79,6 +86,18 @@ export const Dashboard = () => {
     }
   }
 
+  const loadUpcomingAppointments = async () => {
+    try {
+      setUpcomingAppointmentsLoading(true)
+      const { appointments } = await appointmentService.getUpcomingAppointments()
+      setUpcomingAppointments(appointments)
+    } catch {
+      // ignore
+    } finally {
+      setUpcomingAppointmentsLoading(false)
+    }
+  }
+
   const loadNotifications = async () => {
     try {
       const list = await notificationService.getNotifications()
@@ -95,6 +114,8 @@ export const Dashboard = () => {
       const { doctor } = await authService.getProfile()
       if (doctor.availabilityStatus) setAvailabilityStatus(doctor.availabilityStatus as 'available' | 'unavailable' | 'busy')
       if (doctor.unavailableReason) setUnavailableReason(doctor.unavailableReason)
+      if (doctor.unavailableUntil) setUnavailableUntil(doctor.unavailableUntil)
+      else setUnavailableUntil(null)
     } catch {
       // ignore
     } finally {
@@ -102,16 +123,41 @@ export const Dashboard = () => {
     }
   }
 
+  const getUnavailableUntilISO = (): string | undefined => {
+    if (availabilityStatus === 'available') return undefined
+    if (unavailableDuration === 'custom' && unavailableUntilCustom) {
+      const d = new Date(unavailableUntilCustom)
+      return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
+    }
+    const hours = parseFloat(unavailableDuration)
+    if (Number.isNaN(hours) || hours <= 0) return undefined
+    return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+  }
+
   const handleSetAvailability = async (status: 'available' | 'unavailable' | 'busy') => {
+    setAvailabilityUpdateSuccess(null)
+    setAvailabilityUpdateError(null)
     setAvailabilityUpdating(true)
     try {
-      await authService.updateDoctorAvailability({
+      const until = status !== 'available' ? getUnavailableUntilISO() : undefined
+      const res = await authService.updateDoctorAvailability({
         availabilityStatus: status,
         unavailableReason: status !== 'available' ? unavailableReason : undefined,
+        unavailableUntil: until,
       })
       setAvailabilityStatus(status)
-    } catch {
-      // ignore
+      if (status === 'available') {
+        setUnavailableUntil(null)
+      } else if (res.unavailableUntil) {
+        setUnavailableUntil(res.unavailableUntil)
+      } else {
+        setUnavailableUntil(null)
+      }
+      setAvailabilityUpdateSuccess(status === 'available' ? 'You are now available.' : 'Reason and time period saved.')
+      setTimeout(() => setAvailabilityUpdateSuccess(null), 4000)
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? 'Failed to save. Please try again.'
+      setAvailabilityUpdateError(msg)
     } finally {
       setAvailabilityUpdating(false)
     }
@@ -122,6 +168,7 @@ export const Dashboard = () => {
     void loadLabAssistants()
     void loadNotifications()
     void loadTodayAppointments()
+    void loadUpcomingAppointments()
     void loadProfileAvailability()
   }, [])
 
@@ -316,6 +363,85 @@ export const Dashboard = () => {
 
           <div style={{ marginTop: 16 }}>
             <Card className="dashboard-overview-card">
+              <p className="dashboard-kicker">Upcoming appointments</p>
+              <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8, fontSize: 13, color: '#627d98' }}>
+                Appointments booked for future dates (after today).
+              </p>
+              {upcomingAppointmentsLoading ? (
+                <p className="dashboard-body" style={{ marginTop: 8 }}>
+                  Loading…
+                </p>
+              ) : (
+                <>
+                  {upcomingAppointments.length === 0 && (
+                    <p className="dashboard-body" style={{ marginTop: 8 }}>
+                      No upcoming appointments.
+                    </p>
+                  )}
+                  {upcomingAppointments.length > 0 && (
+                    <>
+                      <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8, fontSize: 13, fontWeight: 600 }}>
+                        {upcomingAppointments.length} appointment{upcomingAppointments.length !== 1 ? 's' : ''} scheduled
+                      </p>
+                      <ul
+                        style={{
+                          listStyle: 'none',
+                          padding: 0,
+                          marginTop: 10,
+                          marginBottom: 0,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          maxHeight: 280,
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {upcomingAppointments.map((a) => (
+                          <li
+                            key={a.id}
+                            style={{
+                              padding: '8px 10px',
+                              borderRadius: 10,
+                              backgroundColor: '#f5f9fc',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              gap: 8,
+                              fontSize: 13,
+                              cursor: 'pointer',
+                              border: '1px solid transparent',
+                            }}
+                            onClick={() => navigate(`/patients/${a.patientId}`)}
+                            onKeyDown={(e) => e.key === 'Enter' && navigate(`/patients/${a.patientId}`)}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <div>
+                              <strong>{a.patientName}</strong>
+                              <div style={{ color: '#607d8b' }}>
+                                {a.reason || 'Appointment'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', color: '#486581', fontSize: 12, whiteSpace: 'nowrap' }}>
+                              {new Date(a.visitDate).toLocaleDateString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
+            </Card>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <Card className="dashboard-overview-card">
               <p className="dashboard-kicker">Your availability</p>
               <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
                 Mark yourself unavailable or busy so your assistant can inform patients in real time.
@@ -358,15 +484,74 @@ export const Dashboard = () => {
                         type="text"
                         value={unavailableReason}
                         onChange={(e) => setUnavailableReason(e.target.value)}
-                        placeholder="e.g. Emergency, in surgery"
+                        placeholder="e.g. For operation, will take 3 hours"
                         style={{
                           width: '100%',
                           padding: '8px 10px',
                           borderRadius: 8,
                           border: '1px solid #e2e8f0',
                           fontSize: 13,
+                          marginBottom: 10,
                         }}
                       />
+                      <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                        Unavailable for (time period)
+                      </label>
+                      <select
+                        value={unavailableDuration}
+                        onChange={(e) => setUnavailableDuration(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          fontSize: 13,
+                          marginBottom: 8,
+                        }}
+                      >
+                        <option value="">Select duration</option>
+                        <option value="0.5">30 minutes</option>
+                        <option value="1">1 hour</option>
+                        <option value="2">2 hours</option>
+                        <option value="3">3 hours</option>
+                        <option value="4">4 hours</option>
+                        <option value="custom">Custom (date & time)</option>
+                      </select>
+                      {unavailableDuration === 'custom' && (
+                        <div style={{ marginBottom: 8 }}>
+                          <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                            Available again at
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={unavailableUntilCustom}
+                            onChange={(e) => setUnavailableUntilCustom(e.target.value)}
+                            min={new Date().toISOString().slice(0, 16)}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              border: '1px solid #e2e8f0',
+                              fontSize: 13,
+                            }}
+                          />
+                        </div>
+                      )}
+                      {unavailableUntil && (
+                        <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 8 }}>
+                          Unavailable until: {new Date(unavailableUntil).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                        </p>
+                      )}
+                      {availabilityUpdateSuccess && (
+                        <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 4 }}>
+                          {availabilityUpdateSuccess}
+                        </p>
+                      )}
+                      {availabilityUpdateError && (
+                        <p style={{ fontSize: 12, color: '#c62828', marginTop: 4, marginBottom: 4 }}>
+                          {availabilityUpdateError}
+                        </p>
+                      )}
                       <button
                         type="button"
                         disabled={availabilityUpdating}
@@ -382,7 +567,7 @@ export const Dashboard = () => {
                           fontSize: 12,
                         }}
                       >
-                        Update reason
+                        {availabilityUpdating ? 'Saving…' : 'Save reason & time period'}
                       </button>
                     </div>
                   )}

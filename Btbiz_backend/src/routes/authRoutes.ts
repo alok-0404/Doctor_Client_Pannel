@@ -8,6 +8,7 @@ import {
   labManagerRegister,
   pharmacyRegister,
   getDoctorProfile,
+  updateDoctorClinic,
   completeDoctorForgotPassword,
   startDoctorForgotPassword,
   createAssistantAccount,
@@ -70,6 +71,9 @@ router.post("/doctor/logout", authenticateDoctor, doctorLogout);
 
 // GET /auth/doctor/profile (JWT protected)
 router.get("/doctor/profile", authenticateDoctor, getDoctorProfile);
+
+// PATCH /auth/doctor/clinic (doctor only – set clinic location for distance on booking)
+router.patch("/doctor/clinic", authenticateDoctor, updateDoctorClinic);
 
 // PATCH /auth/doctor/availability (doctor only – mark unavailable/busy)
 router.patch("/doctor/availability", authenticateDoctor, updateDoctorAvailability);

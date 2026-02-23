@@ -16,6 +16,9 @@ export interface IVisit extends Document {
   weightKg?: number;
   temperature?: number; // Celsius
   otherVitalsNotes?: string;
+  /** Patient's location at time of booking (with consent) – so doctor can see */
+  patientLatitude?: number;
+  patientLongitude?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,7 +54,9 @@ const VisitSchema = new Schema<IVisit>(
     bloodSugarFasting: { type: Number },
     weightKg: { type: Number },
     temperature: { type: Number },
-    otherVitalsNotes: { type: String }
+    otherVitalsNotes: { type: String },
+    patientLatitude: { type: Number },
+    patientLongitude: { type: Number }
   },
   { timestamps: true }
 );

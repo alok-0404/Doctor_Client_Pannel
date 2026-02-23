@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 import { authStorage } from '../utils/authStorage'
 
-type Role = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER'
+type Role = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER' | 'PHARMACY'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -27,6 +27,9 @@ export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) 
     }
     if (role === 'LAB_MANAGER') {
       return <Navigate to="/lab-manager" replace />
+    }
+    if (role === 'PHARMACY') {
+      return <Navigate to="/medicine" replace />
     }
     return <Navigate to="/dashboard" replace />
   }

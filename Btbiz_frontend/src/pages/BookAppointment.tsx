@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { publicAppointmentService, type PatientSummary } from '../services/api'
+import { publicAppointmentService, type PatientSummary, type ConsultantOption } from '../services/api'
 
 type Mode = 'none' | 'old' | 'new'
 type Step = 'details' | 'payment' | 'confirm'
@@ -15,12 +15,33 @@ const TIME_SLOTS = [
   '2:00 - 3:00 PM',
 ]
 
+/** Distance in km between two lat/lng points (Haversine) */
+function distanceKm(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number
+): number {
+  const R = 6371 // Earth radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
 export const BookAppointment = () => {
+  const [policyAccepted, setPolicyAccepted] = useState(false)
   const [mode, setMode] = useState<Mode>('none')
   const [step, setStep] = useState<Step>('details')
 
-  const [consultants, setConsultants] = useState<Array<{ id: string; name: string }>>([])
+  const [consultants, setConsultants] = useState<ConsultantOption[]>([])
   const [loadingConsultants, setLoadingConsultants] = useState(false)
+
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const [locationLoading, setLocationLoading] = useState(false)
 
   // Old patient state
   const [oldMobile, setOldMobile] = useState('')
@@ -29,6 +50,7 @@ export const BookAppointment = () => {
   const [oldConsultantId, setOldConsultantId] = useState('')
   const [oldOpdNo, setOldOpdNo] = useState('')
   const [oldName, setOldName] = useState('')
+  const [oldEmail, setOldEmail] = useState('')
   const [oldGender, setOldGender] = useState<string>('')
   const [oldAddress, setOldAddress] = useState('')
   const [appointmentDate, setAppointmentDate] = useState('')
@@ -40,6 +62,7 @@ export const BookAppointment = () => {
   const [newAge, setNewAge] = useState('')
   const [newGender, setNewGender] = useState<string>('')
   const [newMobile, setNewMobile] = useState('')
+  const [newEmail, setNewEmail] = useState('')
   const [newCity, setNewCity] = useState('')
   const [newAddress, setNewAddress] = useState('')
 
@@ -65,6 +88,32 @@ export const BookAppointment = () => {
         setLoadingConsultants(false)
       })
   }, [])
+
+  const fetchUserLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocationError('Location is not supported by your browser.')
+      return
+    }
+    setLocationLoading(true)
+    setLocationError(null)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setLocationLoading(false)
+      },
+      (err) => {
+        setLocationError(err.message === 'User denied Geolocation' ? 'Location access denied. Distance will not be shown.' : 'Could not get your location.')
+        setLocationLoading(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    )
+  }, [])
+
+  const selectedConsultant = consultants.find((c) => c.id === (mode === 'old' ? oldConsultantId : newConsultantId))
+  const hasClinicLocation = selectedConsultant && selectedConsultant.clinicLatitude != null && selectedConsultant.clinicLongitude != null
+  const distanceKmValue = userLocation && hasClinicLocation && selectedConsultant
+    ? distanceKm(userLocation.lat, userLocation.lng, selectedConsultant.clinicLatitude!, selectedConsultant.clinicLongitude!)
+    : null
 
   const resetState = () => {
     setStep('details')
@@ -139,6 +188,7 @@ export const BookAppointment = () => {
           patientName: oldName || undefined,
           gender: oldGender || undefined,
           address: oldAddress || undefined,
+          ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
         })
       } else {
         res = await publicAppointmentService.bookNewPatientAppointment({
@@ -151,6 +201,7 @@ export const BookAppointment = () => {
           address: newAddress || undefined,
           appointmentDate,
           preferredSlot: preferredSlot || undefined,
+          ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
         })
       }
       setAppointmentId(res.appointmentId)
@@ -161,6 +212,78 @@ export const BookAppointment = () => {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const renderConsent = () => (
+    <div className="appt-card" style={{ maxWidth: 520 }}>
+      <h2 className="public-section-title" style={{ marginBottom: 12 }}>Privacy &amp; Terms</h2>
+      <p className="public-section-text" style={{ marginBottom: 16 }}>
+        To book an appointment, we need you to accept our Privacy Policy and Terms &amp; Conditions.
+        We may use your <strong>location</strong> to (1) show you how far you are from the doctor&apos;s clinic, and (2) share your location at the time of booking with your doctor so they can see where you were when you booked.
+      </p>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
+        <input
+          type="checkbox"
+          checked={policyAccepted}
+          onChange={(e) => setPolicyAccepted(e.target.checked)}
+          style={{ marginTop: 4 }}
+        />
+        <span className="public-section-text" style={{ margin: 0 }}>
+          I accept the <strong>Privacy Policy</strong> and <strong>Terms &amp; Conditions</strong>, and I allow the use of my location to see distance from the clinic and to share my location with the doctor at booking.
+        </span>
+      </label>
+      <button
+        type="button"
+        className="public-cta"
+        disabled={!policyAccepted}
+        onClick={() => setPolicyAccepted(true)}
+      >
+        Continue to Book Appointment
+      </button>
+    </div>
+  )
+
+  const renderDistanceBlock = () => {
+    if (!selectedConsultant) return null
+    if (!hasClinicLocation) {
+      return (
+        <p className="appt-timing-msg" style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
+          Distance is not available for this consultant (clinic location not set).
+        </p>
+      )
+    }
+    if (locationLoading) {
+      return <p className="appt-timing-msg" style={{ background: '#fef3c7', borderColor: '#fcd34d' }}>Getting your location…</p>
+    }
+    if (locationError) {
+      return (
+        <div style={{ marginTop: 8 }}>
+          <p className="appt-timing-msg" style={{ background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
+            {locationError}
+          </p>
+          <button type="button" className="public-cta" style={{ marginTop: 8, padding: '6px 14px', fontSize: '0.9rem' }} onClick={fetchUserLocation}>
+            Try again
+          </button>
+        </div>
+      )
+    }
+    if (distanceKmValue != null) {
+      return (
+        <p className="appt-timing-msg" style={{ marginTop: 12 }}>
+          You are approximately <strong>{distanceKmValue.toFixed(1)} km</strong> from <strong>{selectedConsultant.name}</strong>&apos;s clinic.
+          {selectedConsultant.clinicAddress && (
+            <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem' }}>{selectedConsultant.clinicAddress}</span>
+          )}
+        </p>
+      )
+    }
+    return (
+      <div style={{ marginTop: 8 }}>
+        <button type="button" className="public-cta" style={{ padding: '6px 14px', fontSize: '0.9rem' }} onClick={fetchUserLocation}>
+          Use my location – show distance from clinic
+        </button>
+      </div>
+    )
   }
 
   const renderModeChooser = () => (
@@ -212,6 +335,15 @@ export const BookAppointment = () => {
         </div>
       )}
       <div className="appt-field">
+        <label>Email (optional)</label>
+        <input
+          type="email"
+          value={oldEmail}
+          onChange={(e) => setOldEmail(e.target.value)}
+          placeholder="your@email.com"
+        />
+      </div>
+      <div className="appt-field">
         <label>Consultation Type *</label>
         <select value={oldConsultationType} onChange={(e) => setOldConsultationType(e.target.value)}>
           {CONSULTATION_TYPES.map((t) => (
@@ -242,6 +374,7 @@ export const BookAppointment = () => {
           />
         </div>
       </div>
+      {renderDistanceBlock()}
       <div className="appt-two-cols">
         <div className="appt-field">
           <label>Appointment Date *</label>
@@ -287,6 +420,7 @@ export const BookAppointment = () => {
           ))}
         </select>
       </div>
+      {renderDistanceBlock()}
       <div className="appt-field">
         <label>Name of the Patient *</label>
         <input
@@ -320,6 +454,15 @@ export const BookAppointment = () => {
           type="tel"
           value={newMobile}
           onChange={(e) => setNewMobile(e.target.value)}
+        />
+      </div>
+      <div className="appt-field">
+        <label>Email (optional)</label>
+        <input
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          placeholder="your@email.com"
         />
       </div>
       <div className="appt-two-cols">
@@ -389,6 +532,10 @@ export const BookAppointment = () => {
     </div>
   )
 
+  const getConfirmName = () => (mode === 'old' ? (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—' : newName || '—')
+  const getConfirmMobile = () => (mode === 'old' ? oldMobile : newMobile) || '—'
+  const getConfirmEmail = () => (mode === 'old' ? oldEmail : newEmail).trim() || '—'
+
   const renderConfirm = () => (
     <div className="appt-card" style={{ textAlign: 'center' }}>
       <h2 className="public-section-title" style={{ marginBottom: 16 }}>Appointment Confirmed</h2>
@@ -400,6 +547,11 @@ export const BookAppointment = () => {
           Appointment ID: <strong>{appointmentId}</strong>
         </p>
       )}
+      <div className="public-section-text" style={{ marginBottom: 16, textAlign: 'left', maxWidth: 360, marginLeft: 'auto', marginRight: 'auto' }}>
+        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Name:</strong> {getConfirmName()}</p>
+        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Mobile:</strong> {getConfirmMobile()}</p>
+        <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569' }}><strong>Email:</strong> {getConfirmEmail()}</p>
+      </div>
       <p className="public-section-text" style={{ marginBottom: 24 }}>
         You will be contacted by the clinic if any changes are required.
       </p>
@@ -422,19 +574,24 @@ export const BookAppointment = () => {
       </header>
       <main className="public-main" style={{ paddingTop: 32 }}>
         <h1 className="public-section-title">Book Appointment</h1>
-        <p className="public-section-text" style={{ marginBottom: 20 }}>
-          Please choose whether you are an old patient or a new patient.
-        </p>
-        {step === 'details' && mode === 'none' && renderModeChooser()}
+        {!policyAccepted && renderConsent()}
+        {policyAccepted && (
+          <>
+            <p className="public-section-text" style={{ marginBottom: 20 }}>
+              Please choose whether you are an old patient or a new patient.
+            </p>
+            {step === 'details' && mode === 'none' && renderModeChooser()}
+          </>
+        )}
         {error && (
           <p style={{ color: '#b91c1c', marginBottom: 16, fontSize: '0.9rem' }}>
             {error}
           </p>
         )}
-        {step === 'details' && mode === 'old' && renderOldForm()}
-        {step === 'details' && mode === 'new' && renderNewForm()}
-        {step === 'payment' && renderPayment()}
-        {step === 'confirm' && renderConfirm()}
+        {policyAccepted && step === 'details' && mode === 'old' && renderOldForm()}
+        {policyAccepted && step === 'details' && mode === 'new' && renderNewForm()}
+        {policyAccepted && step === 'payment' && renderPayment()}
+        {policyAccepted && step === 'confirm' && renderConfirm()}
         {step !== 'confirm' && (
           <p style={{ marginTop: 24, fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>
             <Link to="/">Back to Home</Link>

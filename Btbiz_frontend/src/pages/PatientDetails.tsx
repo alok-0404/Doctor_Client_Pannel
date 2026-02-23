@@ -66,6 +66,8 @@ export const PatientDetails = () => {
           weightKg?: number
           temperature?: number
           otherVitalsNotes?: string
+          patientLatitude?: number
+          patientLongitude?: number
           doctor?: { name: string }
           diagnosticTests?: Array<{ _id: string; testName: string; result?: string; notes?: string }>
         }>
@@ -94,7 +96,9 @@ export const PatientDetails = () => {
           return {
             date: formatVisitDate(v.visitDate),
             reason: v.reason || '—',
-            notes: `${v.notes || ''}${vitalsStr}`.trim() || undefined
+            notes: `${v.notes || ''}${vitalsStr}`.trim() || undefined,
+            patientLatitude: v.patientLatitude,
+            patientLongitude: v.patientLongitude
           }
         })
         setData({

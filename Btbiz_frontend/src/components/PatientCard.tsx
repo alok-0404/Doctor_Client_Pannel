@@ -51,6 +51,9 @@ export interface VisitItem {
   date: string
   reason: string
   notes?: string
+  /** Patient's location at time of booking (so doctor can see) */
+  patientLatitude?: number
+  patientLongitude?: number
 }
 
 export interface PrescriptionItem {
@@ -121,7 +124,7 @@ interface PatientCardProps {
   patientId: string
 }
 
-type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'pharmacyDispensations' | 'tests' | 'documents'
+type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'pharmacyDispensations' | 'tests'
 
 export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
@@ -129,8 +132,8 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
     visitHistory: false,
     prescriptions: false,
     medicines: false,
+    pharmacyDispensations: false,
     tests: false,
-    documents: false,
   })
 
   const toggleSection = (key: SectionKey) => (e: React.MouseEvent | React.KeyboardEvent) => {
@@ -144,7 +147,6 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const openMedicines = openSections.medicines
   const openPharmacyDispensations = openSections.pharmacyDispensations
   const openTests = openSections.tests
-  const openDocuments = openSections.documents
 
   return (
     <div className="patient-layout">
@@ -265,20 +267,38 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                 {data.visits.map((visit) => (
                   <li
                     key={`${visit.date}-${visit.reason}`}
-                    className="patient-list-item">
-                    <div className="patient-list-copy">
-                      <p className="patient-list-primary">
-                        {visit.reason}
-                      </p>
-                      {visit.notes && (
-                        <p className="patient-list-secondary">
-                          {visit.notes}
+                    className="patient-list-item"
+                    style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div className="patient-list-copy">
+                        <p className="patient-list-primary">
+                          {visit.reason}
                         </p>
-                      )}
+                        {visit.notes && (
+                          <p className="patient-list-secondary">
+                            {visit.notes}
+                          </p>
+                        )}
+                      </div>
+                      <span className="patient-list-meta">
+                        {visit.date}
+                      </span>
                     </div>
-                    <span className="patient-list-meta">
-                      {visit.date}
-                    </span>
+                    {visit.patientLatitude != null && visit.patientLongitude != null && (
+                      <p className="patient-list-secondary" style={{ margin: 0, fontSize: 12 }}>
+                        Patient location at booking:{' '}
+                        <a
+                          href={`https://www.google.com/maps?q=${visit.patientLatitude},${visit.patientLongitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: '#1e40af', fontWeight: 500 }}
+                        >
+                          Open in Google Maps
+                        </a>
+                        {' '}({visit.patientLatitude.toFixed(4)}, {visit.patientLongitude.toFixed(4)})
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -296,20 +316,50 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
               Prescriptions
             </h3>
             {openPrescriptions && (
-              <ul className="patient-list">
-                {data.prescriptions.map((p) => (
-                  <li
-                    key={`${p.date}-${p.summary}`}
-                    className="patient-list-item">
-                    <p className="patient-list-meta">
-                      {p.date}
-                    </p>
-                    <p className="patient-list-primary">
-                      {p.summary}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {(data.prescriptions?.length > 0 || (data.documents?.length ?? 0) > 0) ? (
+                  <ul className="patient-list">
+                    {data.prescriptions?.map((p) => (
+                      <li
+                        key={`${p.date}-${p.summary}`}
+                        className="patient-list-item">
+                        <p className="patient-list-meta">
+                          {p.date}
+                        </p>
+                        <p className="patient-list-primary">
+                          {p.summary}
+                        </p>
+                      </li>
+                    ))}
+                    {data.documents?.map((doc) => (
+                      <li
+                        key={doc.id}
+                        className="patient-list-item"
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+                      >
+                        <div>
+                          <p className="patient-list-primary">
+                            {doc.originalName}
+                          </p>
+                          <span className="patient-list-meta">
+                            {new Date(doc.uploadedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · Uploaded prescription
+                          </span>
+                          {doc.ocrText && (
+                            <p className="patient-list-secondary" style={{ marginTop: 4, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {doc.ocrText}
+                            </p>
+                          )}
+                        </div>
+                        <DocumentViewButton patientId={patientId} documentId={doc.id} label="View" />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="patient-list-secondary" style={{ margin: 0 }}>
+                    No prescriptions recorded yet.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -440,56 +490,6 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-
-          <div
-            className={`patient-section-card patient-collapsible ${openDocuments ? 'patient-collapsible-open' : ''}`}
-            onClick={toggleSection('documents')}
-            onKeyDown={(e) => e.key === 'Enter' && toggleSection('documents')(e)}
-            role="button"
-            tabIndex={0}
-          >
-            <h3 className="patient-section-title">
-              Uploaded Documents
-            </h3>
-            {openDocuments && (
-              <>
-                {(!data.documents || data.documents.length === 0) ? (
-                  <p className="patient-list-secondary" style={{ margin: 0 }}>
-                    No documents uploaded yet.
-                  </p>
-                ) : (
-                  <ul className="patient-list">
-                    {data.documents.map((doc) => (
-                      <li
-                        key={doc.id}
-                        className="patient-list-item"
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
-                      >
-                        <div>
-                          <p className="patient-list-primary">
-                            {doc.originalName}
-                          </p>
-                          <span className="patient-list-meta">
-                            {new Date(doc.uploadedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          {doc.ocrText && (
-                            <p className="patient-list-secondary" style={{ marginTop: 4, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {doc.ocrText}
-                            </p>
-                          )}
-                        </div>
-                        <DocumentViewButton
-                          patientId={patientId}
-                          documentId={doc.id}
-                          label="View"
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
             )}
           </div>
         </div>

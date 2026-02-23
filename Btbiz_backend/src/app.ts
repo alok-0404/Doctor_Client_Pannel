@@ -13,8 +13,45 @@ import pharmacyRoutes from "./routes/pharmacyRoutes";
 
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://wit-true-destinations-variations.trycloudflare.com",
+];
+
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (origin.endsWith(".trycloudflare.com")) return true;
+  return false;
+}
+
+// Set CORS header early so it's on every response (including 500/errors)
+app.use((req, res, next) => {
+  const origin = req.get("Origin");
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+  })
+);
 app.use(express.json());
 app.use(morgan("dev"));
 
@@ -33,6 +70,15 @@ app.use("/pharmacy", pharmacyRoutes);
 // Fallback 404
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found" });
+});
+
+// Error handler so 500 responses still have CORS and JSON
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // eslint-disable-next-line no-console
+  console.error("Unhandled error:", err);
+  if (!res.headersSent) {
+    res.status(500).json({ message: "Internal server error" });
+  }
 });
 
 export default app;

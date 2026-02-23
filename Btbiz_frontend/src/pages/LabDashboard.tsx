@@ -40,6 +40,7 @@ export const LabDashboard = () => {
 
   const [addTestSelect, setAddTestSelect] = useState('')
   const [addTestCustom, setAddTestCustom] = useState('')
+  const [addTestPrice, setAddTestPrice] = useState('')
   const [addTestLoading, setAddTestLoading] = useState(false)
   const [addTestError, setAddTestError] = useState<string | null>(null)
   const [uploadingReportForTestId, setUploadingReportForTestId] = useState<string | null>(null)
@@ -112,12 +113,18 @@ export const LabDashboard = () => {
       setAddTestError('Select a test or enter custom test name.')
       return
     }
+    const price = addTestPrice.trim() ? parseFloat(addTestPrice) : undefined
+    if (price !== undefined && (Number.isNaN(price) || price < 0)) {
+      setAddTestError('Enter a valid rate (₹).')
+      return
+    }
     setAddTestError(null)
     setAddTestLoading(true)
     try {
-      await patientService.addDiagnosticTests(patient.id, selectedVisitId, [testName])
+      await patientService.addDiagnosticTests(patient.id, selectedVisitId, [{ testName, price }])
       setAddTestSelect('')
       setAddTestCustom('')
+      setAddTestPrice('')
       const h = await patientService.getFullHistory(patient.id)
       setHistory(h)
     } catch (err: any) {
@@ -127,6 +134,30 @@ export const LabDashboard = () => {
     } finally {
       setAddTestLoading(false)
     }
+  }
+
+  const openLabReceipt = () => {
+    if (!patient || !selectedVisit) return
+    const tests = diagnosticTests.map((t) => ({
+      testName: t.testName,
+      price: t.price ?? 0,
+    }))
+    const total = tests.reduce((sum, t) => sum + t.price, 0)
+    setReceiptData({
+      patient: {
+        name: `${patient.firstName} ${patient.lastName ?? ''}`.trim() || 'Patient',
+        mobile: patient.mobileNumber ?? '',
+      },
+      visit: {
+        visitDate: selectedVisit.visitDate,
+        reason: selectedVisit.reason,
+      },
+      tests,
+      total,
+      paidAmount: 0,
+      paymentStatus: 'Unpaid',
+    })
+    setShowReceipt(true)
   }
 
   const formatVisitDate = (d: string) => {
@@ -281,6 +312,7 @@ export const LabDashboard = () => {
                             <tr style={{ background: '#f0f4f8', borderBottom: '2px solid #d9e2ec' }}>
                               <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>#</th>
                               <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Test name</th>
+                              <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#102a43' }}>Rate (₹)</th>
                               <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Report</th>
                               <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Added on</th>
                             </tr>
@@ -288,7 +320,7 @@ export const LabDashboard = () => {
                           <tbody>
                             {diagnosticTests.length === 0 ? (
                               <tr>
-                                <td colSpan={4} style={{ padding: '16px 12px', color: '#627d98', textAlign: 'center' }}>
+                                <td colSpan={5} style={{ padding: '16px 12px', color: '#627d98', textAlign: 'center' }}>
                                   No tests added yet. Add a test below.
                                 </td>
                               </tr>
@@ -302,6 +334,9 @@ export const LabDashboard = () => {
                                 >
                                   <td style={{ padding: '10px 12px', color: '#627d98' }}>{idx + 1}</td>
                                   <td style={{ padding: '10px 12px', fontWeight: 500 }}>{t.testName}</td>
+                                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500 }}>
+                                    {t.price != null ? `₹${t.price}` : '—'}
+                                  </td>
                                   <td style={{ padding: '10px 12px', color: '#486581' }}>
                                     {t.hasReport ? (
                                       <button
@@ -354,6 +389,13 @@ export const LabDashboard = () => {
                           </tbody>
                         </table>
                       </div>
+                      {diagnosticTests.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <Button type="button" onClick={openLabReceipt}>
+                            View bill / Receipt
+                          </Button>
+                        </div>
+                      )}
 
                       <h3 style={{ fontSize: 16, marginBottom: 8 }}>Add test</h3>
                       <form
@@ -409,6 +451,15 @@ export const LabDashboard = () => {
                             placeholder="Enter test name"
                           />
                         )}
+                        <TextField
+                          id="lab-test-rate"
+                          label="Rate (₹)"
+                          type="number"
+                          min={0}
+                          value={addTestPrice}
+                          onChange={(e) => setAddTestPrice(e.target.value)}
+                          placeholder="e.g. 200"
+                        />
                         <div style={{ alignSelf: 'flex-end' }}>
                           <Button
                             type="submit"

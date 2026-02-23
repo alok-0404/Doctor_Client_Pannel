@@ -21,6 +21,7 @@ export const AssistantDashboard = () => {
   const [patient, setPatient] = useState<PatientSummary | null>(null)
   const [patientId, setPatientId] = useState<string | null>(null)
   const [hasTodayVisit, setHasTodayVisit] = useState(false)
+  const [todayVisitId, setTodayVisitId] = useState<string | null>(null)
 
   // Form state for new patient / edit
   const [firstName, setFirstName] = useState('')
@@ -46,6 +47,8 @@ export const AssistantDashboard = () => {
 
   // Doctor availability (real-time for assistant)
   const [doctorAvailabilityStatus, setDoctorAvailabilityStatus] = useState<AvailabilityStatus>('available')
+  const [doctorUnavailableReason, setDoctorUnavailableReason] = useState<string | null>(null)
+  const [doctorUnavailableUntil, setDoctorUnavailableUntil] = useState<string | null>(null)
   const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsLoading, setTodayPatientsLoading] = useState(false)
 
@@ -66,6 +69,10 @@ export const AssistantDashboard = () => {
       const { doctor } = await authService.getProfile()
       if (doctor.referredToDoctorName) setReferredToDoctorName(doctor.referredToDoctorName)
       if (doctor.availabilityStatus) setDoctorAvailabilityStatus(doctor.availabilityStatus as AvailabilityStatus)
+      if (doctor.unavailableReason) setDoctorUnavailableReason(doctor.unavailableReason)
+      else setDoctorUnavailableReason(null)
+      if (doctor.unavailableUntil) setDoctorUnavailableUntil(doctor.unavailableUntil)
+      else setDoctorUnavailableUntil(null)
     } catch {
       // ignore
     }
@@ -113,6 +120,7 @@ export const AssistantDashboard = () => {
           })
           const todayVisit = todayVisits[0]
           setHasTodayVisit(Boolean(todayVisit))
+          setTodayVisitId(todayVisit?._id ?? null)
 
           // If there is a visit today (patient already saw the doctor),
           // pre-fill vitals and notes with the recorded values so assistant sees them.
@@ -157,6 +165,7 @@ export const AssistantDashboard = () => {
           }
         } catch {
           setHasTodayVisit(false)
+          setTodayVisitId(null)
           setDiseaseReason('')
           setNotesForDoctor('')
           setBpSystolic('')
@@ -282,22 +291,28 @@ export const AssistantDashboard = () => {
       setFormError('Blood pressure (systolic and diastolic) is mandatory.')
       return
     }
+    const payload = {
+      reason: diseaseReason.trim() || undefined,
+      notes: notesForDoctor.trim() || undefined,
+      bloodPressureSystolic: sys,
+      bloodPressureDiastolic: dia,
+      bloodSugarFasting: sugar,
+      weightKg: weight,
+      temperature: temp,
+      otherVitalsNotes: otherVitalsNotes.trim() || undefined,
+    }
     setReferLoading(true)
     try {
-      await patientService.createVisit(patientId, {
-        reason: diseaseReason.trim() || undefined,
-        notes: notesForDoctor.trim() || undefined,
-        bloodPressureSystolic: sys,
-        bloodPressureDiastolic: dia,
-        bloodSugarFasting: sugar,
-        weightKg: weight,
-        temperature: temp,
-        otherVitalsNotes: otherVitalsNotes.trim() || undefined,
-      })
+      if (hasTodayVisit && todayVisitId) {
+        await patientService.referExistingVisit(patientId, todayVisitId, payload)
+      } else {
+        await patientService.createVisit(patientId, payload)
+      }
       setFormSuccess('Patient referred to doctor successfully.')
       setStep('search')
       setPatient(null)
       setPatientId(null)
+      setTodayVisitId(null)
       setMobileSearch('')
     } catch (err: any) {
       setFormError(err?.response?.data?.message ?? 'Could not refer patient.')
@@ -339,6 +354,7 @@ export const AssistantDashboard = () => {
     setPatient(null)
     setPatientId(null)
     setHasTodayVisit(false)
+    setTodayVisitId(null)
     setMobileSearch('')
     setFormError(null)
     setFormSuccess(null)
@@ -374,8 +390,11 @@ export const AssistantDashboard = () => {
           query: { doctorId: userId },
           transports: ['websocket', 'polling']
         })
-        socket.on('doctorAvailabilityChanged', (data: { availabilityStatus: AvailabilityStatus }) => {
-          if (mounted && data.availabilityStatus) setDoctorAvailabilityStatus(data.availabilityStatus)
+        socket.on('doctorAvailabilityChanged', (data: { availabilityStatus: AvailabilityStatus; unavailableReason?: string; unavailableUntil?: string }) => {
+          if (!mounted) return
+          if (data.availabilityStatus) setDoctorAvailabilityStatus(data.availabilityStatus)
+          setDoctorUnavailableReason(data.unavailableReason ?? null)
+          setDoctorUnavailableUntil(data.unavailableUntil ?? null)
         })
       } catch {
         // ignore
@@ -420,6 +439,16 @@ export const AssistantDashboard = () => {
                 {doctorAvailabilityStatus}
               </strong>
               .
+              {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (doctorUnavailableReason || doctorUnavailableUntil) && (
+                <span style={{ display: 'block', marginTop: 6, fontSize: 13, fontWeight: 400, color: '#334155' }}>
+                  {doctorUnavailableReason && <span>{doctorUnavailableReason}</span>}
+                  {doctorUnavailableUntil && (
+                    <span style={{ display: 'block', marginTop: 2, color: '#627d98' }}>
+                      Available again at: {new Date(doctorUnavailableUntil).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </span>
+                  )}
+                </span>
+              )}
             </p>
             {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (
               <div style={{ marginTop: 12 }}>
@@ -715,11 +744,9 @@ export const AssistantDashboard = () => {
               {formSuccess && <p className="text-sm" style={{ color: '#2e7d32' }}>{formSuccess}</p>}
               <div className="dialog-actions" style={{ marginTop: 8 }}>
                 <Button type="button" variant="secondary" onClick={goBackToSearch}>Back to search</Button>
-                {!hasTodayVisit && (
-                  <Button type="submit" disabled={referLoading}>
-                    {referLoading ? 'Referring…' : 'Refer to doctor'}
-                  </Button>
-                )}
+                <Button type="submit" disabled={referLoading}>
+                  {referLoading ? 'Referring…' : 'Refer to doctor'}
+                </Button>
               </div>
             </form>
           </Card>

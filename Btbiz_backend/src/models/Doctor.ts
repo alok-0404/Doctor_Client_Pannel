@@ -10,6 +10,10 @@ export interface IDoctor extends Document {
   passwordHash: string;
   role: DoctorRole;
   status: boolean;
+  /** Clinic/hospital location for distance calculation on booking */
+  clinicLatitude?: number;
+  clinicLongitude?: number;
+  clinicAddress?: string;
   createdByDoctorId?: Types.ObjectId;
   availabilityStatus?: AvailabilityStatus;
   unavailableReason?: string;
@@ -37,6 +41,9 @@ const DoctorSchema = new Schema<IDoctor>(
       default: false,
       required: true
     },
+    clinicLatitude: { type: Number },
+    clinicLongitude: { type: Number },
+    clinicAddress: { type: String },
     createdByDoctorId: {
       type: Schema.Types.ObjectId,
       ref: "Doctor"

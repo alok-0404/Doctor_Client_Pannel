@@ -20,7 +20,7 @@ export interface DoctorLoginPayload {
   password: string
 }
 
-export type DoctorRole = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER'
+export type DoctorRole = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER' | 'PHARMACY'
 
 export interface DoctorLoginResponse {
   token: string
@@ -218,6 +218,13 @@ export const appointmentService = {
     return data.appointments
   },
 
+  /** Upcoming (future) appointments for doctor – after today. */
+  async getUpcomingAppointments(): Promise<{ appointments: DoctorAppointmentItem[]; total: number }> {
+    const res = await api.get('/appointments/doctor/upcoming')
+    const data = res.data as { appointments: DoctorAppointmentItem[]; total: number }
+    return { appointments: data.appointments ?? [], total: data.total ?? 0 }
+  },
+
   /** For assistant: linked doctor's today appointments (with patient mobile for calling/messaging). */
   async getAssistantDoctorTodayAppointments(): Promise<{ doctorId: string; appointments: DoctorAppointmentItem[] }> {
     const res = await api.get('/appointments/assistant/doctor-today')
@@ -252,6 +259,7 @@ export interface VisitVitals {
 export interface DiagnosticTestItem {
   _id: string
   testName: string
+  price?: number
   result?: string
   notes?: string
   createdAt?: string
@@ -392,11 +400,13 @@ export const patientService = {
   async addDiagnosticTests(
     patientId: string,
     visitId: string,
-    testNames: string[]
+    tests: Array<{ testName: string; price?: number }>
   ): Promise<void> {
+    // Send both formats: backend may be new (accepts tests[]) or old (accepts testNames[])
+    const testNames = tests.map((t) => t.testName)
     await api.post(
       `/patients/${patientId}/visits/${visitId}/diagnostic-tests`,
-      { testNames }
+      { tests, testNames }
     )
   },
 
@@ -457,6 +467,23 @@ export const patientService = {
     await api.post(`/patients/${patientId}/visit`, payload)
   },
 
+  async referExistingVisit(
+    patientId: string,
+    visitId: string,
+    payload: {
+      reason?: string
+      notes?: string
+      bloodPressureSystolic?: number
+      bloodPressureDiastolic?: number
+      bloodSugarFasting?: number
+      weightKg?: number
+      temperature?: number
+      otherVitalsNotes?: string
+    }
+  ): Promise<void> {
+    await api.post(`/patients/${patientId}/visit/${visitId}/refer`, payload)
+  },
+
   async uploadDocument(
     patientId: string,
     file: File
@@ -481,10 +508,18 @@ export const patientService = {
   },
 }
 
+export interface ConsultantOption {
+  id: string
+  name: string
+  clinicLatitude?: number
+  clinicLongitude?: number
+  clinicAddress?: string
+}
+
 export const publicAppointmentService = {
-  async listConsultants(): Promise<Array<{ id: string; name: string }>> {
+  async listConsultants(): Promise<ConsultantOption[]> {
     const res = await api.get('/public/doctors')
-    const data = res.data as { doctors: Array<{ id: string; name: string }> }
+    const data = res.data as { doctors: ConsultantOption[] }
     return data.doctors
   },
 
@@ -509,6 +544,8 @@ export const publicAppointmentService = {
     patientName?: string
     gender?: string
     address?: string
+    patientLatitude?: number
+    patientLongitude?: number
   }): Promise<{ appointmentId: string; patientId: string }> {
     const res = await api.post('/public/appointments/old', payload)
     return res.data as { appointmentId: string; patientId: string }
@@ -524,6 +561,8 @@ export const publicAppointmentService = {
     address?: string
     appointmentDate: string
     preferredSlot?: string
+    patientLatitude?: number
+    patientLongitude?: number
   }): Promise<{ appointmentId: string; patientId: string }> {
     const res = await api.post('/public/appointments/new', payload)
     return res.data as { appointmentId: string; patientId: string }

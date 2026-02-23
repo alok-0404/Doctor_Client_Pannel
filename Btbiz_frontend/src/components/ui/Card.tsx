@@ -1,13 +1,14 @@
-import type { FC, ReactNode } from 'react'
+import type { FC, ReactNode, CSSProperties } from 'react'
 
 interface CardProps {
   children: ReactNode
   className?: string
+  style?: CSSProperties
 }
 
-export const Card: FC<CardProps> = ({ children, className = '' }) => {
+export const Card: FC<CardProps> = ({ children, className = '', style }) => {
   return (
-    <section className={`ui-card ${className}`}>
+    <section className={`ui-card ${className}`} style={style}>
       {children}
     </section>
   )

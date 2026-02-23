@@ -10,6 +10,7 @@ import {
   getDiagnosticTestReportFile,
   getDocumentFile,
   getPatientFullHistory,
+  recordVitalsAndReferForExistingVisit,
   searchPatientByMobile,
   updatePatient,
   uploadDiagnosticTestReport,
@@ -34,6 +35,9 @@ router.patch("/:patientId", updatePatient);
 
 // POST /patients/:patientId/visit - create visit (vitals, reason, notes; assistant refers to their doctor)
 router.post("/:patientId/visit", createVisit);
+
+// POST /patients/:patientId/visit/:visitId/refer - update existing visit vitals and create assistant referral notification
+router.post("/:patientId/visit/:visitId/refer", recordVitalsAndReferForExistingVisit);
 
 // POST /patients/:patientId/documents - upload report/prescription file
 router.post("/:patientId/documents", upload.single("file"), uploadPatientDocument);
