@@ -54,7 +54,7 @@ const startServer = async (): Promise<void> => {
 
   setIo(io);
 
-  server.listen(env.port, "localhost", () => {
+  server.listen(env.port, () => {
     // eslint-disable-next-line no-console
     console.log(`Server listening on port ${env.port}`);
   });

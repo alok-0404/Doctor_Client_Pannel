@@ -53,9 +53,14 @@ args = "cd Btbiz_backend && npm run dev"
 waitForPort = 3000
 
 [[ports]]
+localPort = 3000
+externalPort = 3000
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 3000
-externalPort = 3000
+[deployment]
+deploymentTarget = "vm"
+run = ["bash", "-c", "cd Btbiz_backend && node dist/server.js & cd Btbiz_frontend && npx serve -s dist -l 5000"]
+build = ["bash", "-c", "cd Btbiz_backend && npm install && npm run build && cd ../Btbiz_frontend && npm install && npm run build"]
