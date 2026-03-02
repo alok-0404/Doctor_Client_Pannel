@@ -1,0 +1,10 @@
+{
+  "name": "btbiz-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "cd Btbiz_frontend && npm install && cd ../Btbiz_backend && npm install",
+    "build": "cd Btbiz_frontend && VITE_API_BASE_URL= npm run build && cd ../Btbiz_backend && npm run build",
+    "start": "cd Btbiz_backend && NODE_ENV=production PORT=5000 node dist/server.js"
+  }
+}
