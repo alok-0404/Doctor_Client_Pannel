@@ -62,5 +62,5 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "vm"
-run = ["bash", "-c", "cd Btbiz_backend && node dist/server.js & cd Btbiz_frontend && npx serve -s dist -l 5000"]
-build = ["bash", "-c", "cd Btbiz_backend && npm install && npm run build && cd ../Btbiz_frontend && npm install && npm run build"]
+run = ["bash", "-c", "cd Btbiz_backend && NODE_ENV=production PORT=5000 node dist/server.js"]
+build = ["bash", "-c", "cd Btbiz_frontend && npm install && VITE_API_BASE_URL= npm run build && cd ../Btbiz_backend && npm install && npm run build"]

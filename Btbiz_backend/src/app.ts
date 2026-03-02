@@ -1,3 +1,4 @@
+import path from "path";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -68,10 +69,17 @@ app.use("/public", publicRoutes);
 app.use("/appointments", appointmentRoutes);
 app.use("/pharmacy", pharmacyRoutes);
 
-// Fallback 404
-app.use((_req, res) => {
-  res.status(404).json({ message: "Route not found" });
-});
+if (process.env.NODE_ENV === "production") {
+  const frontendDist = path.join(__dirname, "../../Btbiz_frontend/dist");
+  app.use(express.static(frontendDist));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+} else {
+  app.use((_req, res) => {
+    res.status(404).json({ message: "Route not found" });
+  });
+}
 
 // Error handler so 500 responses still have CORS and JSON
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
