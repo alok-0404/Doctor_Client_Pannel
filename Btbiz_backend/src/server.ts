@@ -20,7 +20,11 @@ const startServer = async (): Promise<void> => {
           !origin ||
           origin === "http://localhost:3000" ||
           origin === "http://localhost:5173" ||
-          origin.endsWith(".trycloudflare.com")
+          origin === "http://localhost:5000" ||
+          origin.endsWith(".trycloudflare.com") ||
+          origin.endsWith(".replit.dev") ||
+          origin.endsWith(".replit.app") ||
+          origin.endsWith(".repl.co")
         ) {
           callback(null, true);
         } else {
@@ -50,7 +54,7 @@ const startServer = async (): Promise<void> => {
 
   setIo(io);
 
-  server.listen(env.port, () => {
+  server.listen(env.port, "localhost", () => {
     // eslint-disable-next-line no-console
     console.log(`Server listening on port ${env.port}`);
   });

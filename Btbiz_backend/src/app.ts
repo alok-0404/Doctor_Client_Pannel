@@ -23,6 +23,7 @@ function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   if (origin.endsWith(".trycloudflare.com")) return true;
+  if (origin.endsWith(".replit.dev") || origin.endsWith(".replit.app") || origin.endsWith(".repl.co")) return true;
   return false;
 }
 
