@@ -29,7 +29,7 @@ export const PatientSearch = () => {
     try {
       const patient = await patientService.searchByMobile(digits)
       if (patient) {
-        navigate(`/patients/${patient.id}`)
+        navigate(`/patient/${patient.id}`)
       } else {
         setNotFound(true)
       }

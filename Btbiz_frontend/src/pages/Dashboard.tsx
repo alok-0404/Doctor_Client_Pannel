@@ -196,7 +196,7 @@ export const Dashboard = () => {
         // ignore
       }
     }
-    navigate(`/patients/${n.patientId}`)
+    navigate(`/patient/${n.patientId}`)
   }
 
   const handleCreateAssistant = async (e: React.FormEvent) => {
@@ -410,8 +410,8 @@ export const Dashboard = () => {
                               cursor: 'pointer',
                               border: '1px solid transparent',
                             }}
-                            onClick={() => navigate(`/patients/${a.patientId}`)}
-                            onKeyDown={(e) => e.key === 'Enter' && navigate(`/patients/${a.patientId}`)}
+                            onClick={() => navigate(`/patient/${a.patientId}`)}
+                            onKeyDown={(e) => e.key === 'Enter' && navigate(`/patient/${a.patientId}`)}
                             role="button"
                             tabIndex={0}
                           >
@@ -891,7 +891,7 @@ export const Dashboard = () => {
           </div>
           <button
             type="button"
-            onClick={() => { window.location.href = '/patients/search' }}
+            onClick={() => { window.location.href = '/search-patients' }}
             className="ui-button ui-button-primary dashboard-search-button"
           >
             Open search workspace

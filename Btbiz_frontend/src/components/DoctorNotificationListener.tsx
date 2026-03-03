@@ -68,7 +68,7 @@ export const DoctorNotificationListener = () => {
         // ignore
       }
     }
-    navigate(`/patients/${patientId}`, { replace: true })
+    navigate(`/patient/${patientId}`, { replace: true })
   }
 
   const handleDismiss = async () => {

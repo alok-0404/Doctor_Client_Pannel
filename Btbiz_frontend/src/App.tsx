@@ -99,7 +99,7 @@ export const App = () => {
         )}
       />
       <Route
-        path="/patients/search"
+        path="/search-patients"
         element={(
           <ProtectedRoute allowedRoles={['DOCTOR']}>
             <PatientSearch />
@@ -107,7 +107,7 @@ export const App = () => {
         )}
       />
       <Route
-        path="/patients/:id"
+        path="/patient/:id"
         element={(
           <ProtectedRoute allowedRoles={['DOCTOR']}>
             <PatientDetails />
