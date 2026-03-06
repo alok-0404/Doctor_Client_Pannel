@@ -107,11 +107,15 @@ export const loginDoctor = async (
 
   const doctor = await Doctor.findOne({ email });
   if (!doctor) {
+    // eslint-disable-next-line no-console
+    console.error("loginDoctor: doctor not found for email", email);
     throw new Error("INVALID_CREDENTIALS");
   }
 
   const isPasswordValid = await bcrypt.compare(password, doctor.passwordHash);
   if (!isPasswordValid) {
+    // eslint-disable-next-line no-console
+    console.error("loginDoctor: invalid password for email", email);
     throw new Error("INVALID_CREDENTIALS");
   }
 

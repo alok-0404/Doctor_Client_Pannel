@@ -8,7 +8,6 @@ const navLinks = [
   { label: 'Contact', to: '#contact' },
   { label: 'Book Appointment', to: '/book-appointment' },
 ]
-// Staff Login intentionally not linked here - only staff get /login URL privately
 
 export const PublicHome = () => {
   return (
@@ -19,13 +18,18 @@ export const PublicHome = () => {
           <Link to="/" className="public-logo">
             MEDIGRAPH
           </Link>
-          <nav className="public-nav" aria-label="Main">
-            {navLinks.map((item) => (
-              <Link key={item.to} to={item.to} className="public-nav-link">
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <div className="public-header-right">
+            <nav className="public-nav" aria-label="Main">
+              {navLinks.map((item) => (
+                <Link key={item.to} to={item.to} className="public-nav-link">
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+            <Link to="/portal" className="public-nav-staff">
+              For staff only
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -123,6 +127,12 @@ export const PublicHome = () => {
         .public-logo:hover {
           color: #1e40af;
         }
+        .public-header-right {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
         .public-nav {
           display: flex;
           align-items: center;
@@ -140,6 +150,21 @@ export const PublicHome = () => {
         .public-nav-link:hover {
           color: #0f172a;
           background: #f1f5f9;
+        }
+        .public-nav-staff {
+          padding: 8px 16px;
+          border-radius: 9999px;
+          background: #0f172a;
+          color: #fff;
+          text-decoration: none;
+          font-size: 0.9rem;
+          font-weight: 600;
+          box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
+          white-space: nowrap;
+        }
+        .public-nav-staff:hover {
+          background: #1e40af;
+          color: #fff;
         }
         .public-main {
           flex: 1;
