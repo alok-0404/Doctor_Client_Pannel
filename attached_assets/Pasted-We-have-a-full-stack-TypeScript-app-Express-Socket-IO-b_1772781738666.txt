@@ -1,0 +1,35 @@
+We have a full‑stack TypeScript app (Express + Socket.IO backend, React + Vite frontend).
+In local development, doctor referral live notifications work correctly via Socket.IO, but on the live Replit deployment the doctor does not receive the real‑time notification banner when an assistant refers a patient.
+1) Environment variable for API base URL (Vite)
+Frontend file Btbiz_frontend/src/services/api.ts uses:
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+and the Socket.IO client (Btbiz_frontend/src/components/DoctorNotificationListener.tsx) does:
+socket = io(API_BASE_URL, { query: { doctorId }, transports: ['websocket', 'polling'] })
+Currently, our .env in the frontend has:
+VITE_API_BASE_URL=http://localhost:3000
+This is correct for local development but wrong for the live deployment.
+On Replit, this should be set to the public backend URL, e.g.:
+VITE_API_BASE_URL=https://<my-replit-backend-url>
+or, if the frontend is served by the same Express app, to the same origin as the browser sees (the main site URL).
+Could you please:
+Confirm what URL the backend is exposed on in this Replit setup, and
+Configure VITE_API_BASE_URL for the frontend build to point to that URL?
+Without this, the Socket.IO client in production will keep trying to connect to http://localhost:3000, which obviously fails from the browser.
+2) CORS / origin configuration for HTTP and Socket.IO
+Backend HTTP CORS is configured in Btbiz_backend/src/app.ts:
+const allowedOrigins = [  "http://localhost:3000",  "http://localhost:5173",  "https://wit-true-destinations-variations.trycloudflare.com",];
+And Socket.IO CORS is configured in Btbiz_backend/src/server.ts:
+const io = new SocketServer(server, {  cors: {    origin: (origin, callback) => {      if (        !origin ||        origin === "http://localhost:3000" ||        origin === "http://localhost:5173" ||        origin === "http://localhost:5000" ||        origin.endsWith(".trycloudflare.com") ||        origin.endsWith(".replit.dev") ||        origin.endsWith(".replit.app") ||        origin.endsWith(".repl.co")      ) {        callback(null, true);      } else {        callback(new Error("Not allowed by CORS"), false);      }    },  },});
+For production, we need to make sure that the exact origin of the deployed frontend (e.g. https://<my‑app>.<user>.repl.co or custom domain) is allowed by both HTTP CORS and Socket.IO CORS.
+Concretely, we need:
+That origin added to allowedOrigins in app.ts, and
+If it does not match the existing *.repl.co / *.replit.app patterns, it should also be allowed in the Socket.IO origin check in server.ts.
+Could you please verify that the live frontend origin is being accepted by CORS for both HTTP and Socket.IO, and adjust the configuration if needed?
+3) Build / deployment sequence
+After updating VITE_API_BASE_URL and CORS, the correct sequence should be:
+Build the frontend in Btbiz_frontend (npm run build with the correct VITE_API_BASE_URL in the environment).
+Ensure the built files are available at Btbiz_frontend/dist (the backend serves this in production).
+Run the backend (Btbiz_backend) so that:
+Express serves the built React app from dist, and
+Socket.IO is available on the same origin as configured in VITE_API_BASE_URL.
+If you can confirm that these environment variables and CORS settings are applied correctly on Replit, the real‑time doctor referral notifications should start working on the live site just like they do locally.

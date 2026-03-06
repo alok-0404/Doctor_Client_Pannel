@@ -17,7 +17,7 @@ export const DoctorNotificationListener = () => {
   const isDoctor = role === 'DOCTOR'
 
   useEffect(() => {
-    if (!isDoctor || !API_BASE_URL) return
+    if (!isDoctor) return
 
     let socket: ReturnType<typeof io> | null = null
     let mounted = true
@@ -28,7 +28,8 @@ export const DoctorNotificationListener = () => {
         const doctorId = doctor?.id
         if (!doctorId || !mounted) return
 
-        socket = io(API_BASE_URL, {
+        const socketUrl = API_BASE_URL || window.location.origin
+        socket = io(socketUrl, {
           query: { doctorId },
           transports: ['websocket', 'polling']
         })

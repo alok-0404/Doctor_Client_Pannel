@@ -378,7 +378,6 @@ export const AssistantDashboard = () => {
 
   // Socket: real-time doctor availability updates for assistant
   useEffect(() => {
-    if (!API_BASE_URL) return
     let socket: ReturnType<typeof io> | null = null
     let mounted = true
     const connect = async () => {
@@ -386,7 +385,8 @@ export const AssistantDashboard = () => {
         const { doctor } = await authService.getProfile()
         const userId = doctor?.id
         if (!userId || !mounted) return
-        socket = io(API_BASE_URL, {
+        const socketUrl = API_BASE_URL || window.location.origin
+        socket = io(socketUrl, {
           query: { doctorId: userId },
           transports: ['websocket', 'polling']
         })
