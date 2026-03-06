@@ -42,7 +42,20 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https://images.pexels.com"],
+        connectSrc: ["'self'", "wss:", "ws:"],
+        fontSrc: ["'self'", "data:"],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: (origin, callback) => {
