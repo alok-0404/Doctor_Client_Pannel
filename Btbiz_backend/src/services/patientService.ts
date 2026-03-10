@@ -9,7 +9,18 @@ import { Doctor } from "../models/Doctor";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
 
 export const findPatientByMobile = async (mobile: string) => {
-  return Patient.findOne({ mobileNumber: mobile });
+  // Allow matching both raw 10-digit numbers and normalized forms like +91xxxxxxxxxx
+  const digits = mobile.replace(/\D/g, "");
+  const last10 = digits.slice(-10);
+
+  const candidates = new Set<string>();
+  if (mobile) candidates.add(mobile);
+  if (last10) {
+    candidates.add(last10);
+    candidates.add(`+91${last10}`);
+  }
+
+  return Patient.findOne({ mobileNumber: { $in: Array.from(candidates) } });
 };
 
 export interface CreatePatientPayload {
