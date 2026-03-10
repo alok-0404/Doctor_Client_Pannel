@@ -120,8 +120,6 @@ export const AssistantDashboard = () => {
 
       if (found) {
         // For prefill from bot/UI – vitals will always be filled manually by assistant.
-        setHasTodayVisit(false)
-        setTodayVisitId(null)
         setDiseaseReason('')
         setNotesForDoctor('')
         setBpSystolic('')
@@ -142,6 +140,27 @@ export const AssistantDashboard = () => {
         setEmergencyName(found.emergencyContactName ?? '')
         setEmergencyPhone(found.emergencyContactPhone ?? '')
         setStep('checkin')
+
+        // Detect if there is already a visit for today (e.g. created from online/bot appointment)
+        // so that we UPDATE that visit (referExistingVisit) instead of creating a duplicate.
+        try {
+          const history = await patientService.getFullHistory(found.id)
+          const today = new Date()
+          const todayVisits = (history.visits ?? []).filter((v) => {
+            const d = new Date(v.visitDate)
+            return (
+              d.getFullYear() === today.getFullYear() &&
+              d.getMonth() === today.getMonth() &&
+              d.getDate() === today.getDate()
+            )
+          })
+          const todayVisit = todayVisits[0]
+          setHasTodayVisit(Boolean(todayVisit))
+          setTodayVisitId(todayVisit?._id ?? null)
+        } catch {
+          setHasTodayVisit(false)
+          setTodayVisitId(null)
+        }
       } else {
         setMobileNumber(digits)
         setFirstName('')
