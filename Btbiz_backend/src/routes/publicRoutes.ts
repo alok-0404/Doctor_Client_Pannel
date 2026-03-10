@@ -13,6 +13,36 @@ import { getIo } from "../socket";
 
 const router = Router();
 
+/** Combine appointmentDate (YYYY-MM-DD) and preferredSlot text into a Date with time.
+ *  If preferredSlot can't be parsed, falls back to midnight (original behaviour).
+ */
+function buildVisitDate(appointmentDate: string, preferredSlot?: string): Date {
+  const visitDate = new Date(appointmentDate);
+  if (!preferredSlot) {
+    return visitDate;
+  }
+
+  const lower = preferredSlot.toLowerCase();
+  // Try to extract first time like "10", "10:30", "10am", "10:30 pm" from the slot string
+  const match = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!match) {
+    return visitDate;
+  }
+
+  let hour = parseInt(match[1], 10);
+  const minute = match[2] ? parseInt(match[2], 10) : 0;
+  const suffix = match[3];
+
+  if (suffix === "pm" && hour < 12) {
+    hour += 12;
+  } else if (suffix === "am" && hour === 12) {
+    hour = 0;
+  }
+
+  visitDate.setHours(hour, minute, 0, 0);
+  return visitDate;
+}
+
 // GET /public/doctors - list consultants for appointment dropdown (with clinic location for distance)
 router.get("/doctors", async (_req, res) => {
   try {
@@ -109,7 +139,7 @@ router.post("/appointments/old", async (req, res) => {
       await updatePatientService((patient as any)._id.toString(), updatePayload);
     }
 
-    const visitDate = new Date(body.appointmentDate);
+    const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
     const notesParts = [`OPD No: ${body.opdNumber}`];
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
 
@@ -188,7 +218,7 @@ router.post("/appointments/new", async (req, res) => {
       }
     }
 
-    const visitDate = new Date(body.appointmentDate);
+    const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
     const notesParts = [`City: ${body.city || ""}`];
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
 
