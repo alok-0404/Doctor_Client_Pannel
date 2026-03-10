@@ -104,77 +104,32 @@ export const AssistantDashboard = () => {
     }
     setSearchLoading(true)
     try {
-      const found = await patientService.searchByMobile(digits)
-      if (found) {
-        // Load today's visit info to decide whether this is pre‑doctor (check‑in) or post‑doctor (upload only)
-        try {
-          const history = await patientService.getFullHistory(found.id)
-          const today = new Date()
-          const todayVisits = (history.visits ?? []).filter((v) => {
-            const d = new Date(v.visitDate)
-            return (
-              d.getFullYear() === today.getFullYear() &&
-              d.getMonth() === today.getMonth() &&
-              d.getDate() === today.getDate()
-            )
-          })
-          const todayVisit = todayVisits[0]
-          setHasTodayVisit(Boolean(todayVisit))
-          setTodayVisitId(todayVisit?._id ?? null)
-
-          // If there is a visit today (patient already saw the doctor),
-          // pre-fill vitals and notes with the recorded values so assistant sees them.
-          if (todayVisit) {
-            setDiseaseReason(todayVisit.reason ?? '')
-            setNotesForDoctor(todayVisit.notes ?? '')
-            setBpSystolic(
-              todayVisit.bloodPressureSystolic != null
-                ? String(todayVisit.bloodPressureSystolic)
-                : ''
-            )
-            setBpDiastolic(
-              todayVisit.bloodPressureDiastolic != null
-                ? String(todayVisit.bloodPressureDiastolic)
-                : ''
-            )
-            setBloodSugar(
-              todayVisit.bloodSugarFasting != null
-                ? String(todayVisit.bloodSugarFasting)
-                : ''
-            )
-            setWeightKg(
-              todayVisit.weightKg != null
-                ? String(todayVisit.weightKg)
-                : ''
-            )
-            setTemperature(
-              todayVisit.temperature != null
-                ? String(todayVisit.temperature)
-                : ''
-            )
-            setOtherVitalsNotes(todayVisit.otherVitalsNotes ?? '')
-          } else {
-            setDiseaseReason('')
-            setNotesForDoctor('')
-            setBpSystolic('')
-            setBpDiastolic('')
-            setBloodSugar('')
-            setWeightKg('')
-            setTemperature('')
-            setOtherVitalsNotes('')
-          }
-        } catch {
-          setHasTodayVisit(false)
-          setTodayVisitId(null)
-          setDiseaseReason('')
-          setNotesForDoctor('')
-          setBpSystolic('')
-          setBpDiastolic('')
-          setBloodSugar('')
-          setWeightKg('')
-          setTemperature('')
-          setOtherVitalsNotes('')
+      // Use assistant-specific prefill API so bot-created patients/appointments also work.
+      let found: PatientSummary | null = null
+      try {
+        const prefill = await appointmentService.getAssistantPatientPrefill(digits)
+        found = prefill.patient
+        // Optionally we could use prefill.latestVisit for display, but vitals remain manual.
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          found = null
+        } else {
+          throw err
         }
+      }
+
+      if (found) {
+        // For prefill from bot/UI – vitals will always be filled manually by assistant.
+        setHasTodayVisit(false)
+        setTodayVisitId(null)
+        setDiseaseReason('')
+        setNotesForDoctor('')
+        setBpSystolic('')
+        setBpDiastolic('')
+        setBloodSugar('')
+        setWeightKg('')
+        setTemperature('')
+        setOtherVitalsNotes('')
 
         setPatient(found)
         setPatientId(found.id)

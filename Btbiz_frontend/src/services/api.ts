@@ -211,6 +211,16 @@ export const notificationService = {
   },
 }
 
+export interface AssistantPatientPrefill {
+  patient: PatientSummary
+  latestVisit: {
+    id: string
+    visitDate: string
+    reason?: string
+    notes?: string
+  } | null
+}
+
 export const appointmentService = {
   async getTodayAppointments(): Promise<DoctorAppointmentItem[]> {
     const res = await api.get('/appointments/doctor/today')
@@ -230,6 +240,12 @@ export const appointmentService = {
     const res = await api.get('/appointments/assistant/doctor-today')
     const data = res.data as { doctorId: string; appointments: DoctorAppointmentItem[] }
     return data
+  },
+
+  /** For assistant check-in desk: prefill patient + latest visit (works for bot-created appointments too). */
+  async getAssistantPatientPrefill(mobile: string): Promise<AssistantPatientPrefill> {
+    const res = await api.get('/appointments/assistant/patient-prefill', { params: { mobile } })
+    return res.data as AssistantPatientPrefill
   },
 }
 

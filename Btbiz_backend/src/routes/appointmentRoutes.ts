@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import { authenticateDoctor } from "../middleware/authMiddleware";
 import { Doctor } from "../models/Doctor";
 import { Visit } from "../models/Visit";
+import { Patient } from "../models/Patient";
+import { findPatientByMobile } from "../services/patientService";
 
 const router = Router();
 
@@ -134,6 +136,79 @@ router.get("/assistant/doctor-today", async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("appointments/assistant/doctor-today error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /appointments/assistant/patient-prefill?mobile=...
+// For assistant check-in desk: fetch patient basic info + latest visit for that doctor's clinic.
+router.get("/assistant/patient-prefill", async (req, res) => {
+  try {
+    if (!req.doctor?._id) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    // Allow both DOCTOR and ASSISTANT to use this endpoint.
+    let doctorId: string | undefined;
+    if (req.doctor.role === "DOCTOR") {
+      doctorId = req.doctor._id.toString();
+    } else if (req.doctor.role === "ASSISTANT") {
+      const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+      doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
+    }
+
+    if (!doctorId) {
+      res.status(400).json({ message: "Assistant is not linked to a doctor" });
+      return;
+    }
+
+    const mobile = (req.query.mobile as string | undefined)?.trim();
+    if (!mobile) {
+      res.status(400).json({ message: "Query parameter 'mobile' is required" });
+      return;
+    }
+
+    const patient = await findPatientByMobile(mobile);
+    if (!patient) {
+      res.status(404).json({ message: "Patient not found" });
+      return;
+    }
+
+    // Latest visit for this patient with this doctor (any date)
+    const latestVisit = await Visit.findOne({
+      patient: patient._id,
+      doctor: new mongoose.Types.ObjectId(doctorId)
+    })
+      .sort({ visitDate: -1 })
+      .lean();
+
+    res.status(200).json({
+      patient: {
+        id: patient._id.toString(),
+        firstName: patient.firstName,
+        lastName: patient.lastName,
+        mobileNumber: patient.mobileNumber,
+        gender: patient.gender,
+        dateOfBirth: patient.dateOfBirth,
+        address: patient.address,
+        bloodGroup: patient.bloodGroup,
+        previousHealthHistory: patient.previousHealthHistory,
+        emergencyContactName: patient.emergencyContactName,
+        emergencyContactPhone: patient.emergencyContactPhone
+      },
+      latestVisit: latestVisit
+        ? {
+            id: (latestVisit as any)._id.toString(),
+            visitDate: latestVisit.visitDate,
+            reason: latestVisit.reason,
+            notes: latestVisit.notes
+          }
+        : null
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("appointments/assistant/patient-prefill error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
