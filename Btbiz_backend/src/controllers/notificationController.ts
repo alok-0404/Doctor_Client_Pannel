@@ -24,6 +24,7 @@ export const getNotifications = async (
     })
       .sort({ createdAt: -1 })
       .limit(50)
+      .populate("patient", "mobileNumber gender address emergencyContactName emergencyContactPhone")
       .lean();
 
     res.status(200).json({
@@ -31,6 +32,11 @@ export const getNotifications = async (
         id: (n._id as mongoose.Types.ObjectId).toString(),
         patientId: (n.patient as mongoose.Types.ObjectId).toString(),
         patientName: n.patientName,
+        patientMobile: (n as any)?.patient?.mobileNumber ?? undefined,
+        emergencyContactName: (n as any)?.patient?.emergencyContactName ?? undefined,
+        emergencyContactPhone: (n as any)?.patient?.emergencyContactPhone ?? undefined,
+        gender: (n as any)?.patient?.gender ?? undefined,
+        address: (n as any)?.patient?.address ?? undefined,
         visitId: (n.visit as mongoose.Types.ObjectId).toString(),
         status: n.status,
         source: n.source,

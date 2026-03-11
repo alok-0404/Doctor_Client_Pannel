@@ -642,11 +642,20 @@ export const Dashboard = () => {
                             gap: 8,
                           }}
                         >
-                          <span style={{ fontWeight: n.status === 'unread' ? 600 : 400 }}>
-                            {n.status === 'unread' && (
-                              <span style={{ marginRight: 6, color: '#0d47a1' }}>●</span>
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ fontWeight: n.status === 'unread' ? 600 : 400, display: 'block' }}>
+                              {n.status === 'unread' && (
+                                <span style={{ marginRight: 6, color: '#0d47a1' }}>●</span>
+                              )}
+                              {n.patientName}
+                            </span>
+                            {(n.patientMobile || n.emergencyContactPhone) && (
+                              <span style={{ display: 'block', marginTop: 2, fontSize: 12, color: '#627d98' }}>
+                                {n.patientMobile ? `Mobile: ${n.patientMobile}` : ''}
+                                {n.patientMobile && n.emergencyContactPhone ? ' · ' : ''}
+                                {n.emergencyContactPhone ? `Emergency: ${n.emergencyContactPhone}` : ''}
+                              </span>
                             )}
-                            {n.patientName}
                           </span>
                           <span style={{ fontSize: 12, color: '#627d98' }}>
                             {new Date(n.createdAt).toLocaleString('en-IN', {

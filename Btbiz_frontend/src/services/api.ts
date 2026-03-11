@@ -180,6 +180,11 @@ export interface DoctorNotificationItem {
   id: string
   patientId: string
   patientName: string
+  patientMobile?: string
+  emergencyContactName?: string
+  emergencyContactPhone?: string
+  gender?: string
+  address?: string
   visitId: string
   status: 'unread' | 'dismissed' | 'read'
   source: 'ASSISTANT_REFERRAL' | 'ONLINE_APPOINTMENT'
