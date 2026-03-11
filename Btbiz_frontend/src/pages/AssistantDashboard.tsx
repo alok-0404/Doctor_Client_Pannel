@@ -106,8 +106,9 @@ export const AssistantDashboard = () => {
     try {
       // Use assistant-specific prefill API so bot-created patients/appointments also work.
       let found: PatientSummary | null = null
+      let prefill: Awaited<ReturnType<typeof appointmentService.getAssistantPatientPrefill>> | null = null
       try {
-        const prefill = await appointmentService.getAssistantPatientPrefill(digits)
+        prefill = await appointmentService.getAssistantPatientPrefill(digits)
         found = prefill.patient
         // Optionally we could use prefill.latestVisit for display, but vitals remain manual.
       } catch (err: any) {
@@ -144,7 +145,7 @@ export const AssistantDashboard = () => {
         // Detect if there is already a visit for today with the assistant's linked doctor.
         // We use the assistant-specific prefill latestVisit (already filtered by that doctor),
         // to avoid 403 errors when the patient has visits with other doctors.
-        const latestVisit = prefill.latestVisit
+        const latestVisit = prefill?.latestVisit ?? null
         if (latestVisit) {
           const today = new Date()
           const d = new Date(latestVisit.visitDate)
