@@ -141,23 +141,25 @@ export const AssistantDashboard = () => {
         setEmergencyPhone(found.emergencyContactPhone ?? '')
         setStep('checkin')
 
-        // Detect if there is already a visit for today (e.g. created from online/bot appointment)
-        // so that we UPDATE that visit (referExistingVisit) instead of creating a duplicate.
-        try {
-          const history = await patientService.getFullHistory(found.id)
+        // Detect if there is already a visit for today with the assistant's linked doctor.
+        // We use the assistant-specific prefill latestVisit (already filtered by that doctor),
+        // to avoid 403 errors when the patient has visits with other doctors.
+        const latestVisit = prefill.latestVisit
+        if (latestVisit) {
           const today = new Date()
-          const todayVisits = (history.visits ?? []).filter((v) => {
-            const d = new Date(v.visitDate)
-            return (
-              d.getFullYear() === today.getFullYear() &&
-              d.getMonth() === today.getMonth() &&
-              d.getDate() === today.getDate()
-            )
-          })
-          const todayVisit = todayVisits[0]
-          setHasTodayVisit(Boolean(todayVisit))
-          setTodayVisitId(todayVisit?._id ?? null)
-        } catch {
+          const d = new Date(latestVisit.visitDate)
+          const isToday =
+            d.getFullYear() === today.getFullYear() &&
+            d.getMonth() === today.getMonth() &&
+            d.getDate() === today.getDate()
+          if (isToday) {
+            setHasTodayVisit(true)
+            setTodayVisitId(latestVisit.id)
+          } else {
+            setHasTodayVisit(false)
+            setTodayVisitId(null)
+          }
+        } else {
           setHasTodayVisit(false)
           setTodayVisitId(null)
         }
