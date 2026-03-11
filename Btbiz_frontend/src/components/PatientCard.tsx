@@ -174,6 +174,15 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                 <dt>Mobile</dt>
                 <dd>{data.mobile}</dd>
               </div>
+              {data.emergencyContact && (
+                <div className="patient-summary-row">
+                  <dt>Emergency</dt>
+                  <dd>
+                    {data.emergencyContact.name}
+                    {` • ${data.emergencyContact.phone}`}
+                  </dd>
+                </div>
+              )}
               {data.heightCm && data.weightKg && (
                 <div className="patient-summary-row">
                   <dt>Height / Weight</dt>
