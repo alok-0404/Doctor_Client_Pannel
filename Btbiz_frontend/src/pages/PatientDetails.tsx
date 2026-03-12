@@ -108,8 +108,9 @@ export const PatientDetails = () => {
           gender: p.gender === 'MALE' ? 'Male' : p.gender === 'FEMALE' ? 'Female' : p.gender ?? '—',
           mobile: p.mobileNumber ?? '',
           lastVisit,
-          basicInfo: p.previousHealthHistory,
-          bloodGroup: p.bloodGroup,
+          address: p.address ?? undefined,
+          basicInfo: p.previousHealthHistory ?? undefined,
+          bloodGroup: p.bloodGroup ?? undefined,
           emergencyContact:
             p.emergencyContactName || p.emergencyContactPhone
               ? {

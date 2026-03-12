@@ -97,6 +97,7 @@ export interface PatientDetailsData {
   gender: string
   mobile: string
   lastVisit?: string
+  address?: string
   basicInfo?: string
   heightCm?: number
   weightKg?: number
@@ -128,8 +129,8 @@ type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | '
 
 export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
-    patient: false,
-    visitHistory: false,
+    patient: true,
+    visitHistory: true,
     prescriptions: false,
     medicines: false,
     pharmacyDispensations: false,
@@ -181,6 +182,12 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                     {data.emergencyContact.name}
                     {` • ${data.emergencyContact.phone}`}
                   </dd>
+                </div>
+              )}
+              {data.address && (
+                <div className="patient-summary-row">
+                  <dt>Address</dt>
+                  <dd>{data.address}</dd>
                 </div>
               )}
               {data.heightCm && data.weightKg && (
