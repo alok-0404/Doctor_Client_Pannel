@@ -120,16 +120,7 @@ export const AssistantDashboard = () => {
       }
 
       if (found) {
-        // For prefill from bot/UI – vitals will always be filled manually by assistant.
-        setDiseaseReason('')
-        setNotesForDoctor('')
-        setBpSystolic('')
-        setBpDiastolic('')
-        setBloodSugar('')
-        setWeightKg('')
-        setTemperature('')
-        setOtherVitalsNotes('')
-
+        // Prefill demographics from patient record
         setPatient(found)
         setPatientId(found.id)
         setFirstName(found.firstName)
@@ -144,7 +135,7 @@ export const AssistantDashboard = () => {
 
         // Detect if there is already a visit for today with the assistant's linked doctor.
         // We use the assistant-specific prefill latestVisit (already filtered by that doctor),
-        // to avoid 403 errors when the patient has visits with other doctors.
+        // and then fetch full history only to prefill vitals for that specific visit.
         const latestVisit = prefill?.latestVisit ?? null
         if (latestVisit) {
           const today = new Date()
@@ -156,13 +147,87 @@ export const AssistantDashboard = () => {
           if (isToday) {
             setHasTodayVisit(true)
             setTodayVisitId(latestVisit.id)
+
+            // Try to prefill vitals from today's visit so assistant doesn't have to retype
+            try {
+              const history = await patientService.getFullHistory(found.id)
+              const todaysVisit = (history.visits as any[] | undefined)?.find(
+                (v) => v._id === latestVisit.id
+              )
+              if (todaysVisit) {
+                setDiseaseReason(todaysVisit.reason ?? '')
+                setNotesForDoctor(todaysVisit.notes ?? '')
+                setBpSystolic(
+                  typeof todaysVisit.bloodPressureSystolic === 'number'
+                    ? String(todaysVisit.bloodPressureSystolic)
+                    : ''
+                )
+                setBpDiastolic(
+                  typeof todaysVisit.bloodPressureDiastolic === 'number'
+                    ? String(todaysVisit.bloodPressureDiastolic)
+                    : ''
+                )
+                setBloodSugar(
+                  typeof todaysVisit.bloodSugarFasting === 'number'
+                    ? String(todaysVisit.bloodSugarFasting)
+                    : ''
+                )
+                setWeightKg(
+                  typeof todaysVisit.weightKg === 'number'
+                    ? String(todaysVisit.weightKg)
+                    : ''
+                )
+                setTemperature(
+                  typeof todaysVisit.temperature === 'number'
+                    ? String(todaysVisit.temperature)
+                    : ''
+                )
+                setOtherVitalsNotes(todaysVisit.otherVitalsNotes ?? '')
+              } else {
+                // No matching visit details – start with blank vitals
+                setDiseaseReason('')
+                setNotesForDoctor('')
+                setBpSystolic('')
+                setBpDiastolic('')
+                setBloodSugar('')
+                setWeightKg('')
+                setTemperature('')
+                setOtherVitalsNotes('')
+              }
+            } catch {
+              // If history load fails, keep vitals blank so assistant can enter fresh values
+              setDiseaseReason('')
+              setNotesForDoctor('')
+              setBpSystolic('')
+              setBpDiastolic('')
+              setBloodSugar('')
+              setWeightKg('')
+              setTemperature('')
+              setOtherVitalsNotes('')
+            }
           } else {
             setHasTodayVisit(false)
             setTodayVisitId(null)
+            setDiseaseReason('')
+            setNotesForDoctor('')
+            setBpSystolic('')
+            setBpDiastolic('')
+            setBloodSugar('')
+            setWeightKg('')
+            setTemperature('')
+            setOtherVitalsNotes('')
           }
         } else {
           setHasTodayVisit(false)
           setTodayVisitId(null)
+          setDiseaseReason('')
+          setNotesForDoctor('')
+          setBpSystolic('')
+          setBpDiastolic('')
+          setBloodSugar('')
+          setWeightKg('')
+          setTemperature('')
+          setOtherVitalsNotes('')
         }
       } else {
         setMobileNumber(digits)
