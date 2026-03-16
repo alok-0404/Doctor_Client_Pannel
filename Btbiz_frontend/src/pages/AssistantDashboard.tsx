@@ -10,6 +10,13 @@ import { API_BASE_URL, authService, patientService, appointmentService, type Pat
 type Step = 'search' | 'new_patient' | 'checkin'
 type AvailabilityStatus = 'available' | 'unavailable' | 'busy'
 
+const normalizeMobileForBackend = (raw: string): string => {
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return ''
+  const last10 = digits.slice(-10)
+  return `+91${last10}`
+}
+
 export const AssistantDashboard = () => {
   const name = authStorage.getName() ?? 'Assistant'
 
@@ -102,13 +109,14 @@ export const AssistantDashboard = () => {
       setSearchError('Enter a valid 10-digit mobile number.')
       return
     }
+    const backendMobile = normalizeMobileForBackend(digits)
     setSearchLoading(true)
     try {
       // Use assistant-specific prefill API so bot-created patients/appointments also work.
       let found: PatientSummary | null = null
       let prefill: Awaited<ReturnType<typeof appointmentService.getAssistantPatientPrefill>> | null = null
       try {
-        prefill = await appointmentService.getAssistantPatientPrefill(digits)
+        prefill = await appointmentService.getAssistantPatientPrefill(backendMobile)
         found = prefill.patient
         // Optionally we could use prefill.latestVisit for display, but vitals remain manual.
       } catch (err: any) {
@@ -125,7 +133,7 @@ export const AssistantDashboard = () => {
         setPatientId(found.id)
         setFirstName(found.firstName)
         setLastName(found.lastName ?? '')
-        setMobileNumber(found.mobileNumber)
+        setMobileNumber(found.mobileNumber || backendMobile)
         setAddress(found.address ?? '')
         setPreviousHealthHistory(found.previousHealthHistory ?? '')
         setBloodGroup(found.bloodGroup ?? '')
@@ -230,7 +238,7 @@ export const AssistantDashboard = () => {
           setOtherVitalsNotes('')
         }
       } else {
-        setMobileNumber(digits)
+        setMobileNumber(backendMobile)
         setFirstName('')
         setLastName('')
         setAddress('')
@@ -270,12 +278,13 @@ export const AssistantDashboard = () => {
       setFormError('Valid 10-digit mobile number is required.')
       return
     }
+    const backendMobile = normalizeMobileForBackend(digits)
     setSaveLoading(true)
     try {
       const created = await patientService.createPatient({
         firstName: firstName.trim(),
         lastName: lastName.trim() || undefined,
-        mobileNumber: digits,
+        mobileNumber: backendMobile,
         address: address.trim() || undefined,
         previousHealthHistory: previousHealthHistory.trim() || undefined,
         bloodGroup: bloodGroup.trim() || undefined,
@@ -304,7 +313,7 @@ export const AssistantDashboard = () => {
       const updated = await patientService.updatePatient(patientId, {
         firstName: firstName.trim(),
         lastName: lastName.trim() || undefined,
-        mobileNumber: mobileNumber.replace(/\D/g, ''),
+        mobileNumber: normalizeMobileForBackend(mobileNumber),
         address: address.trim() || undefined,
         previousHealthHistory: previousHealthHistory.trim() || undefined,
         bloodGroup: bloodGroup.trim() || undefined,
