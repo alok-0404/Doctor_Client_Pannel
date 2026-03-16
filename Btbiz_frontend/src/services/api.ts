@@ -196,6 +196,8 @@ export interface DoctorAppointmentItem {
   patientId: string
   patientName: string
   patientMobile?: string
+  /** Optional source of appointment, e.g. 'WHATSAPP' for bot-created appointments */
+  source?: string
   visitDate: string
   reason?: string
   notes?: string

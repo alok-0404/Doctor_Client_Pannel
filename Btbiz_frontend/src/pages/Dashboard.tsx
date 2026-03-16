@@ -342,8 +342,26 @@ export const Dashboard = () => {
                         >
                           <div>
                             <strong>{a.patientName}</strong>
-                            <div style={{ color: '#607d8b' }}>
-                              {a.reason || 'Appointment'}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                              <span style={{ color: '#607d8b' }}>
+                                {a.reason || 'Appointment'}
+                              </span>
+                              {a.source === 'WHATSAPP' && (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: 0.4,
+                                    padding: '2px 6px',
+                                    borderRadius: 999,
+                                    backgroundColor: '#e0f2f1',
+                                    color: '#00695c',
+                                    border: '1px solid #80cbc4',
+                                  }}
+                                >
+                                  WhatsApp
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right', color: '#9fb3c8', fontSize: 12 }}>
@@ -417,8 +435,26 @@ export const Dashboard = () => {
                           >
                             <div>
                               <strong>{a.patientName}</strong>
-                              <div style={{ color: '#607d8b' }}>
-                                {a.reason || 'Appointment'}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                <span style={{ color: '#607d8b' }}>
+                                  {a.reason || 'Appointment'}
+                                </span>
+                                {a.source === 'WHATSAPP' && (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      textTransform: 'uppercase',
+                                      letterSpacing: 0.4,
+                                      padding: '2px 6px',
+                                      borderRadius: 999,
+                                      backgroundColor: '#e0f2f1',
+                                      color: '#00695c',
+                                      border: '1px solid #80cbc4',
+                                    }}
+                                  >
+                                    WhatsApp
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div style={{ textAlign: 'right', color: '#486581', fontSize: 12, whiteSpace: 'nowrap' }}>

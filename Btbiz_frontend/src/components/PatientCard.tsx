@@ -74,6 +74,8 @@ export interface DocumentItem {
   originalName: string
   uploadedAt: string
   ocrText?: string
+  /** Optional source of document, e.g. 'WHATSAPP' when uploaded via bot */
+  source?: string
 }
 
 export interface PharmacyDispensationItem {
@@ -358,7 +360,15 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                             {doc.originalName}
                           </p>
                           <span className="patient-list-meta">
-                            {new Date(doc.uploadedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · Uploaded prescription
+                            {new Date(doc.uploadedAt).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                            {' · Uploaded prescription'}
+                            {doc.source === 'WHATSAPP' && ' · WhatsApp'}
                           </span>
                           {doc.ocrText && (
                             <p className="patient-list-secondary" style={{ marginTop: 4, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>

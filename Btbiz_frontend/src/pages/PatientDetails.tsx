@@ -41,7 +41,7 @@ export const PatientDetails = () => {
       .then((res) => {
         if (cancelled) return
         const p = res.patient as any
-        const documents = (res.documents || []) as Array<{ id: string; originalName: string; uploadedAt: string; ocrText?: string }>
+        const documents = (res.documents || []) as Array<{ id: string; originalName: string; uploadedAt: string; ocrText?: string; source?: string }>
         const pharmacyDispensations = (res.pharmacyDispensations || []) as Array<{
           id: string
           dispensedBy: string
@@ -128,6 +128,7 @@ export const PatientDetails = () => {
             originalName: d.originalName,
             uploadedAt: d.uploadedAt,
             ocrText: d.ocrText,
+            source: d.source,
           }))
         })
       })
