@@ -16,7 +16,23 @@ const PillTag: FC<TagProps> = ({ variant = 'worked', children }) => {
   )
 }
 
-const DocumentViewButton: FC<{ patientId: string; documentId: string; label: string }> = ({ patientId, documentId, label }) => {
+interface DocumentViewButtonProps {
+  patientId: string
+  documentId: string
+  label: string
+  /** Optional fallback text (e.g. OCR) to show if file cannot be opened */
+  fallbackText?: string
+}
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const DocumentViewButton: FC<DocumentViewButtonProps> = ({ patientId, documentId, label, fallbackText }) => {
   const [loading, setLoading] = useState(false)
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -24,6 +40,33 @@ const DocumentViewButton: FC<{ patientId: string; documentId: string; label: str
     setLoading(true)
     try {
       await patientService.openDocument(patientId, documentId)
+    } catch {
+      if (fallbackText) {
+        const win = window.open('', '_blank', 'noopener,noreferrer')
+        if (win) {
+          win.document.write(`
+            <html>
+              <head>
+                <title>Prescription text</title>
+                <meta charset="utf-8" />
+              </head>
+              <body style="margin:0; padding:16px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#0f172a;">
+                <h1 style="font-size:16px; margin:0 0 12px;">Prescription text</h1>
+                <pre style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:13px; line-height:1.5; padding:12px; border-radius:8px; background:#ffffff; border:1px solid #e2e8f0; max-width:960px; overflow:auto;">
+${escapeHtml(fallbackText)}
+                </pre>
+              </body>
+            </html>
+          `)
+          win.document.close()
+        } else {
+          // eslint-disable-next-line no-alert
+          alert('Unable to open prescription text in a new tab.')
+        }
+      } else {
+        // eslint-disable-next-line no-alert
+        alert('Failed to open document.')
+      }
     } finally {
       setLoading(false)
     }
@@ -376,7 +419,12 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                             </p>
                           )}
                         </div>
-                        <DocumentViewButton patientId={patientId} documentId={doc.id} label="View" />
+                        <DocumentViewButton
+                          patientId={patientId}
+                          documentId={doc.id}
+                          label="View"
+                          fallbackText={doc.ocrText}
+                        />
                       </li>
                     ))}
                   </ul>
