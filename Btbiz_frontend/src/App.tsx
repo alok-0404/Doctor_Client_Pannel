@@ -11,16 +11,19 @@ import { Dashboard } from './pages/Dashboard'
 import { AssistantDashboard } from './pages/AssistantDashboard.tsx'
 import { LabDashboard } from './pages/LabDashboard'
 import { LabManagerDashboard } from './pages/LabManagerDashboard'
+import { SuperAdminDashboard } from './pages/SuperAdminDashboard'
 import { PatientSearch } from './pages/PatientSearch'
 import { PatientDetails } from './pages/PatientDetails'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { DoctorNotificationListener } from './components/DoctorNotificationListener'
+import { GlobalBackButton } from './components/GlobalBackButton'
 import HandwritingExtractor from './components/HandwritingExtractor'
 
 export const App = () => {
   return (
     <>
       <DoctorNotificationListener />
+      <GlobalBackButton />
       <Routes>
       <Route
         path="/"
@@ -87,6 +90,14 @@ export const App = () => {
         element={(
           <ProtectedRoute allowedRoles={['LAB_MANAGER']}>
             <LabManagerDashboard />
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/super-admin"
+        element={(
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+            <SuperAdminDashboard />
           </ProtectedRoute>
         )}
       />

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
+import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import {
   authService,
   notificationService,
@@ -22,6 +23,7 @@ export const Dashboard = () => {
   const [showAddAssistant, setShowAddAssistant] = useState(false)
   const [cName, setCName] = useState('')
   const [cEmail, setCEmail] = useState('')
+  const [cCountryCode, setCCountryCode] = useState('+91')
   const [cPhoneDigits, setCPhoneDigits] = useState('')
   const [cPassword, setCPassword] = useState('')
   const [cLoading, setCLoading] = useState(false)
@@ -33,6 +35,7 @@ export const Dashboard = () => {
   const [showAddLabAssistant, setShowAddLabAssistant] = useState(false)
   const [labName, setLabName] = useState('')
   const [labEmail, setLabEmail] = useState('')
+  const [labCountryCode, setLabCountryCode] = useState('+91')
   const [labPhoneDigits, setLabPhoneDigits] = useState('')
   const [labPassword, setLabPassword] = useState('')
   const [labLoading, setLabLoading] = useState(false)
@@ -272,14 +275,14 @@ export const Dashboard = () => {
       return
     }
 
-    if (cPhoneDigits.length !== 10) {
-      setCError('Mobile number must be 10 digits.')
+    if (cPhoneDigits.length < 6) {
+      setCError('Please enter a valid mobile number.')
       return
     }
 
     try {
       setCLoading(true)
-      const normalizedPhone = `+91${cPhoneDigits}`
+      const normalizedPhone = `${cCountryCode}${cPhoneDigits}`
       await authService.createAssistant({
         name: cName,
         email: cEmail,
@@ -309,13 +312,13 @@ export const Dashboard = () => {
       setLabError('Please fill all fields.')
       return
     }
-    if (labPhoneDigits.length !== 10) {
-      setLabError('Mobile number must be 10 digits.')
+    if (labPhoneDigits.length < 6) {
+      setLabError('Please enter a valid mobile number.')
       return
     }
     try {
       setLabLoading(true)
-      const normalizedPhone = `+91${labPhoneDigits}`
+      const normalizedPhone = `${labCountryCode}${labPhoneDigits}`
       await authService.createLabAssistant({
         name: labName,
         email: labEmail,
@@ -1082,16 +1085,13 @@ export const Dashboard = () => {
                 value={cEmail}
                 onChange={(e) => setCEmail(e.target.value)}
               />
-              <TextField
+              <CountryCodePhoneInput
                 id="assistant-phone"
                 label="WhatsApp number"
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={cPhoneDigits}
-                onChange={(e) => {
-                  const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 10)
-                  setCPhoneDigits(onlyDigits)
-                }}
+                countryCode={cCountryCode}
+                onCountryCodeChange={setCCountryCode}
+                phoneDigits={cPhoneDigits}
+                onPhoneDigitsChange={setCPhoneDigits}
               />
               <TextField
                 id="assistant-password"
@@ -1161,16 +1161,13 @@ export const Dashboard = () => {
                 value={labEmail}
                 onChange={(e) => setLabEmail(e.target.value)}
               />
-              <TextField
+              <CountryCodePhoneInput
                 id="lab-phone"
                 label="WhatsApp number"
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={labPhoneDigits}
-                onChange={(e) => {
-                  const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 10)
-                  setLabPhoneDigits(onlyDigits)
-                }}
+                countryCode={labCountryCode}
+                onCountryCodeChange={setLabCountryCode}
+                phoneDigits={labPhoneDigits}
+                onPhoneDigitsChange={setLabPhoneDigits}
               />
               <TextField
                 id="lab-password"

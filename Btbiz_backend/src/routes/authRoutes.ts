@@ -15,7 +15,8 @@ import {
   listAssistants,
   createLabAssistantAccount,
   listLabAssistants,
-  updateDoctorAvailability
+  updateDoctorAvailability,
+  superAdminLogin
 } from "../controllers/authController";
 
 const router = Router();
@@ -31,6 +32,9 @@ router.post("/pharmacy/register", pharmacyRegister);
 
 // POST /auth/doctor/login
 router.post("/doctor/login", doctorLogin);
+
+// POST /auth/super-admin/login
+router.post("/super-admin/login", superAdminLogin);
 
 // POST /auth/doctor/password/forgot - send OTP over WhatsApp
 router.post("/doctor/password/forgot", startDoctorForgotPassword);

@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { authService } from '../services/api'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
+import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 
 export const Register = () => {
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [countryCode, setCountryCode] = useState('+91')
   const [phoneDigits, setPhoneDigits] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -24,14 +26,14 @@ export const Register = () => {
       return
     }
 
-    if (phoneDigits.length !== 10) {
-      setError('Mobile number must be 10 digits.')
+    if (phoneDigits.length < 6) {
+      setError('Please enter a valid mobile number.')
       return
     }
 
     try {
       setLoading(true)
-      const normalizedPhone = `+91${phoneDigits}`
+      const normalizedPhone = `${countryCode}${phoneDigits}`
       await authService.register({ name, email, password, phone: normalizedPhone })
       setSuccess('Registration successful. Redirecting to login…')
 
@@ -85,16 +87,13 @@ export const Register = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <TextField
+            <CountryCodePhoneInput
               id="phone"
-              type="tel"
               label="Registered WhatsApp number"
-              placeholder="+91 98765 43210"
-              value={phoneDigits}
-              onChange={(e) => {
-                const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 10)
-                setPhoneDigits(onlyDigits)
-              }}
+              countryCode={countryCode}
+              onCountryCodeChange={setCountryCode}
+              phoneDigits={phoneDigits}
+              onPhoneDigitsChange={setPhoneDigits}
             />
             <TextField
               id="password"

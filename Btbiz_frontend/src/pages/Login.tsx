@@ -4,6 +4,7 @@ import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
+import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 
 export const Login = () => {
   const navigate = useNavigate()
@@ -14,6 +15,7 @@ export const Login = () => {
 
   const [showForgot, setShowForgot] = useState(false)
   const [forgotStep, setForgotStep] = useState<'phone' | 'otp'>('phone')
+  const [forgotCountryCode, setForgotCountryCode] = useState('+91')
   const [forgotPhoneDigits, setForgotPhoneDigits] = useState('')
   const [forgotOtp, setForgotOtp] = useState('')
   const [forgotNewPassword, setForgotNewPassword] = useState('')
@@ -32,7 +34,12 @@ export const Login = () => {
 
     try {
       setLoading(true)
-      const result = await authService.login({ email, password })
+      let result
+      try {
+        result = await authService.login({ email, password })
+      } catch {
+        result = await authService.superAdminLogin({ email, password })
+      }
       authStorage.set(result.token, result.doctorName, result.role)
       if (result.role === 'ASSISTANT') {
         navigate('/assistant')
@@ -42,6 +49,8 @@ export const Login = () => {
         navigate('/lab-manager')
       } else if (result.role === 'PHARMACY') {
         navigate('/medicine')
+      } else if (result.role === 'SUPER_ADMIN') {
+        navigate('/super-admin')
       } else {
         navigate('/dashboard')
       }
@@ -64,14 +73,14 @@ export const Login = () => {
       return
     }
 
-    if (forgotPhoneDigits.length !== 10) {
-      setForgotError('Mobile number must be 10 digits.')
+    if (forgotPhoneDigits.length < 6) {
+      setForgotError('Please enter a valid mobile number.')
       return
     }
 
     try {
       setForgotLoading(true)
-      const normalizedPhone = `+91${forgotPhoneDigits}`
+      const normalizedPhone = `${forgotCountryCode}${forgotPhoneDigits}`
       await authService.startForgotPassword({ phone: normalizedPhone })
       setForgotSuccess('OTP sent on your WhatsApp (if number exists).')
       setForgotStep('otp')
@@ -94,7 +103,7 @@ export const Login = () => {
 
     try {
       setForgotLoading(true)
-      const normalizedPhone = `+91${forgotPhoneDigits}`
+      const normalizedPhone = `${forgotCountryCode}${forgotPhoneDigits}`
       await authService.completeForgotPassword({
         phone: normalizedPhone,
         otp: forgotOtp,
@@ -104,6 +113,7 @@ export const Login = () => {
       setTimeout(() => {
         setShowForgot(false)
         setForgotStep('phone')
+        setForgotCountryCode('+91')
         setForgotOtp('')
         setForgotNewPassword('')
         setForgotPhoneDigits('')
@@ -241,16 +251,13 @@ export const Login = () => {
 
             {forgotStep === 'phone' && (
               <form onSubmit={handleStartForgot} className="login-form" style={{ marginTop: 12 }}>
-                <TextField
+                <CountryCodePhoneInput
                   id="forgot-phone"
-                  type="tel"
                   label="Registered WhatsApp number"
-                  placeholder="+91 98765 43210"
-                  value={forgotPhoneDigits}
-                  onChange={(e) => {
-                    const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 10)
-                    setForgotPhoneDigits(onlyDigits)
-                  }}
+                  countryCode={forgotCountryCode}
+                  onCountryCodeChange={setForgotCountryCode}
+                  phoneDigits={forgotPhoneDigits}
+                  onPhoneDigitsChange={setForgotPhoneDigits}
                 />
                 {forgotError && (
                   <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>

@@ -20,7 +20,7 @@ export interface DoctorLoginPayload {
   password: string
 }
 
-export type DoctorRole = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER' | 'PHARMACY'
+export type DoctorRole = 'DOCTOR' | 'ASSISTANT' | 'LAB_ASSISTANT' | 'LAB_MANAGER' | 'PHARMACY' | 'SUPER_ADMIN'
 
 export interface DoctorLoginResponse {
   token: string
@@ -58,6 +58,33 @@ export interface AssistantSummary {
   } | null
 }
 
+export interface SuperAdminListItem {
+  id: string
+  name: string
+  email: string
+  phone: string
+  status: boolean
+  createdAt: string
+}
+
+export interface SuperAdminOverview {
+  summary: {
+    doctors: number
+    assistants: number
+    labAssistants: number
+    pharmacies: number
+    labs: number
+    diagnostics: number
+  }
+  lists: {
+    doctors: SuperAdminListItem[]
+    assistants: SuperAdminListItem[]
+    labAssistants: SuperAdminListItem[]
+    pharmacies: SuperAdminListItem[]
+    labs: SuperAdminListItem[]
+  }
+}
+
 export const authService = {
   async login(payload: DoctorLoginPayload): Promise<DoctorLoginResponse> {
     const res = await api.post('/auth/doctor/login', payload)
@@ -66,6 +93,19 @@ export const authService = {
       doctor: { name: string; role: DoctorRole }
     }
 
+    return {
+      token: data.accessToken,
+      doctorName: data.doctor.name,
+      role: data.doctor.role,
+    }
+  },
+
+  async superAdminLogin(payload: DoctorLoginPayload): Promise<DoctorLoginResponse> {
+    const res = await api.post('/auth/super-admin/login', payload)
+    const data = res.data as {
+      accessToken: string
+      doctor: { name: string; role: DoctorRole }
+    }
     return {
       token: data.accessToken,
       doctorName: data.doctor.name,
@@ -184,6 +224,11 @@ export const authService = {
   }): Promise<{ availabilityStatus: string; unavailableReason?: string; unavailableUntil?: string }> {
     const res = await api.patch('/auth/doctor/availability', payload)
     return res.data
+  },
+
+  async getSuperAdminOverview(): Promise<SuperAdminOverview> {
+    const res = await api.get('/super-admin/overview')
+    return res.data as SuperAdminOverview
   },
 }
 

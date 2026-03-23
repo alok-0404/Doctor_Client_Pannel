@@ -3,6 +3,7 @@ import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
+import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { authService, type AssistantSummary } from '../services/api'
 
 export const LabManagerDashboard = () => {
@@ -11,6 +12,7 @@ export const LabManagerDashboard = () => {
   const [showAddLabAssistant, setShowAddLabAssistant] = useState(false)
   const [labName, setLabName] = useState('')
   const [labEmail, setLabEmail] = useState('')
+  const [labCountryCode, setLabCountryCode] = useState('+91')
   const [labPhoneDigits, setLabPhoneDigits] = useState('')
   const [labPassword, setLabPassword] = useState('')
   const [labLoading, setLabLoading] = useState(false)
@@ -40,13 +42,13 @@ export const LabManagerDashboard = () => {
       setLabError('Please fill all fields.')
       return
     }
-    if (labPhoneDigits.length !== 10) {
-      setLabError('Mobile number must be 10 digits.')
+    if (labPhoneDigits.length < 6) {
+      setLabError('Please enter a valid mobile number.')
       return
     }
     try {
       setLabLoading(true)
-      const normalizedPhone = `+91${labPhoneDigits}`
+      const normalizedPhone = `${labCountryCode}${labPhoneDigits}`
       await authService.createLabAssistant({
         name: labName,
         email: labEmail,
@@ -212,16 +214,13 @@ export const LabManagerDashboard = () => {
                 value={labEmail}
                 onChange={(e) => setLabEmail(e.target.value)}
               />
-              <TextField
+              <CountryCodePhoneInput
                 id="lab-phone"
                 label="WhatsApp number"
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={labPhoneDigits}
-                onChange={(e) => {
-                  const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 10)
-                  setLabPhoneDigits(onlyDigits)
-                }}
+                countryCode={labCountryCode}
+                onCountryCodeChange={setLabCountryCode}
+                phoneDigits={labPhoneDigits}
+                onPhoneDigitsChange={setLabPhoneDigits}
               />
               <TextField
                 id="lab-password"

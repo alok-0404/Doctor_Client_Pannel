@@ -13,6 +13,8 @@ import {
   registerPharmacy,
   startDoctorPasswordReset
 } from "../services/authService";
+import jwt from "jsonwebtoken";
+import { env } from "../config/env";
 
 export const doctorRegister = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -224,6 +226,48 @@ export const completeDoctorForgotPassword = async (
 
     // eslint-disable-next-line no-console
     console.error("completeDoctorForgotPassword error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const superAdminLogin = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { email, password } = req.body as { email?: string; password?: string };
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password are required" });
+      return;
+    }
+
+    const emailMatches = email.trim().toLowerCase() === env.superAdmin.email.trim().toLowerCase();
+    const passwordMatches = password === env.superAdmin.password;
+    if (!emailMatches || !passwordMatches) {
+      res.status(401).json({ message: "Invalid super admin credentials" });
+      return;
+    }
+
+    const accessToken = jwt.sign(
+      {
+        role: "SUPER_ADMIN",
+        email: env.superAdmin.email,
+        name: env.superAdmin.name
+      },
+      env.jwt.secret,
+      { expiresIn: env.jwt.expiresIn as "1h" | "7d" | "24h" }
+    );
+
+    res.status(200).json({
+      accessToken,
+      doctor: {
+        name: env.superAdmin.name,
+        role: "SUPER_ADMIN"
+      }
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("superAdminLogin error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

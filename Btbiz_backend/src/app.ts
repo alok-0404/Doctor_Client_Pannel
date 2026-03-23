@@ -11,6 +11,7 @@ import ocrRoutes from "./routes/ocr";
 import publicRoutes from "./routes/publicRoutes";
 import appointmentRoutes from "./routes/appointmentRoutes";
 import pharmacyRoutes from "./routes/pharmacyRoutes";
+import superAdminRoutes from "./routes/superAdminRoutes";
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use("/api/ocr", ocrRoutes);
 app.use("/public", publicRoutes);
 app.use("/appointments", appointmentRoutes);
 app.use("/pharmacy", pharmacyRoutes);
+app.use("/super-admin", superAdminRoutes);
 
 if (process.env.NODE_ENV === "production") {
   const frontendDist = path.join(__dirname, "../../Btbiz_frontend/dist");

@@ -8,6 +8,11 @@ export const env = {
   jwt: {
     secret: process.env.JWT_SECRET || "dev_jwt_secret_change_me",
     expiresIn: process.env.JWT_EXPIRES_IN || "1h"
+  },
+  superAdmin: {
+    email: process.env.SUPER_ADMIN_EMAIL || "superadmin@medigraph.com",
+    password: process.env.SUPER_ADMIN_PASSWORD || "Admin@123",
+    name: process.env.SUPER_ADMIN_NAME || "Super Admin"
   }
 } as const;
 

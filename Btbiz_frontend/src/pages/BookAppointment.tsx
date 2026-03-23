@@ -63,6 +63,7 @@ export const BookAppointment = () => {
   const [locationFetchedAt, setLocationFetchedAt] = useState<Date | null>(null)
 
   // Family booking state (recommended flow)
+  const [familyCountryCode, setFamilyCountryCode] = useState('+91')
   const [familyMobile, setFamilyMobile] = useState('')
   const [familyAccountId, setFamilyAccountId] = useState<string | null>(null)
   const [familyMembers, setFamilyMembers] = useState<FamilyMemberSummary[]>([])
@@ -87,6 +88,7 @@ export const BookAppointment = () => {
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Old patient state
+  const [oldCountryCode, setOldCountryCode] = useState('+91')
   const [oldMobile, setOldMobile] = useState('')
   const [oldPatient, setOldPatient] = useState<PatientSummary | null>(null)
   const [oldConsultationType, setOldConsultationType] = useState(CONSULTATION_TYPES[0])
@@ -104,6 +106,7 @@ export const BookAppointment = () => {
   const [newName, setNewName] = useState('')
   const [newAge, setNewAge] = useState('')
   const [newGender, setNewGender] = useState<string>('')
+  const [newCountryCode, setNewCountryCode] = useState('+91')
   const [newMobile, setNewMobile] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [newCity, setNewCity] = useState('')
@@ -272,7 +275,7 @@ export const BookAppointment = () => {
     setFamilyMembers([])
     setSelectedFamilyMemberId('')
 
-    const mobile = familyMobile.trim()
+    const mobile = `${familyCountryCode}${familyMobile.replace(/\D/g, '').trim()}`
     if (mobile.length < 8) {
       setError('Please enter a valid mobile number.')
       return
@@ -395,11 +398,12 @@ export const BookAppointment = () => {
   const handleFetchOldPatient = async () => {
     setError(null)
     setOldPatient(null)
-    if (!oldMobile || oldMobile.trim().length < 8) {
+    const oldMobileNormalized = `${oldCountryCode}${oldMobile.replace(/\D/g, '').trim()}`
+    if (!oldMobile || oldMobileNormalized.length < 8) {
       return
     }
     try {
-      const p = await publicAppointmentService.findPatientByMobile(oldMobile.trim())
+      const p = await publicAppointmentService.findPatientByMobile(oldMobileNormalized)
       if (!p) {
         setError('No patient found with this mobile number.')
         return
@@ -476,7 +480,7 @@ export const BookAppointment = () => {
         })
       } else if (mode === 'old') {
         res = await publicAppointmentService.bookOldPatientAppointment({
-          mobileNumber: oldMobile.trim(),
+          mobileNumber: `${oldCountryCode}${oldMobile.replace(/\D/g, '').trim()}`,
           consultationType: oldConsultationType,
           consultantId: oldConsultantId,
           opdNumber: oldOpdNo,
@@ -493,7 +497,7 @@ export const BookAppointment = () => {
           patientName: newName,
           age: newAge ? Number(newAge) : undefined,
           gender: newGender,
-          mobileNumber: newMobile.trim(),
+          mobileNumber: `${newCountryCode}${newMobile.replace(/\D/g, '').trim()}`,
           city: newCity || undefined,
           address: newAddress || undefined,
           appointmentDate,
@@ -648,12 +652,21 @@ export const BookAppointment = () => {
       <div className="appt-two-cols">
         <div className="appt-field">
           <label>Primary Mobile No *</label>
-          <input
-            type="tel"
-            value={familyMobile}
-            onChange={(e) => setFamilyMobile(e.target.value)}
-            placeholder="Enter mobile number"
-          />
+          <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
+            <select value={familyCountryCode} onChange={(e) => setFamilyCountryCode(e.target.value)}>
+              <option value="+91">IN (+91)</option>
+              <option value="+1">US/CA (+1)</option>
+              <option value="+44">UK (+44)</option>
+              <option value="+61">AU (+61)</option>
+              <option value="+971">UAE (+971)</option>
+            </select>
+            <input
+              type="tel"
+              value={familyMobile}
+              onChange={(e) => setFamilyMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
+              placeholder="Enter mobile number"
+            />
+          </div>
         </div>
         <div className="appt-field" style={{ justifyContent: 'flex-end' }}>
           <label>&nbsp;</label>
@@ -966,13 +979,22 @@ export const BookAppointment = () => {
       <h2 className="public-section-title" style={{ marginBottom: 16 }}>Old Patient Appointment</h2>
       <div className="appt-field">
         <label>Mobile No *</label>
-        <input
-          type="tel"
-          value={oldMobile}
-          onChange={(e) => setOldMobile(e.target.value)}
-          onBlur={handleFetchOldPatient}
-          placeholder="Enter registered mobile number"
-        />
+        <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
+          <select value={oldCountryCode} onChange={(e) => setOldCountryCode(e.target.value)}>
+            <option value="+91">IN (+91)</option>
+            <option value="+1">US/CA (+1)</option>
+            <option value="+44">UK (+44)</option>
+            <option value="+61">AU (+61)</option>
+            <option value="+971">UAE (+971)</option>
+          </select>
+          <input
+            type="tel"
+            value={oldMobile}
+            onChange={(e) => setOldMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
+            onBlur={handleFetchOldPatient}
+            placeholder="Enter registered mobile number"
+          />
+        </div>
       </div>
       {oldPatient && (
         <div className="appt-summary">
@@ -1123,11 +1145,20 @@ export const BookAppointment = () => {
       </div>
       <div className="appt-field">
         <label>Mobile No *</label>
-        <input
-          type="tel"
-          value={newMobile}
-          onChange={(e) => setNewMobile(e.target.value)}
-        />
+        <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
+          <select value={newCountryCode} onChange={(e) => setNewCountryCode(e.target.value)}>
+            <option value="+91">IN (+91)</option>
+            <option value="+1">US/CA (+1)</option>
+            <option value="+44">UK (+44)</option>
+            <option value="+61">AU (+61)</option>
+            <option value="+971">UAE (+971)</option>
+          </select>
+          <input
+            type="tel"
+            value={newMobile}
+            onChange={(e) => setNewMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
+          />
+        </div>
       </div>
       <div className="appt-field">
         <label>Email (optional)</label>
