@@ -11,13 +11,50 @@ const router = Router();
 
 router.use(authenticateDoctor);
 
-function mapVisitToAppointment(v: any): Record<string, unknown> {
+/** Distance in km between two lat/lng points (Haversine). */
+function distanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function mapVisitToAppointment(
+  v: any,
+  clinicLat?: number | null,
+  clinicLng?: number | null
+): Record<string, unknown> {
   const patient = v.patient;
   const patientId = patient?._id ? patient._id.toString() : (v.patient as mongoose.Types.ObjectId).toString();
   const patientName =
     patient?.firstName != null
       ? [patient.firstName, patient.lastName || ""].join(" ").trim()
       : "Patient";
+
+  const patientLat = v.patientLatitude;
+  const patientLng = v.patientLongitude;
+  let distanceKmValue: number | undefined;
+  if (
+    typeof patientLat === "number" &&
+    typeof patientLng === "number" &&
+    typeof clinicLat === "number" &&
+    typeof clinicLng === "number"
+  ) {
+    distanceKmValue = distanceKm(patientLat, patientLng, clinicLat, clinicLng);
+  }
+
   return {
     id: (v._id as mongoose.Types.ObjectId).toString(),
     patientId,
@@ -25,7 +62,10 @@ function mapVisitToAppointment(v: any): Record<string, unknown> {
     patientMobile: patient?.mobileNumber ?? undefined,
     visitDate: v.visitDate,
     reason: v.reason,
-    notes: v.notes
+    notes: v.notes,
+    patientLatitude: patientLat,
+    patientLongitude: patientLng,
+    distanceKm: distanceKmValue
   };
 }
 
@@ -55,8 +95,12 @@ router.get("/doctor/today", async (req, res) => {
       .populate("patient", "firstName lastName mobileNumber")
       .lean();
 
+    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
+    const clinicLat = (doctorDoc as any)?.clinicLatitude;
+    const clinicLng = (doctorDoc as any)?.clinicLongitude;
+
     res.status(200).json({
-      appointments: visits.map(mapVisitToAppointment)
+      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng))
     });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -91,8 +135,12 @@ router.get("/doctor/upcoming", async (req, res) => {
       .populate("patient", "firstName lastName mobileNumber")
       .lean();
 
+    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
+    const clinicLat = (doctorDoc as any)?.clinicLatitude;
+    const clinicLng = (doctorDoc as any)?.clinicLongitude;
+
     res.status(200).json({
-      appointments: visits.map(mapVisitToAppointment),
+      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng)),
       total: visits.length
     });
   } catch (error) {
@@ -129,13 +177,60 @@ router.get("/assistant/doctor-today", async (req, res) => {
       .populate("patient", "firstName lastName mobileNumber")
       .lean();
 
+    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
+    const clinicLat = (doctorDoc as any)?.clinicLatitude;
+    const clinicLng = (doctorDoc as any)?.clinicLongitude;
+
     res.status(200).json({
       doctorId,
-      appointments: visits.map(mapVisitToAppointment)
+      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng))
     });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("appointments/assistant/doctor-today error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /appointments/assistant/doctor-upcoming - for assistant: linked doctor's upcoming appointments (after today)
+router.get("/assistant/doctor-upcoming", async (req, res) => {
+  try {
+    if (req.doctor?.role !== "ASSISTANT") {
+      res.status(403).json({ message: "Only assistants can use this endpoint" });
+      return;
+    }
+
+    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+    const doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
+    if (!doctorId) {
+      res.status(400).json({ message: "Assistant is not linked to a doctor" });
+      return;
+    }
+
+    const now = new Date();
+    const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+
+    const visits = await Visit.find({
+      doctor: new mongoose.Types.ObjectId(doctorId),
+      visitDate: { $gte: startOfTomorrow }
+    })
+      .sort({ visitDate: 1 })
+      .limit(100)
+      .populate("patient", "firstName lastName mobileNumber")
+      .lean();
+
+    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
+    const clinicLat = (doctorDoc as any)?.clinicLatitude;
+    const clinicLng = (doctorDoc as any)?.clinicLongitude;
+
+    res.status(200).json({
+      doctorId,
+      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng)),
+      total: visits.length
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("appointments/assistant/doctor-upcoming error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

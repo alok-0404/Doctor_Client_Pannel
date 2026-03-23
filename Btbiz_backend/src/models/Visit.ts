@@ -19,6 +19,8 @@ export interface IVisit extends Document {
   /** Patient's location at time of booking (with consent) – so doctor can see */
   patientLatitude?: number;
   patientLongitude?: number;
+  /** Optional accuracy (meters) for last known patient location. */
+  patientLocationAccuracyMeters?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,7 +58,8 @@ const VisitSchema = new Schema<IVisit>(
     temperature: { type: Number },
     otherVitalsNotes: { type: String },
     patientLatitude: { type: Number },
-    patientLongitude: { type: Number }
+    patientLongitude: { type: Number },
+    patientLocationAccuracyMeters: { type: Number }
   },
   { timestamps: true }
 );

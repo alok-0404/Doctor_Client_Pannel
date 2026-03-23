@@ -1,12 +1,23 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { publicAppointmentService, type PatientSummary, type ConsultantOption } from '../services/api'
+import { publicAppointmentService, type PatientSummary, type ConsultantOption, type FamilyMemberSummary, type FamilyRelation } from '../services/api'
 
-type Mode = 'none' | 'old' | 'new'
+type Mode = 'none' | 'family' | 'old' | 'new'
 type Step = 'details' | 'payment' | 'confirm'
 
 const CONSULTATION_TYPES = ['New Consultation', 'Review Appointment']
 const GENDERS = ['MALE', 'FEMALE', 'OTHER']
+const RELATIONS: Array<{ value: FamilyRelation; label: string }> = [
+  { value: 'SELF', label: 'Self' },
+  { value: 'SPOUSE', label: 'Spouse' },
+  { value: 'SON', label: 'Son' },
+  { value: 'DAUGHTER', label: 'Daughter' },
+  { value: 'FATHER', label: 'Father' },
+  { value: 'MOTHER', label: 'Mother' },
+  { value: 'BROTHER', label: 'Brother' },
+  { value: 'SISTER', label: 'Sister' },
+  { value: 'OTHER', label: 'Other' },
+]
 const TIME_SLOTS = [
   '10:00 - 11:00 AM',
   '11:00 AM - 12:00 PM',
@@ -42,6 +53,32 @@ export const BookAppointment = () => {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [locationError, setLocationError] = useState<string | null>(null)
   const [locationLoading, setLocationLoading] = useState(false)
+  const [locationAccuracyMeters, setLocationAccuracyMeters] = useState<number | null>(null)
+  const [locationFetchedAt, setLocationFetchedAt] = useState<Date | null>(null)
+
+  // Family booking state (recommended flow)
+  const [familyMobile, setFamilyMobile] = useState('')
+  const [familyAccountId, setFamilyAccountId] = useState<string | null>(null)
+  const [familyMembers, setFamilyMembers] = useState<FamilyMemberSummary[]>([])
+  const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState<string>('')
+
+  const [familyConsultantId, setFamilyConsultantId] = useState('')
+  const [familyConsultationType, setFamilyConsultationType] = useState(CONSULTATION_TYPES[0])
+  const [familyOpdNo, setFamilyOpdNo] = useState('')
+  const [familyPatientName, setFamilyPatientName] = useState('')
+  const [familyGender, setFamilyGender] = useState<string>('')
+  const [familyAddress, setFamilyAddress] = useState('')
+
+  const [addingMember, setAddingMember] = useState(false)
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
+  const [newMemberFullName, setNewMemberFullName] = useState('')
+  const [newMemberRelation, setNewMemberRelation] = useState<FamilyRelation>('SELF')
+  const [newMemberGender, setNewMemberGender] = useState<'MALE' | 'FEMALE' | 'OTHER' | ''>('')
+  const [newMemberDob, setNewMemberDob] = useState('')
+  const [newMemberAddress, setNewMemberAddress] = useState('')
+  const [viewingHistoryForId, setViewingHistoryForId] = useState<string | null>(null)
+  const [memberHistory, setMemberHistory] = useState<Awaited<ReturnType<typeof publicAppointmentService.getFamilyMemberHistory>> | null>(null)
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Old patient state
   const [oldMobile, setOldMobile] = useState('')
@@ -69,6 +106,8 @@ export const BookAppointment = () => {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
+  const liveShareWatchIdRef = useRef<number | null>(null)
+  const lastSentMsRef = useRef<number>(0)
 
   useEffect(() => {
     setLoadingConsultants(true)
@@ -79,6 +118,7 @@ export const BookAppointment = () => {
         if (list.length > 0) {
           setOldConsultantId((prev) => prev || list[0].id)
           setNewConsultantId((prev) => prev || list[0].id)
+          setFamilyConsultantId((prev) => prev || list[0].id)
         }
       })
       .catch(() => {
@@ -99,17 +139,83 @@ export const BookAppointment = () => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setLocationAccuracyMeters(typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null)
+        setLocationFetchedAt(new Date())
         setLocationLoading(false)
       },
       (err) => {
         setLocationError(err.message === 'User denied Geolocation' ? 'Location access denied. Distance will not be shown.' : 'Could not get your location.')
         setLocationLoading(false)
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
   }, [])
 
-  const selectedConsultant = consultants.find((c) => c.id === (mode === 'old' ? oldConsultantId : newConsultantId))
+  // Auto-fetch location after user accepts policy, so distance is ready.
+  useEffect(() => {
+    if (!policyAccepted) return
+    if (userLocation) return
+    if (locationLoading) return
+    if (locationError) return
+    fetchUserLocation()
+  }, [policyAccepted, userLocation, locationLoading, locationError, fetchUserLocation])
+
+  // Live location sharing for appointment: send updates to backend every ~10 seconds.
+  useEffect(() => {
+    if (!appointmentId) return
+    if (!policyAccepted) return
+
+    if (!navigator.geolocation) {
+      return
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      async (pos) => {
+        const nowMs = Date.now()
+        // Throttle network calls: at most once per 10s.
+        if (nowMs - lastSentMsRef.current < 10_000) return
+        lastSentMsRef.current = nowMs
+
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        setUserLocation({ lat, lng })
+        setLocationAccuracyMeters(typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null)
+        setLocationFetchedAt(new Date())
+
+        try {
+          await publicAppointmentService.updateAppointmentLiveLocation({
+            appointmentId,
+            patientLatitude: lat,
+            patientLongitude: lng,
+            accuracyMeters: typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : undefined,
+          })
+        } catch {
+          // silent failure
+        } finally {
+          // no-op
+        }
+      },
+      () => {
+        // ignore location errors silently (permission denied / unavailable)
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    )
+
+    liveShareWatchIdRef.current = watchId
+    return () => {
+      if (liveShareWatchIdRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(liveShareWatchIdRef.current)
+      }
+      liveShareWatchIdRef.current = null
+    }
+  }, [appointmentId, policyAccepted])
+
+  const selectedConsultantId =
+    mode === 'old' ? oldConsultantId
+      : mode === 'new' ? newConsultantId
+        : mode === 'family' ? familyConsultantId
+          : ''
+  const selectedConsultant = consultants.find((c) => c.id === selectedConsultantId)
   const hasClinicLocation = selectedConsultant && selectedConsultant.clinicLatitude != null && selectedConsultant.clinicLongitude != null
   const distanceKmValue = userLocation && hasClinicLocation && selectedConsultant
     ? distanceKm(userLocation.lat, userLocation.lng, selectedConsultant.clinicLatitude!, selectedConsultant.clinicLongitude!)
@@ -131,6 +237,144 @@ export const BookAppointment = () => {
     resetState()
   }
 
+  const selectFamily = () => {
+    setMode('family')
+    resetState()
+  }
+
+  const selectedFamilyMember = useMemo(
+    () => familyMembers.find((m) => m.id === selectedFamilyMemberId) ?? null,
+    [familyMembers, selectedFamilyMemberId]
+  )
+
+  const selectedFamilyPatientId = selectedFamilyMember?.patientId ?? selectedFamilyMember?.patient?.id ?? null
+
+  const handleFamilyLogin = async () => {
+    setError(null)
+    setFamilyAccountId(null)
+    setFamilyMembers([])
+    setSelectedFamilyMemberId('')
+
+    const mobile = familyMobile.trim()
+    if (mobile.length < 8) {
+      setError('Please enter a valid mobile number.')
+      return
+    }
+    try {
+      const account = await publicAppointmentService.familyLoginOrCreate(mobile)
+      setFamilyAccountId(account.id)
+      const list = await publicAppointmentService.listFamilyMembers({ accountId: account.id })
+      setFamilyMembers(list.members ?? [])
+      if ((list.members ?? []).length === 1) {
+        setSelectedFamilyMemberId(list.members[0].id)
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to load family members. Please try again.')
+    }
+  }
+
+  const handleAddFamilyMember = async () => {
+    setError(null)
+    if (!familyAccountId) {
+      setError('Please login with your mobile number first.')
+      return
+    }
+    if (!newMemberFullName.trim()) {
+      setError('Please enter member full name.')
+      return
+    }
+    try {
+      if (editingMemberId) {
+        await publicAppointmentService.updateFamilyMember(editingMemberId, {
+          fullName: newMemberFullName.trim(),
+          relation: newMemberRelation,
+          gender: newMemberGender || undefined,
+          dateOfBirth: newMemberDob || undefined,
+          address: newMemberAddress || undefined,
+        })
+      } else {
+        await publicAppointmentService.addFamilyMember({
+          accountId: familyAccountId,
+          fullName: newMemberFullName.trim(),
+          relation: newMemberRelation,
+          gender: newMemberGender || undefined,
+          dateOfBirth: newMemberDob || undefined,
+          address: newMemberAddress || undefined,
+        })
+      }
+      const list = await publicAppointmentService.listFamilyMembers({ accountId: familyAccountId })
+      setFamilyMembers(list.members ?? [])
+      if (!editingMemberId) {
+        const last = (list.members ?? [])[list.members.length - 1]
+        if (last?.id) setSelectedFamilyMemberId(last.id)
+      }
+      setAddingMember(false)
+      setEditingMemberId(null)
+      setNewMemberFullName('')
+      setNewMemberRelation('SELF')
+      setNewMemberGender('')
+      setNewMemberDob('')
+      setNewMemberAddress('')
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to add family member. Please try again.')
+    }
+  }
+
+  const startEditMember = (member: FamilyMemberSummary) => {
+    setAddingMember(true)
+    setEditingMemberId(member.id)
+    setNewMemberFullName(member.fullName)
+    setNewMemberRelation(member.relation)
+    setNewMemberGender((member.gender as any) || '')
+    setNewMemberDob(member.dateOfBirth ?? '')
+    setNewMemberAddress(member.patient?.address ?? '')
+  }
+
+  const handleDeleteMember = async (memberId: string) => {
+    if (!familyAccountId) return
+    try {
+      await publicAppointmentService.deleteFamilyMember(memberId)
+      const list = await publicAppointmentService.listFamilyMembers({ accountId: familyAccountId })
+      setFamilyMembers(list.members ?? [])
+      if (selectedFamilyMemberId === memberId) {
+        setSelectedFamilyMemberId('')
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to delete family member. Please try again.')
+    }
+  }
+
+  const handleViewHistory = async (memberId: string) => {
+    setViewingHistoryForId(memberId)
+    setMemberHistory(null)
+    setLoadingHistory(true)
+    setError(null)
+    try {
+      const hist = await publicAppointmentService.getFamilyMemberHistory(memberId)
+      setMemberHistory(hist)
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to load health records. Please try again.')
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  // When member is selected, prefill editable patient details for appointment.
+  useEffect(() => {
+    if (mode !== 'family') return
+    if (!selectedFamilyMember) return
+    const p = selectedFamilyMember.patient
+    setFamilyPatientName(
+      (p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : selectedFamilyMember.fullName) || ''
+    )
+    setFamilyGender(p?.gender ?? selectedFamilyMember.gender ?? '')
+    setFamilyAddress(p?.address ?? '')
+  }, [mode, selectedFamilyMember])
+
   const handleFetchOldPatient = async () => {
     setError(null)
     setOldPatient(null)
@@ -147,8 +391,9 @@ export const BookAppointment = () => {
       setOldName(`${p.firstName} ${p.lastName ?? ''}`.trim())
       setOldGender(p.gender ?? '')
       setOldAddress(p.address ?? '')
-    } catch {
-      setError('Failed to fetch patient details. Please try again.')
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Failed to fetch patient details. Please try again.')
     }
   }
 
@@ -158,7 +403,24 @@ export const BookAppointment = () => {
       setError('Please select appointment date.')
       return
     }
-    if (mode === 'old') {
+    if (mode === 'family') {
+      if (!familyAccountId) {
+        setError('Please login with your mobile number first.')
+        return
+      }
+      if (!selectedFamilyMemberId || !selectedFamilyPatientId) {
+        setError('Please select a family member.')
+        return
+      }
+      if (!familyConsultantId) {
+        setError('Please select a consultant.')
+        return
+      }
+      if (!familyPatientName || !familyGender) {
+        setError('Please fill patient name and gender.')
+        return
+      }
+    } else if (mode === 'old') {
       if (!oldMobile || !oldConsultationType || !oldConsultantId || !oldOpdNo) {
         setError('Please fill all mandatory fields.')
         return
@@ -166,6 +428,11 @@ export const BookAppointment = () => {
     } else if (mode === 'new') {
       if (!newConsultantId || !newName || !newGender || !newMobile) {
         setError('Please fill all mandatory fields.')
+        return
+      }
+      const ageNum = newAge ? Number(newAge) : NaN
+      if (!newAge || isNaN(ageNum) || ageNum < 18) {
+        setError('Age must be 18 or above.')
         return
       }
     }
@@ -177,7 +444,20 @@ export const BookAppointment = () => {
     setError(null)
     try {
       let res: { appointmentId: string; patientId: string }
-      if (mode === 'old') {
+      if (mode === 'family') {
+        res = await publicAppointmentService.bookFamilyAppointment({
+          patientId: selectedFamilyPatientId!,
+          consultantId: familyConsultantId,
+          appointmentDate,
+          preferredSlot: preferredSlot || undefined,
+          consultationType: familyConsultationType || undefined,
+          opdNumber: familyOpdNo || undefined,
+          patientName: familyPatientName || undefined,
+          gender: familyGender || undefined,
+          address: familyAddress || undefined,
+          ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
+        })
+      } else if (mode === 'old') {
         res = await publicAppointmentService.bookOldPatientAppointment({
           mobileNumber: oldMobile.trim(),
           consultationType: oldConsultationType,
@@ -269,12 +549,52 @@ export const BookAppointment = () => {
     }
     if (distanceKmValue != null) {
       return (
-        <p className="appt-timing-msg" style={{ marginTop: 12 }}>
-          You are approximately <strong>{distanceKmValue.toFixed(1)} km</strong> from <strong>{selectedConsultant.name}</strong>&apos;s clinic.
-          {selectedConsultant.clinicAddress && (
-            <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem' }}>{selectedConsultant.clinicAddress}</span>
+        <div className="appt-timing-msg" style={{ marginTop: 12 }}>
+          <div>
+            You are approximately <strong>{distanceKmValue.toFixed(1)} km</strong> from <strong>{selectedConsultant.name}</strong>&apos;s clinic.
+          </div>
+          {locationAccuracyMeters != null && (
+            <div style={{ marginTop: 6, fontSize: '0.9rem', color: '#475569' }}>
+              Location accuracy: <strong>±{Math.round(locationAccuracyMeters)} m</strong>
+              {locationFetchedAt && (
+                <span> · Updated {locationFetchedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+              )}
+            </div>
           )}
-        </p>
+          {userLocation && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <a
+                className="public-cta"
+                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#0369a1' }}
+                href={`https://www.google.com/maps?q=${userLocation.lat},${userLocation.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View my location on map
+              </a>
+              <a
+                className="public-cta"
+                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#1e40af' }}
+                href={`https://www.google.com/maps?q=${selectedConsultant.clinicLatitude},${selectedConsultant.clinicLongitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View clinic on map
+              </a>
+              <button
+                type="button"
+                className="public-cta"
+                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#334155' }}
+                onClick={fetchUserLocation}
+              >
+                Refresh location
+              </button>
+            </div>
+          )}
+          {selectedConsultant.clinicAddress && (
+            <span style={{ display: 'block', marginTop: 10, fontSize: '0.9rem' }}>{selectedConsultant.clinicAddress}</span>
+          )}
+        </div>
       )
     }
     return (
@@ -288,12 +608,338 @@ export const BookAppointment = () => {
 
   const renderModeChooser = () => (
     <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 32 }}>
+      <button type="button" className="public-cta" onClick={selectFamily}>
+        Family Booking
+      </button>
       <button type="button" className="public-cta" onClick={selectOld}>
         Old Patient
       </button>
       <button type="button" className="public-cta" onClick={selectNew}>
         New Patient
       </button>
+    </div>
+  )
+
+  const renderFamilyForm = () => (
+    <div className="appt-card">
+      <h2 className="public-section-title" style={{ marginBottom: 6 }}>Family Booking</h2>
+      <p className="public-section-text" style={{ marginBottom: 16 }}>
+        Enter your <strong>primary mobile number</strong>, then select a family member (or add a new one).
+      </p>
+
+      <div className="appt-two-cols">
+        <div className="appt-field">
+          <label>Primary Mobile No *</label>
+          <input
+            type="tel"
+            value={familyMobile}
+            onChange={(e) => setFamilyMobile(e.target.value)}
+            placeholder="Enter mobile number"
+          />
+        </div>
+        <div className="appt-field" style={{ justifyContent: 'flex-end' }}>
+          <label>&nbsp;</label>
+          <button type="button" className="public-cta" onClick={handleFamilyLogin}>
+            Load Family
+          </button>
+        </div>
+      </div>
+
+      {familyAccountId && (
+        <>
+          <div className="appt-field">
+            <label>Select Family Member *</label>
+            <select
+              value={selectedFamilyMemberId}
+              onChange={(e) => setSelectedFamilyMemberId(e.target.value)}
+            >
+              <option value="">Select member</option>
+              {familyMembers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.fullName} ({m.relation})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <button type="button" className="public-cta" style={{ padding: '8px 16px', fontSize: '0.95rem' }} onClick={() => setAddingMember((v) => !v)}>
+              {addingMember ? 'Close Member Form' : '+ Add Family Member'}
+            </button>
+            <p className="public-section-text" style={{ margin: 0, alignSelf: 'center' }}>
+              Members: <strong>{familyMembers.length}</strong>
+            </p>
+          </div>
+
+          {familyMembers.length > 0 && (
+            <div className="appt-summary" style={{ marginBottom: 16 }}>
+              <p className="public-section-text" style={{ margin: '0 0 8px' }}>
+                Your family members:
+              </p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {familyMembers.map((m) => (
+                  <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#0f172a' }}>
+                        {m.fullName} <span style={{ fontWeight: 400, color: '#64748b' }}>({m.relation})</span>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                        {m.patient?.gender && <span>{m.patient.gender}</span>}
+                        {m.patient?.gender && m.patient?.address && <span> · </span>}
+                        {m.patient?.address && <span>{m.patient.address}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="public-cta"
+                        style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                        onClick={() => setSelectedFamilyMemberId(m.id)}
+                      >
+                        Use for booking
+                      </button>
+                      <button
+                        type="button"
+                        className="public-cta"
+                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#0369a1' }}
+                        onClick={() => handleViewHistory(m.id)}
+                      >
+                        View records
+                      </button>
+                      <button
+                        type="button"
+                        className="public-cta"
+                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#4b5563' }}
+                        onClick={() => startEditMember(m)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="public-cta"
+                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#b91c1c' }}
+                        onClick={() => handleDeleteMember(m.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {addingMember && (
+            <div className="appt-card" style={{ background: '#f8fafc', borderColor: '#e2e8f0', boxShadow: 'none' }}>
+              <h3 className="public-section-title" style={{ marginBottom: 12, fontSize: '1.1rem' }}>
+                {editingMemberId ? 'Edit Family Member' : 'Add Family Member'}
+              </h3>
+              <div className="appt-field">
+                <label>Full Name *</label>
+                <input
+                  type="text"
+                  value={newMemberFullName}
+                  onChange={(e) => setNewMemberFullName(e.target.value)}
+                  placeholder="e.g. Rohan Sharma"
+                />
+              </div>
+              <div className="appt-two-cols">
+                <div className="appt-field">
+                  <label>Relation *</label>
+                  <select value={newMemberRelation} onChange={(e) => setNewMemberRelation(e.target.value as FamilyRelation)}>
+                    {RELATIONS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="appt-field">
+                  <label>Gender</label>
+                  <select value={newMemberGender} onChange={(e) => setNewMemberGender(e.target.value as any)}>
+                    <option value="">Select Gender</option>
+                    {GENDERS.map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="appt-two-cols">
+                <div className="appt-field">
+                  <label>Date of Birth</label>
+                  <input type="date" value={newMemberDob} onChange={(e) => setNewMemberDob(e.target.value)} />
+                </div>
+                <div className="appt-field">
+                  <label>Address</label>
+                  <input type="text" value={newMemberAddress} onChange={(e) => setNewMemberAddress(e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+                <button type="button" className="public-cta" onClick={handleAddFamilyMember}>
+                  Save Member
+                </button>
+                <button
+                  type="button"
+                  className="public-cta"
+                  style={{ background: '#334155' }}
+                  onClick={() => {
+                    setAddingMember(false)
+                    setEditingMemberId(null)
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="appt-field">
+            <label>Consultation Type</label>
+            <select value={familyConsultationType} onChange={(e) => setFamilyConsultationType(e.target.value)}>
+              {CONSULTATION_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="appt-two-cols">
+            <div className="appt-field">
+              <label>Name of Consultant *</label>
+              <select
+                value={familyConsultantId}
+                onChange={(e) => setFamilyConsultantId(e.target.value)}
+                disabled={loadingConsultants}
+              >
+                {consultants.length === 0 && <option value="">Loading…</option>}
+                {consultants.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="appt-field">
+              <label>Patient OPD No (optional)</label>
+              <input
+                type="text"
+                value={familyOpdNo}
+                onChange={(e) => setFamilyOpdNo(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {renderDistanceBlock()}
+
+          <div className="appt-two-cols">
+            <div className="appt-field">
+              <label>Patient Name *</label>
+              <input
+                type="text"
+                value={familyPatientName}
+                onChange={(e) => setFamilyPatientName(e.target.value)}
+                disabled={!selectedFamilyMemberId}
+              />
+            </div>
+            <div className="appt-field">
+              <label>Gender *</label>
+              <select value={familyGender} onChange={(e) => setFamilyGender(e.target.value)} disabled={!selectedFamilyMemberId}>
+                <option value="">Select Gender</option>
+                {GENDERS.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="appt-field">
+            <label>Address</label>
+            <input
+              type="text"
+              value={familyAddress}
+              onChange={(e) => setFamilyAddress(e.target.value)}
+              disabled={!selectedFamilyMemberId}
+            />
+          </div>
+
+          <div className="appt-two-cols">
+            <div className="appt-field">
+              <label>Appointment Date *</label>
+              <input
+                type="date"
+                value={appointmentDate}
+                onChange={(e) => setAppointmentDate(e.target.value)}
+                min={new Date().toISOString().slice(0, 10)}
+              />
+            </div>
+            <div className="appt-field">
+              <label>Preferred time (approx)</label>
+              <select value={preferredSlot} onChange={(e) => setPreferredSlot(e.target.value)}>
+                <option value="">Select slot</option>
+                {TIME_SLOTS.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <p className="appt-timing-msg">
+            You may come anytime between <strong>10 AM and 3 PM</strong>.
+          </p>
+
+          <button type="button" className="public-cta" style={{ marginTop: 16 }} onClick={goToPayment}>
+            Next
+          </button>
+
+          {viewingHistoryForId && (
+            <div className="appt-card" style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                <h3 className="public-section-title" style={{ marginBottom: 0, fontSize: '1.05rem' }}>Health Records</h3>
+                <button
+                  type="button"
+                  className="public-cta"
+                  style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#334155' }}
+                  onClick={() => {
+                    setViewingHistoryForId(null)
+                    setMemberHistory(null)
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+              {loadingHistory && (
+                <p className="public-section-text">Loading health records…</p>
+              )}
+              {!loadingHistory && memberHistory && (
+                <>
+                  <p className="public-section-text" style={{ marginBottom: 10 }}>
+                    <strong>{memberHistory.member.fullName}</strong> ({memberHistory.member.relation}) – {memberHistory.member.patient.mobileNumber}
+                  </p>
+                  {memberHistory.visits.length === 0 && (
+                    <p className="public-section-text">No visits found for this member yet.</p>
+                  )}
+                  {memberHistory.visits.length > 0 && (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                      {memberHistory.visits.map((v) => (
+                        <li key={v.id} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff' }}>
+                          <div style={{ fontSize: '0.9rem', color: '#0f172a' }}>
+                            <strong>{new Date(v.visitDate).toLocaleDateString()}</strong>
+                            {v.doctorName && <span style={{ color: '#64748b' }}> · {v.doctorName}</span>}
+                          </div>
+                          {v.reason && (
+                            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                              Reason: {v.reason}
+                            </div>
+                          )}
+                          {v.notes && (
+                            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                              Notes: {v.notes}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 
@@ -431,12 +1077,21 @@ export const BookAppointment = () => {
       </div>
       <div className="appt-two-cols">
         <div className="appt-field">
-          <label>Age</label>
+          <label>Age *</label>
           <input
             type="number"
             value={newAge}
             onChange={(e) => setNewAge(e.target.value)}
+            min={18}
+            placeholder="18 or above"
+            style={{
+              borderColor: newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) ? '#dc2626' : undefined,
+              boxShadow: newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) ? '0 0 0 2px rgba(220, 38, 38, 0.2)' : undefined,
+            }}
           />
+          {newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) && (
+            <p style={{ color: '#dc2626', fontSize: '0.8rem', marginTop: 4 }}>Age must be 18 or above</p>
+          )}
         </div>
         <div className="appt-field">
           <label>Gender *</label>
@@ -532,9 +1187,19 @@ export const BookAppointment = () => {
     </div>
   )
 
-  const getConfirmName = () => (mode === 'old' ? (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—' : newName || '—')
-  const getConfirmMobile = () => (mode === 'old' ? oldMobile : newMobile) || '—'
-  const getConfirmEmail = () => (mode === 'old' ? oldEmail : newEmail).trim() || '—'
+  const getConfirmName = () => {
+    if (mode === 'family') return familyPatientName || selectedFamilyMember?.fullName || '—'
+    if (mode === 'old') return (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—'
+    return newName || '—'
+  }
+  const getConfirmMobile = () => {
+    if (mode === 'family') return familyMobile || '—'
+    return (mode === 'old' ? oldMobile : newMobile) || '—'
+  }
+  const getConfirmEmail = () => {
+    if (mode === 'family') return '—'
+    return (mode === 'old' ? oldEmail : newEmail).trim() || '—'
+  }
 
   const renderConfirm = () => (
     <div className="appt-card" style={{ textAlign: 'center' }}>
@@ -555,6 +1220,7 @@ export const BookAppointment = () => {
       <p className="public-section-text" style={{ marginBottom: 24 }}>
         You will be contacted by the clinic if any changes are required.
       </p>
+
       <Link to="/" className="public-cta">
         Back to Home
       </Link>
@@ -578,7 +1244,7 @@ export const BookAppointment = () => {
         {policyAccepted && (
           <>
             <p className="public-section-text" style={{ marginBottom: 20 }}>
-              Please choose whether you are an old patient or a new patient.
+              Please choose how you want to book.
             </p>
             {step === 'details' && mode === 'none' && renderModeChooser()}
           </>
@@ -588,6 +1254,7 @@ export const BookAppointment = () => {
             {error}
           </p>
         )}
+        {policyAccepted && step === 'details' && mode === 'family' && renderFamilyForm()}
         {policyAccepted && step === 'details' && mode === 'old' && renderOldForm()}
         {policyAccepted && step === 'details' && mode === 'new' && renderNewForm()}
         {policyAccepted && step === 'payment' && renderPayment()}

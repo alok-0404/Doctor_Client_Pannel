@@ -247,6 +247,9 @@ export const getDoctorProfile = async (
     availabilityStatus?: string;
     unavailableReason?: string;
     unavailableUntil?: string;
+    clinicLatitude?: number;
+    clinicLongitude?: number;
+    clinicAddress?: string;
   } = {
     id: req.doctor._id.toString(),
     name: req.doctor.name,
@@ -269,12 +272,15 @@ export const getDoctorProfile = async (
     }
   } else if (req.doctor.role === "DOCTOR") {
     const doc = await Doctor.findById(req.doctor._id)
-      .select("availabilityStatus unavailableReason unavailableUntil")
+      .select("availabilityStatus unavailableReason unavailableUntil clinicLatitude clinicLongitude clinicAddress")
       .lean();
     if (doc) {
       payload.availabilityStatus = doc.availabilityStatus ?? "available";
       payload.unavailableReason = doc.unavailableReason;
       payload.unavailableUntil = doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined;
+      payload.clinicLatitude = (doc as any).clinicLatitude;
+      payload.clinicLongitude = (doc as any).clinicLongitude;
+      payload.clinicAddress = (doc as any).clinicAddress;
     }
   }
 

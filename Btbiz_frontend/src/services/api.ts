@@ -160,10 +160,21 @@ export const authService = {
       availabilityStatus?: 'available' | 'unavailable' | 'busy'
       unavailableReason?: string
       unavailableUntil?: string
+      clinicLatitude?: number
+      clinicLongitude?: number
+      clinicAddress?: string
     }
   }> {
     const res = await api.get('/auth/doctor/profile')
     return res.data as any
+  },
+
+  async updateDoctorClinic(payload: {
+    clinicLatitude?: number
+    clinicLongitude?: number
+    clinicAddress?: string
+  }): Promise<void> {
+    await api.patch('/auth/doctor/clinic', payload)
   },
 
   async updateDoctorAvailability(payload: {
@@ -201,6 +212,11 @@ export interface DoctorAppointmentItem {
   visitDate: string
   reason?: string
   notes?: string
+  /** Patient's location at time of booking (if they shared it) */
+  patientLatitude?: number
+  patientLongitude?: number
+  /** Distance in km from patient's booking location to doctor's clinic */
+  distanceKm?: number
 }
 
 export const notificationService = {
@@ -246,6 +262,13 @@ export const appointmentService = {
   async getAssistantDoctorTodayAppointments(): Promise<{ doctorId: string; appointments: DoctorAppointmentItem[] }> {
     const res = await api.get('/appointments/assistant/doctor-today')
     const data = res.data as { doctorId: string; appointments: DoctorAppointmentItem[] }
+    return data
+  },
+
+  /** For assistant: linked doctor's upcoming appointments (after today). */
+  async getAssistantDoctorUpcomingAppointments(): Promise<{ doctorId: string; appointments: DoctorAppointmentItem[]; total: number }> {
+    const res = await api.get('/appointments/assistant/doctor-upcoming')
+    const data = res.data as { doctorId: string; appointments: DoctorAppointmentItem[]; total: number }
     return data
   },
 
@@ -539,6 +562,50 @@ export interface ConsultantOption {
   clinicAddress?: string
 }
 
+export interface FamilyAccountSummary {
+  id: string
+  phone: string
+}
+
+export type FamilyRelation =
+  | 'SELF'
+  | 'SPOUSE'
+  | 'SON'
+  | 'DAUGHTER'
+  | 'FATHER'
+  | 'MOTHER'
+  | 'BROTHER'
+  | 'SISTER'
+  | 'OTHER'
+
+export interface FamilyMemberSummary {
+  id: string
+  fullName: string
+  relation: FamilyRelation
+  gender?: string
+  dateOfBirth?: string
+  patientId: string | null
+  patient: PatientSummary | null
+}
+
+export interface FamilyMemberHistory {
+  member: {
+    id: string
+    fullName: string
+    relation: FamilyRelation
+    gender?: string
+    dateOfBirth?: string
+    patient: PatientSummary
+  }
+  visits: Array<{
+    id: string
+    visitDate: string
+    reason?: string
+    notes?: string
+    doctorName?: string
+  }>
+}
+
 export const publicAppointmentService = {
   async listConsultants(): Promise<ConsultantOption[]> {
     const res = await api.get('/public/doctors')
@@ -589,6 +656,84 @@ export const publicAppointmentService = {
   }): Promise<{ appointmentId: string; patientId: string }> {
     const res = await api.post('/public/appointments/new', payload)
     return res.data as { appointmentId: string; patientId: string }
+  },
+
+  async familyLoginOrCreate(mobileNumber: string): Promise<FamilyAccountSummary> {
+    const res = await api.post('/public/family/login-or-create', { mobileNumber })
+    const data = res.data as { account: FamilyAccountSummary }
+    return data.account
+  },
+
+  async listFamilyMembers(params: { mobile?: string; accountId?: string }): Promise<{
+    account: FamilyAccountSummary
+    members: FamilyMemberSummary[]
+  }> {
+    const res = await api.get('/public/family/members', { params })
+    return res.data as any
+  },
+
+  async addFamilyMember(payload: {
+    accountId: string
+    fullName: string
+    relation: FamilyRelation
+    gender?: 'MALE' | 'FEMALE' | 'OTHER'
+    dateOfBirth?: string
+    address?: string
+  }): Promise<{ member: { id: string; fullName: string; relation: FamilyRelation; patientId: string } }> {
+    const res = await api.post('/public/family/members', payload)
+    return res.data as any
+  },
+
+  async updateFamilyMember(
+    memberId: string,
+    payload: Partial<{
+      fullName: string
+      relation: FamilyRelation
+      gender: 'MALE' | 'FEMALE' | 'OTHER'
+      dateOfBirth: string
+      address: string
+    }>
+  ): Promise<void> {
+    await api.patch(`/public/family/members/${memberId}`, payload)
+  },
+
+  async deleteFamilyMember(memberId: string): Promise<void> {
+    await api.delete(`/public/family/members/${memberId}`)
+  },
+
+  async getFamilyMemberHistory(memberId: string): Promise<FamilyMemberHistory> {
+    const res = await api.get(`/public/family/member-history/${memberId}`)
+    return res.data as any
+  },
+
+  async bookFamilyAppointment(payload: {
+    patientId: string
+    consultantId: string
+    appointmentDate: string
+    preferredSlot?: string
+    consultationType?: string
+    opdNumber?: string
+    patientName?: string
+    gender?: string
+    address?: string
+    patientLatitude?: number
+    patientLongitude?: number
+  }): Promise<{ appointmentId: string; patientId: string }> {
+    const res = await api.post('/public/appointments/family', payload)
+    return res.data as any
+  },
+
+  async updateAppointmentLiveLocation(payload: {
+    appointmentId: string
+    patientLatitude: number
+    patientLongitude: number
+    accuracyMeters?: number
+  }): Promise<void> {
+    await api.patch(`/public/appointments/${payload.appointmentId}/location`, {
+      patientLatitude: payload.patientLatitude,
+      patientLongitude: payload.patientLongitude,
+      accuracyMeters: payload.accuracyMeters,
+    })
   },
 }
 

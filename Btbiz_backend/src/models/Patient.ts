@@ -22,7 +22,9 @@ const PatientSchema = new Schema<IPatient>(
     mobileNumber: {
       type: String,
       required: true,
-      unique: true,
+      // Allow multiple patients to share the same mobile number so that
+      // a single primary phone can be used for multiple family members.
+      // We keep the index for faster lookups by mobile.
       index: true
     },
     dateOfBirth: { type: Date },

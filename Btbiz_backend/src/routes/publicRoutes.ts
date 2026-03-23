@@ -3,12 +3,16 @@ import mongoose from "mongoose";
 
 import { Doctor } from "../models/Doctor";
 import { DoctorNotification } from "../models/DoctorNotification";
+import { Patient } from "../models/Patient";
+import { Visit } from "../models/Visit";
 import {
   createPatient as createPatientService,
   createVisit as createVisitService,
   findPatientByMobile,
   updatePatient as updatePatientService
 } from "../services/patientService";
+import { FamilyAccount } from "../models/FamilyAccount";
+import { FamilyMember } from "../models/FamilyMember";
 import { getIo } from "../socket";
 
 const router = Router();
@@ -66,6 +70,343 @@ router.get("/doctors", async (_req, res) => {
   }
 });
 
+// POST /public/family/login-or-create
+// Body: { mobileNumber: string }
+// Creates or finds a FamilyAccount for the given phone.
+router.post("/family/login-or-create", async (req, res) => {
+  try {
+    const { mobileNumber } = req.body as { mobileNumber?: string };
+    if (!mobileNumber) {
+      res.status(400).json({ message: "mobileNumber is required" });
+      return;
+    }
+
+    const trimmed = mobileNumber.trim();
+    if (!trimmed) {
+      res.status(400).json({ message: "mobileNumber is required" });
+      return;
+    }
+
+    let accountDoc = await FamilyAccount.findOne({ phone: trimmed });
+    if (!accountDoc) {
+      accountDoc = await FamilyAccount.create({ phone: trimmed });
+    }
+
+    res.status(200).json({
+      account: {
+        id: accountDoc._id.toString(),
+        phone: accountDoc.phone
+      }
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/login-or-create error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /public/family/members?mobile=... | accountId=...
+router.get("/family/members", async (req, res) => {
+  try {
+    const mobile = (req.query.mobile as string | undefined)?.trim();
+    const accountId = req.query.accountId as string | undefined;
+
+    let accountFilter: any = null;
+    if (accountId && accountId.trim()) {
+      if (!mongoose.isValidObjectId(accountId)) {
+        res.status(400).json({ message: "Invalid accountId" });
+        return;
+      }
+      accountFilter = { _id: new mongoose.Types.ObjectId(accountId) };
+    } else if (mobile) {
+      accountFilter = { phone: mobile };
+    } else {
+      res.status(400).json({ message: "Either mobile or accountId is required" });
+      return;
+    }
+
+    const account = await FamilyAccount.findOne(accountFilter).lean();
+    if (!account) {
+      res.status(404).json({ message: "Family account not found" });
+      return;
+    }
+
+    const members = await FamilyMember.find({ account: (account as any)._id })
+      .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
+      .sort({ createdAt: 1 })
+      .lean();
+
+    res.status(200).json({
+      account: {
+        id: (account as any)._id.toString(),
+        phone: account.phone
+      },
+      members: members.map((m: any) => ({
+        id: m._id.toString(),
+        fullName: m.fullName,
+        relation: m.relation,
+        gender: m.gender,
+        dateOfBirth: m.dateOfBirth,
+        patientId: m.patient?._id?.toString() ?? null,
+        patient: m.patient
+          ? {
+              id: m.patient._id.toString(),
+              firstName: m.patient.firstName,
+              lastName: m.patient.lastName,
+              mobileNumber: m.patient.mobileNumber,
+              gender: m.patient.gender,
+              dateOfBirth: m.patient.dateOfBirth,
+              address: m.patient.address
+            }
+          : null
+      }))
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/members error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /public/family/members
+// Body: { accountId, fullName, relation, gender?, dateOfBirth?, address? }
+router.post("/family/members", async (req, res) => {
+  try {
+    const body = req.body as {
+      accountId?: string;
+      fullName?: string;
+      relation?: string;
+      gender?: "MALE" | "FEMALE" | "OTHER";
+      dateOfBirth?: string;
+      address?: string;
+    };
+
+    if (!body.accountId || !mongoose.isValidObjectId(body.accountId)) {
+      res.status(400).json({ message: "Valid accountId is required" });
+      return;
+    }
+    if (!body.fullName) {
+      res.status(400).json({ message: "fullName is required" });
+      return;
+    }
+    if (!body.relation) {
+      res.status(400).json({ message: "relation is required" });
+      return;
+    }
+
+    const account = await FamilyAccount.findById(body.accountId).lean();
+    if (!account) {
+      res.status(404).json({ message: "Family account not found" });
+      return;
+    }
+
+    const nameParts = body.fullName.trim().split(" ");
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(" ") || undefined;
+
+    // For family members we conceptually allow multiple people to share the same mobile number
+    // (the account phone is the shared primary phone). However, the underlying DB may still have
+    // a unique index on mobileNumber. To avoid duplicate key errors we:
+    // 1) First try to find an existing Patient with this phone.
+    // 2) If found, reuse it.
+    // 3) If not found, create a new Patient.
+    let patient = await Patient.findOne({ mobileNumber: (account as any).phone });
+    if (!patient) {
+      patient = await Patient.create({
+        firstName,
+        lastName,
+        mobileNumber: (account as any).phone,
+        gender: body.gender,
+        address: body.address
+      });
+    }
+
+    const member = await FamilyMember.create({
+      account: (account as any)._id,
+      patient: (patient as any)._id,
+      fullName: body.fullName.trim(),
+      relation: body.relation,
+      gender: body.gender,
+      dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined
+    });
+
+    res.status(201).json({
+      member: {
+        id: (member as any)._id.toString(),
+        fullName: member.fullName,
+        relation: member.relation,
+        gender: member.gender,
+        dateOfBirth: member.dateOfBirth,
+        patientId: (patient as any)._id.toString()
+      }
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/members POST error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /public/family/members/:id
+// Body: { fullName?, relation?, gender?, dateOfBirth?, address? }
+router.patch("/family/members/:id", async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    if (!mongoose.isValidObjectId(memberId)) {
+      res.status(400).json({ message: "Invalid member id" });
+      return;
+    }
+
+    const body = req.body as {
+      fullName?: string;
+      relation?: string;
+      gender?: "MALE" | "FEMALE" | "OTHER";
+      dateOfBirth?: string;
+      address?: string;
+    };
+
+    const member = await FamilyMember.findById(memberId);
+    if (!member) {
+      res.status(404).json({ message: "Family member not found" });
+      return;
+    }
+
+    if (body.fullName && body.fullName.trim()) {
+      member.fullName = body.fullName.trim();
+      const parts = member.fullName.split(" ");
+      const firstName = parts[0];
+      const lastName = parts.slice(1).join(" ") || undefined;
+      await Patient.findByIdAndUpdate(
+        member.patient,
+        {
+          $set: {
+            firstName,
+            ...(lastName !== undefined && { lastName })
+          }
+        },
+        { new: false }
+      );
+    }
+    if (body.relation) {
+      member.relation = body.relation as any;
+    }
+    if (body.gender) {
+      member.gender = body.gender;
+      await Patient.findByIdAndUpdate(
+        member.patient,
+        { $set: { gender: body.gender } },
+        { new: false }
+      );
+    }
+    if (body.dateOfBirth) {
+      member.dateOfBirth = new Date(body.dateOfBirth);
+    }
+    if (body.address !== undefined) {
+      await Patient.findByIdAndUpdate(
+        member.patient,
+        { $set: { address: body.address } },
+        { new: false }
+      );
+    }
+
+    await member.save();
+
+    res.status(200).json({
+      member: {
+        id: (member as any)._id.toString(),
+        fullName: member.fullName,
+        relation: member.relation,
+        gender: member.gender,
+        dateOfBirth: member.dateOfBirth,
+        patientId: (member as any).patient.toString()
+      }
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/members PATCH error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// DELETE /public/family/members/:id
+// Note: We only remove the FamilyMember link; the underlying Patient and visits remain
+// so that doctor-side history is preserved.
+router.delete("/family/members/:id", async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    if (!mongoose.isValidObjectId(memberId)) {
+      res.status(400).json({ message: "Invalid member id" });
+      return;
+    }
+    const result = await FamilyMember.findByIdAndDelete(memberId);
+    if (!result) {
+      res.status(404).json({ message: "Family member not found" });
+      return;
+    }
+    res.status(204).send();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/members DELETE error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /public/family/member-history/:id
+// Returns a limited view of a family member's health history for public portal.
+router.get("/family/member-history/:id", async (req, res) => {
+  try {
+    const memberId = req.params.id;
+    if (!mongoose.isValidObjectId(memberId)) {
+      res.status(400).json({ message: "Invalid member id" });
+      return;
+    }
+
+    const member = await FamilyMember.findById(memberId)
+      .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
+      .lean();
+    if (!member || !member.patient) {
+      res.status(404).json({ message: "Family member not found" });
+      return;
+    }
+
+    const patientId = (member.patient as any)._id;
+    const visits = await Visit.find({ patient: patientId })
+      .sort({ visitDate: -1 })
+      .populate("doctor", "name")
+      .lean();
+
+    res.status(200).json({
+      member: {
+        id: (member as any)._id.toString(),
+        fullName: (member as any).fullName,
+        relation: (member as any).relation,
+        gender: (member as any).gender,
+        dateOfBirth: (member as any).dateOfBirth,
+        patient: {
+          id: patientId.toString(),
+          firstName: (member.patient as any).firstName,
+          lastName: (member.patient as any).lastName,
+          mobileNumber: (member.patient as any).mobileNumber,
+          gender: (member.patient as any).gender,
+          dateOfBirth: (member.patient as any).dateOfBirth,
+          address: (member.patient as any).address
+        }
+      },
+      visits: visits.map((v: any) => ({
+        id: v._id.toString(),
+        visitDate: v.visitDate,
+        reason: v.reason,
+        notes: v.notes,
+        doctorName: v.doctor?.name ?? undefined
+      }))
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/member-history error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // GET /public/patient-by-mobile?mobile=...
 router.get("/patient-by-mobile", async (req, res) => {
   try {
@@ -74,6 +415,28 @@ router.get("/patient-by-mobile", async (req, res) => {
       res.status(400).json({ message: "Query parameter 'mobile' is required" });
       return;
     }
+
+    // If the same mobile is linked to multiple family members, the old flow becomes ambiguous.
+    // In that case, ask the client to use the family flow (member selection).
+    const digits = mobile.replace(/\D/g, "");
+    const last10 = digits.slice(-10);
+    const candidates = new Set<string>();
+    if (mobile) candidates.add(mobile);
+    if (last10) {
+      candidates.add(last10);
+      candidates.add(`+91${last10}`);
+    }
+    const matchCount = await Patient.countDocuments({
+      mobileNumber: { $in: Array.from(candidates) }
+    });
+    if (matchCount > 1) {
+      res.status(409).json({
+        message:
+          "Multiple family members are linked to this mobile number. Please use Family Booking to select the member."
+      });
+      return;
+    }
+
     const patient = await findPatientByMobile(mobile);
     if (!patient) {
       res.status(404).json({ message: "Patient not found" });
@@ -249,6 +612,156 @@ router.post("/appointments/new", async (req, res) => {
         return;
       }
     }
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /public/appointments/family
+// Create an appointment (Visit) for a specific patientId (family member).
+router.post("/appointments/family", async (req, res) => {
+  try {
+    const body = req.body as {
+      patientId?: string;
+      consultantId?: string;
+      appointmentDate?: string;
+      preferredSlot?: string;
+      consultationType?: string;
+      opdNumber?: string;
+      patientName?: string;
+      gender?: string;
+      address?: string;
+      patientLatitude?: number;
+      patientLongitude?: number;
+    };
+
+    if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
+      res.status(400).json({ message: "Valid patientId is required" });
+      return;
+    }
+    if (!body.consultantId || !body.appointmentDate) {
+      res.status(400).json({ message: "Missing required fields for family appointment" });
+      return;
+    }
+
+    const patient = await Patient.findById(body.patientId);
+    if (!patient) {
+      res.status(404).json({ message: "Patient not found" });
+      return;
+    }
+
+    const updatePayload: any = {};
+    if (body.patientName) {
+      const trimmed = body.patientName.trim();
+      if (trimmed) {
+        const parts = trimmed.split(" ");
+        updatePayload.firstName = parts[0];
+        updatePayload.lastName = parts.slice(1).join(" ") || undefined;
+      }
+    }
+    if (body.gender) updatePayload.gender = body.gender;
+    if (body.address) updatePayload.address = body.address;
+
+    if (Object.keys(updatePayload).length > 0) {
+      await updatePatientService((patient as any)._id.toString(), updatePayload);
+    }
+
+    const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
+    const notesParts: string[] = [];
+    if (body.opdNumber) notesParts.push(`OPD No: ${body.opdNumber}`);
+    if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
+
+    const visit = await createVisitService({
+      patientId: (patient as any)._id.toString(),
+      doctorId: body.consultantId,
+      visitDate,
+      reason: body.consultationType || "Family appointment",
+      notes: notesParts.join(". ") || undefined,
+      patientLatitude: body.patientLatitude,
+      patientLongitude: body.patientLongitude
+    });
+
+    // Notify doctor similarly to online appointment flow (optional, matches existing pattern if you already do it elsewhere).
+    try {
+      const notification = await DoctorNotification.create({
+        doctor: new mongoose.Types.ObjectId(body.consultantId),
+        patient: (patient as any)._id,
+        patientName: `${patient.firstName} ${patient.lastName ?? ""}`.trim(),
+        visit: (visit as any)._id,
+        source: "ONLINE_APPOINTMENT"
+      });
+      const io = getIo();
+      if (io) {
+        io.to(body.consultantId).emit("doctor_notification", {
+          id: (notification as any)._id.toString()
+        });
+      }
+    } catch {
+      // ignore notification errors
+    }
+
+    res.status(201).json({
+      appointmentId: (visit as any)._id.toString(),
+      patientId: (patient as any)._id.toString()
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /appointments/family error:", error);
+    if (error instanceof Error) {
+      if (error.message === "DOCTOR_NOT_FOUND" || error.message === "INVALID_DOCTOR_ID") {
+        res.status(400).json({ message: "Selected consultant is invalid. Please try again." });
+        return;
+      }
+      if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
+        res.status(404).json({ message: "Patient not found. Please check the selected member." });
+        return;
+      }
+    }
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /public/appointments/:appointmentId/location
+// Allows the patient device to keep updating their live location for the appointment day.
+router.patch("/appointments/:appointmentId/location", async (req, res) => {
+  try {
+    const appointmentId = req.params.appointmentId;
+    if (!mongoose.isValidObjectId(appointmentId)) {
+      res.status(400).json({ message: "Invalid appointmentId" });
+      return;
+    }
+
+    const body = req.body as {
+      patientLatitude?: number;
+      patientLongitude?: number;
+      accuracyMeters?: number;
+    };
+
+    if (typeof body.patientLatitude !== "number" || typeof body.patientLongitude !== "number") {
+      res.status(400).json({ message: "patientLatitude and patientLongitude are required" });
+      return;
+    }
+
+    const updated = await Visit.findByIdAndUpdate(
+      appointmentId,
+      {
+        $set: {
+          patientLatitude: body.patientLatitude,
+          patientLongitude: body.patientLongitude,
+          ...(typeof body.accuracyMeters === "number" && { patientLocationAccuracyMeters: body.accuracyMeters })
+        }
+      },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      res.status(404).json({ message: "Appointment not found" });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public PATCH /appointments/:id/location error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

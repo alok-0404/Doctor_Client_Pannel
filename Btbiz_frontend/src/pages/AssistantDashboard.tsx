@@ -56,8 +56,11 @@ export const AssistantDashboard = () => {
   const [doctorAvailabilityStatus, setDoctorAvailabilityStatus] = useState<AvailabilityStatus>('available')
   const [doctorUnavailableReason, setDoctorUnavailableReason] = useState<string | null>(null)
   const [doctorUnavailableUntil, setDoctorUnavailableUntil] = useState<string | null>(null)
+  const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
+  const [upcomingAppointments, setUpcomingAppointments] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsLoading, setTodayPatientsLoading] = useState(false)
+  const [upcomingPatientsLoading, setUpcomingPatientsLoading] = useState(false)
 
   // File upload for reports / prescriptions
   const [docFile, setDocFile] = useState<File | null>(null)
@@ -89,11 +92,25 @@ export const AssistantDashboard = () => {
     setTodayPatientsLoading(true)
     try {
       const { appointments } = await appointmentService.getAssistantDoctorTodayAppointments()
-      setTodayPatientsToContact(appointments)
+      setTodayAppointments(appointments ?? [])
+      setTodayPatientsToContact((appointments ?? []).filter((a) => typeof a.distanceKm === 'number' && a.distanceKm <= 0.5))
     } catch {
       setTodayPatientsToContact([])
+      setTodayAppointments([])
     } finally {
       setTodayPatientsLoading(false)
+    }
+  }
+
+  const loadUpcomingPatientsForDoctor = async () => {
+    setUpcomingPatientsLoading(true)
+    try {
+      const { appointments } = await appointmentService.getAssistantDoctorUpcomingAppointments()
+      setUpcomingAppointments(appointments ?? [])
+    } catch {
+      setUpcomingAppointments([])
+    } finally {
+      setUpcomingPatientsLoading(false)
     }
   }
 
@@ -418,11 +435,20 @@ export const AssistantDashboard = () => {
     void loadProfile()
   }, [])
 
-  // Load today's patients when doctor is unavailable/busy (for contact list)
+  // Load today's + upcoming appointments for assistant view.
   useEffect(() => {
-    if (doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') {
+    void loadTodayPatientsForDoctor()
+    void loadUpcomingPatientsForDoctor()
+    const timer = window.setInterval(() => {
       void loadTodayPatientsForDoctor()
-    } else {
+      void loadUpcomingPatientsForDoctor()
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  // If doctor is available, hide the "to contact" list.
+  useEffect(() => {
+    if (doctorAvailabilityStatus === 'available') {
       setTodayPatientsToContact([])
     }
   }, [doctorAvailabilityStatus])
@@ -471,8 +497,9 @@ export const AssistantDashboard = () => {
     <div className="app-shell">
       <Header clinicName="Check‑in desk" doctorName={name} />
       <main className="search-main" style={{ padding: 24, maxWidth: '100%', width: '100%' }}>
+        <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {referredToDoctorName && (
-          <div style={{ marginBottom: 32, marginRight: 48 }}>
+          <div style={{ marginBottom: 0 }}>
           <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Your doctor&apos;s availability</p>
             <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8 }}>
@@ -504,13 +531,13 @@ export const AssistantDashboard = () => {
             {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (
               <div style={{ marginTop: 12 }}>
                 <p className="dashboard-body" style={{ fontSize: 13, color: '#334155', marginBottom: 8 }}>
-                  Call or message these patients to inform that the doctor is not available. We will update when the doctor is available.
+                  Call or message only patients who are within <strong>500 meters</strong> of the clinic to inform that the doctor is not available.
                 </p>
                 {todayPatientsLoading ? (
                   <p className="dashboard-body" style={{ fontSize: 13 }}>Loading today&apos;s appointments…</p>
                 ) : todayPatientsToContact.length === 0 ? (
                   <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>
-                    No appointments scheduled for today.
+                    No patients are within <strong>500 meters</strong> of the clinic right now.
                   </p>
                 ) : (
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -532,6 +559,24 @@ export const AssistantDashboard = () => {
                         <div>
                           <strong>{a.patientName}</strong>
                           {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
+                          {a.distanceKm != null && (
+                            <div style={{ marginTop: 4, fontSize: 12, color: '#0d47a1' }}>
+                              {a.distanceKm < 1 ? `${Math.round(a.distanceKm * 1000)} m` : `~${a.distanceKm.toFixed(1)} km`} from clinic
+                              {a.patientLatitude != null && a.patientLongitude != null && (
+                                <>
+                                  {' · '}
+                                  <a
+                                    href={`https://www.google.com/maps?q=${a.patientLatitude},${a.patientLongitude}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: '#1565c0', textDecoration: 'underline' }}
+                                  >
+                                    View on map
+                                  </a>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                         {a.patientMobile && (
                           <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
@@ -547,6 +592,105 @@ export const AssistantDashboard = () => {
           </Card>
           </div>
         )}
+
+        <div style={{ marginBottom: 0 }}>
+          <Card className="dashboard-overview-card assistant-availability-card">
+            <p className="dashboard-kicker">Today&apos;s appointments (assistant view)</p>
+            {todayPatientsLoading ? (
+              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+            ) : todayAppointments.length === 0 ? (
+              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No appointments scheduled for today.</p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {todayAppointments.map((a) => (
+                  <li
+                    key={a.id}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      backgroundColor: '#f5f9fc',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      fontSize: 13
+                    }}
+                  >
+                    <div>
+                      <strong>{a.patientName}</strong>
+                      {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
+                      {a.distanceKm != null ? (
+                        <div style={{ marginTop: 4, fontSize: 12, color: a.distanceKm <= 0.5 ? '#2e7d32' : '#0d47a1' }}>
+                          {a.distanceKm <= 0.5
+                            ? `Within 500m (arrived) · ${Math.round(a.distanceKm * 1000)} m`
+                            : `${a.distanceKm < 1 ? `${Math.round(a.distanceKm * 1000)} m` : `~${a.distanceKm.toFixed(1)} km`} from clinic`}
+                        </div>
+                      ) : a.patientLatitude != null && a.patientLongitude != null ? (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#9aa5b1' }}>
+                          Clinic location not set
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#9aa5b1' }}>
+                          Location not shared yet
+                        </div>
+                      )}
+                    </div>
+                    {a.patientMobile && (
+                      <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                        {a.patientMobile}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        <div style={{ marginBottom: 0 }}>
+          <Card className="dashboard-overview-card assistant-availability-card">
+            <p className="dashboard-kicker">Upcoming appointments (assistant view)</p>
+            {upcomingPatientsLoading ? (
+              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+            ) : upcomingAppointments.length === 0 ? (
+              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No upcoming appointments.</p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+                {upcomingAppointments.map((a) => (
+                  <li
+                    key={a.id}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      backgroundColor: '#f5f9fc',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      fontSize: 13
+                    }}
+                  >
+                    <div>
+                      <strong>{a.patientName}</strong>
+                      <div style={{ color: '#607d8b', fontSize: 12 }}>
+                        {new Date(a.visitDate).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                      </div>
+                    </div>
+                    {a.patientMobile && (
+                      <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                        {a.patientMobile}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        {/* Existing assistant workspace below */}
 
         {step === 'search' && (
           <Card className="search-card assistant-workspace-card">
@@ -802,6 +946,7 @@ export const AssistantDashboard = () => {
             </form>
           </Card>
         )}
+        </div>
       </main>
     </div>
   )
