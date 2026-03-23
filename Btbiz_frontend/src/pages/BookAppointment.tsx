@@ -4,6 +4,7 @@ import { publicAppointmentService, type PatientSummary, type ConsultantOption, t
 
 type Mode = 'none' | 'family' | 'old' | 'new'
 type Step = 'details' | 'payment' | 'confirm'
+type PaymentMode = 'online_now' | 'cash_at_clinic'
 
 const CONSULTATION_TYPES = ['New Consultation', 'Review Appointment']
 const GENDERS = ['MALE', 'FEMALE', 'OTHER']
@@ -111,6 +112,7 @@ export const BookAppointment = () => {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
+  const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null)
   const liveShareWatchIdRef = useRef<number | null>(null)
   const lastSentMsRef = useRef<number>(0)
 
@@ -239,6 +241,7 @@ export const BookAppointment = () => {
     setStep('details')
     setError(null)
     setAppointmentId(null)
+    setSelectedPaymentMode(null)
   }
 
   const selectOld = () => {
@@ -453,7 +456,7 @@ export const BookAppointment = () => {
     setStep('payment')
   }
 
-  const handleConfirmAndPay = async () => {
+  const handleConfirmAppointment = async (paymentMode: PaymentMode) => {
     setSubmitting(true)
     setError(null)
     try {
@@ -499,6 +502,7 @@ export const BookAppointment = () => {
         })
       }
       setAppointmentId(res.appointmentId)
+      setSelectedPaymentMode(paymentMode)
       setStep('confirm')
     } catch (err: any) {
       const msg = err?.response?.data?.message
@@ -1188,16 +1192,27 @@ export const BookAppointment = () => {
         Consultation fee: <strong>₹500</strong>
       </p>
       <p className="public-section-text" style={{ marginBottom: 24 }}>
-        (Demo: Clicking the button below will mark the appointment as paid and confirm it in the system.)
+        Choose your payment preference. You can pay now during online booking, or pay cash at the clinic on appointment day.
       </p>
-      <button
-        type="button"
-        className="public-cta"
-        onClick={handleConfirmAndPay}
-        disabled={submitting}
-      >
-        {submitting ? 'Processing…' : 'Pay ₹500 & Confirm Appointment'}
-      </button>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="public-cta"
+          onClick={() => void handleConfirmAppointment('online_now')}
+          disabled={submitting}
+        >
+          {submitting ? 'Processing…' : 'Pay ₹500 Online & Confirm'}
+        </button>
+        <button
+          type="button"
+          className="public-cta"
+          onClick={() => void handleConfirmAppointment('cash_at_clinic')}
+          disabled={submitting}
+          style={{ background: '#334155' }}
+        >
+          {submitting ? 'Processing…' : 'Pay Cash at Clinic & Confirm'}
+        </button>
+      </div>
     </div>
   )
 
@@ -1229,7 +1244,10 @@ export const BookAppointment = () => {
       <div className="public-section-text" style={{ marginBottom: 16, textAlign: 'left', maxWidth: 360, marginLeft: 'auto', marginRight: 'auto' }}>
         <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Name:</strong> {getConfirmName()}</p>
         <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Mobile:</strong> {getConfirmMobile()}</p>
-        <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569' }}><strong>Email:</strong> {getConfirmEmail()}</p>
+        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Email:</strong> {getConfirmEmail()}</p>
+        <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569' }}>
+          <strong>Payment:</strong> {selectedPaymentMode === 'cash_at_clinic' ? 'Cash at clinic (on appointment day)' : 'Paid online during booking'}
+        </p>
       </div>
       <p className="public-section-text" style={{ marginBottom: 24 }}>
         You will be contacted by the clinic if any changes are required.
