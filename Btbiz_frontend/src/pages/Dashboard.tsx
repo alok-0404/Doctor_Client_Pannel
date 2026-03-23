@@ -234,6 +234,18 @@ export const Dashboard = () => {
     }
   }, [])
 
+  // Real-time sync when assistant updates doctor availability
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<{ availabilityStatus?: string; unavailableReason?: string; unavailableUntil?: string }>).detail
+      if (d?.availabilityStatus) setAvailabilityStatus(d.availabilityStatus as 'available' | 'unavailable' | 'busy')
+      if (d?.unavailableReason !== undefined) setUnavailableReason(d.unavailableReason ?? '')
+      if (d?.unavailableUntil !== undefined) setUnavailableUntil(d.unavailableUntil ?? null)
+    }
+    window.addEventListener('doctor-availability-changed', handler)
+    return () => window.removeEventListener('doctor-availability-changed', handler)
+  }, [])
+
   const pendingNotifications = notifications.filter((n) => n.status === 'unread' || n.status === 'dismissed')
   const referralNotifications = pendingNotifications.filter(
     (n) => n.source === 'ASSISTANT_REFERRAL' || !n.source

@@ -52,10 +52,16 @@ export const AssistantDashboard = () => {
   const [notesForDoctor, setNotesForDoctor] = useState('')
   const [referredToDoctorName, setReferredToDoctorName] = useState<string | null>(null)
 
-  // Doctor availability (real-time for assistant)
+  // Doctor availability (real-time for assistant) – assistant can also update on doctor's behalf
   const [doctorAvailabilityStatus, setDoctorAvailabilityStatus] = useState<AvailabilityStatus>('available')
   const [doctorUnavailableReason, setDoctorUnavailableReason] = useState<string | null>(null)
   const [doctorUnavailableUntil, setDoctorUnavailableUntil] = useState<string | null>(null)
+  const [availabilityUpdating, setAvailabilityUpdating] = useState(false)
+  const [availabilityUpdateSuccess, setAvailabilityUpdateSuccess] = useState<string | null>(null)
+  const [availabilityUpdateError, setAvailabilityUpdateError] = useState<string | null>(null)
+  const [unavailableReason, setUnavailableReason] = useState('')
+  const [unavailableDuration, setUnavailableDuration] = useState<string>('')
+  const [unavailableUntilCustom, setUnavailableUntilCustom] = useState('')
   const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
   const [upcomingAppointments, setUpcomingAppointments] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
@@ -79,12 +85,58 @@ export const AssistantDashboard = () => {
       const { doctor } = await authService.getProfile()
       if (doctor.referredToDoctorName) setReferredToDoctorName(doctor.referredToDoctorName)
       if (doctor.availabilityStatus) setDoctorAvailabilityStatus(doctor.availabilityStatus as AvailabilityStatus)
-      if (doctor.unavailableReason) setDoctorUnavailableReason(doctor.unavailableReason)
-      else setDoctorUnavailableReason(null)
+      if (doctor.unavailableReason) {
+        setDoctorUnavailableReason(doctor.unavailableReason)
+        setUnavailableReason(doctor.unavailableReason)
+      } else {
+        setDoctorUnavailableReason(null)
+        setUnavailableReason('')
+      }
       if (doctor.unavailableUntil) setDoctorUnavailableUntil(doctor.unavailableUntil)
       else setDoctorUnavailableUntil(null)
     } catch {
       // ignore
+    }
+  }
+
+  const getUnavailableUntilISO = (): string | undefined => {
+    if (doctorAvailabilityStatus === 'available') return undefined
+    if (unavailableDuration === 'custom' && unavailableUntilCustom) {
+      const d = new Date(unavailableUntilCustom)
+      return Number.isNaN(d.getTime()) ? undefined : d.toISOString()
+    }
+    const hours = parseFloat(unavailableDuration)
+    if (Number.isNaN(hours) || hours <= 0) return undefined
+    return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+  }
+
+  const handleSetAvailability = async (status: AvailabilityStatus) => {
+    setAvailabilityUpdateSuccess(null)
+    setAvailabilityUpdateError(null)
+    setAvailabilityUpdating(true)
+    try {
+      const until = status !== 'available' ? getUnavailableUntilISO() : undefined
+      const res = await authService.updateDoctorAvailability({
+        availabilityStatus: status,
+        unavailableReason: status !== 'available' ? unavailableReason : undefined,
+        unavailableUntil: until
+      })
+      setDoctorAvailabilityStatus(status)
+      if (status === 'available') {
+        setDoctorUnavailableUntil(null)
+      } else if (res.unavailableUntil) {
+        setDoctorUnavailableUntil(res.unavailableUntil)
+      } else {
+        setDoctorUnavailableUntil(null)
+      }
+      setDoctorUnavailableReason(status !== 'available' ? unavailableReason || null : null)
+      setAvailabilityUpdateSuccess(status === 'available' ? 'Doctor is now available.' : 'Status updated.')
+      setTimeout(() => setAvailabilityUpdateSuccess(null), 4000)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to save. Please try again.'
+      setAvailabilityUpdateError(msg)
+    } finally {
+      setAvailabilityUpdating(false)
     }
   }
 
@@ -471,6 +523,7 @@ export const AssistantDashboard = () => {
           if (!mounted) return
           if (data.availabilityStatus) setDoctorAvailabilityStatus(data.availabilityStatus)
           setDoctorUnavailableReason(data.unavailableReason ?? null)
+          setUnavailableReason(data.unavailableReason ?? '')
           setDoctorUnavailableUntil(data.unavailableUntil ?? null)
         })
       } catch {
@@ -502,7 +555,131 @@ export const AssistantDashboard = () => {
           <div style={{ marginBottom: 0 }}>
           <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Your doctor&apos;s availability</p>
-            <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8 }}>
+            <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
+              Mark doctor unavailable or busy so patients can be informed in real time. You can update this on behalf of the doctor.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              {(['available', 'unavailable', 'busy'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  disabled={availabilityUpdating}
+                  onClick={() => handleSetAvailability(status)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    border: doctorAvailabilityStatus === status ? '2px solid #0d47a1' : '1px solid #e2e8f0',
+                    background: doctorAvailabilityStatus === status
+                      ? (status === 'unavailable' ? '#fff3e0' : status === 'busy' ? '#fce4ec' : '#e3f2fd')
+                      : '#fff',
+                    color: doctorAvailabilityStatus === status ? '#0d47a1' : '#334155',
+                    fontWeight: doctorAvailabilityStatus === status ? 600 : 400,
+                    cursor: availabilityUpdating ? 'not-allowed' : 'pointer',
+                    fontSize: 13,
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+            {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                  Reason (optional)
+                </label>
+                <input
+                  type="text"
+                  value={unavailableReason}
+                  onChange={(e) => setUnavailableReason(e.target.value)}
+                  placeholder="e.g. For operation, will take 3 hours"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                    fontSize: 13,
+                    marginBottom: 10
+                  }}
+                />
+                <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                  Unavailable for (time period)
+                </label>
+                <select
+                  value={unavailableDuration}
+                  onChange={(e) => setUnavailableDuration(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                    fontSize: 13,
+                    marginBottom: 8
+                  }}
+                >
+                  <option value="">Select duration</option>
+                  <option value="0.5">30 minutes</option>
+                  <option value="1">1 hour</option>
+                  <option value="2">2 hours</option>
+                  <option value="3">3 hours</option>
+                  <option value="4">4 hours</option>
+                  <option value="custom">Custom (date & time)</option>
+                </select>
+                {unavailableDuration === 'custom' && (
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
+                      Available again at
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={unavailableUntilCustom}
+                      onChange={(e) => setUnavailableUntilCustom(e.target.value)}
+                      min={new Date().toISOString().slice(0, 16)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #e2e8f0',
+                        fontSize: 13
+                      }}
+                    />
+                  </div>
+                )}
+                {doctorUnavailableUntil && (
+                  <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 8 }}>
+                    Unavailable until: {new Date(doctorUnavailableUntil).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                  </p>
+                )}
+                {availabilityUpdateSuccess && (
+                  <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 4 }}>
+                    {availabilityUpdateSuccess}
+                  </p>
+                )}
+                {availabilityUpdateError && (
+                  <p style={{ fontSize: 12, color: '#c62828', marginTop: 4, marginBottom: 4 }}>
+                    {availabilityUpdateError}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={availabilityUpdating}
+                  onClick={() => handleSetAvailability(doctorAvailabilityStatus)}
+                  style={{
+                    marginTop: 8,
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #0d47a1',
+                    background: '#0d47a1',
+                    color: '#fff',
+                    cursor: availabilityUpdating ? 'not-allowed' : 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  Save reason &amp; duration
+                </button>
+              </div>
+            )}
+            <p className="dashboard-body" style={{ marginTop: 10, marginBottom: 8 }}>
               {referredToDoctorName} is currently{' '}
               <strong
                 style={{
@@ -516,15 +693,9 @@ export const AssistantDashboard = () => {
               >
                 {doctorAvailabilityStatus}
               </strong>
-              .
-              {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (doctorUnavailableReason || doctorUnavailableUntil) && (
-                <span style={{ display: 'block', marginTop: 6, fontSize: 13, fontWeight: 400, color: '#334155' }}>
-                  {doctorUnavailableReason && <span>{doctorUnavailableReason}</span>}
-                  {doctorUnavailableUntil && (
-                    <span style={{ display: 'block', marginTop: 2, color: '#627d98' }}>
-                      Available again at: {new Date(doctorUnavailableUntil).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
-                    </span>
-                  )}
+              {doctorUnavailableReason && (
+                <span style={{ display: 'block', marginTop: 4, fontWeight: 400, color: '#334155' }}>
+                  Reason: {doctorUnavailableReason}
                 </span>
               )}
             </p>

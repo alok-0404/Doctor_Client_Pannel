@@ -43,6 +43,18 @@ export const DoctorNotificationListener = () => {
             })
           }
         })
+
+        socket.on('doctorAvailabilityChanged', (data: { availabilityStatus?: string; unavailableReason?: string; unavailableUntil?: string }) => {
+          if (mounted && data.availabilityStatus) {
+            window.dispatchEvent(new CustomEvent('doctor-availability-changed', {
+              detail: {
+                availabilityStatus: data.availabilityStatus,
+                unavailableReason: data.unavailableReason,
+                unavailableUntil: data.unavailableUntil
+              }
+            }))
+          }
+        })
       } catch {
         // ignore
       }

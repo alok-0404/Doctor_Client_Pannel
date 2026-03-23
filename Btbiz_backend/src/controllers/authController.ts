@@ -465,6 +465,7 @@ export const listLabAssistants = async (
 };
 
 // --- Doctor availability (for "mark unavailable/busy") ---
+// Both DOCTOR and ASSISTANT can update. Assistant updates their linked doctor's status.
 
 export const updateDoctorAvailability = async (
   req: Request,
@@ -474,12 +475,18 @@ export const updateDoctorAvailability = async (
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
-  if (req.doctor.role !== "DOCTOR") {
-    res.status(403).json({ message: "Only doctors can update availability" });
+  if (req.doctor.role !== "DOCTOR" && req.doctor.role !== "ASSISTANT") {
+    res.status(403).json({ message: "Only doctors and assistants can update availability" });
     return;
   }
 
-  const doctorId = req.doctor._id?.toString();
+  let doctorId: string | undefined;
+  if (req.doctor.role === "DOCTOR") {
+    doctorId = req.doctor._id?.toString();
+  } else {
+    const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+    doctorId = (assistant as any)?.createdByDoctorId?.toString();
+  }
   if (!doctorId) {
     res.status(401).json({ message: "Unauthorized" });
     return;
@@ -515,13 +522,15 @@ export const updateDoctorAvailability = async (
 
     const io = getIo();
     if (io) {
-      io.to(`assistants-of-doctor:${doctorId}`).emit("doctorAvailabilityChanged", {
+      const payload = {
         doctorId,
         doctorName: doc.name,
         availabilityStatus: doc.availabilityStatus,
         unavailableReason: doc.unavailableReason ?? undefined,
         unavailableUntil: doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined
-      });
+      };
+      io.to(`assistants-of-doctor:${doctorId}`).emit("doctorAvailabilityChanged", payload);
+      io.to(`doctor:${doctorId}`).emit("doctorAvailabilityChanged", payload);
     }
 
     res.status(200).json({

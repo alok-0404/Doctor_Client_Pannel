@@ -26,6 +26,11 @@ const TIME_SLOTS = [
   '2:00 - 3:00 PM',
 ]
 
+/** Check if coordinates are likely invalid (e.g. DevTools override 0,0) */
+function isInvalidCoords(lat: number, lng: number): boolean {
+  return (lat === 0 && lng === 0) || (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)
+}
+
 /** Distance in km between two lat/lng points (Haversine) */
 function distanceKm(
   lat1: number, lon1: number,
@@ -138,7 +143,15 @@ export const BookAppointment = () => {
     setLocationError(null)
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        if (isInvalidCoords(lat, lng)) {
+          setLocationError('Location (0,0) is invalid. If Chrome DevTools is open, go to Sensors → Location → select "No override", then click Refresh location.')
+          setUserLocation(null)
+          setLocationLoading(false)
+          return
+        }
+        setUserLocation({ lat, lng })
         setLocationAccuracyMeters(typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null)
         setLocationFetchedAt(new Date())
         setLocationLoading(false)
@@ -171,13 +184,14 @@ export const BookAppointment = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        if (isInvalidCoords(lat, lng)) return // skip invalid coords (e.g. DevTools 0,0)
         const nowMs = Date.now()
         // Throttle network calls: at most once per 10s.
         if (nowMs - lastSentMsRef.current < 10_000) return
         lastSentMsRef.current = nowMs
 
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
         setUserLocation({ lat, lng })
         setLocationAccuracyMeters(typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null)
         setLocationFetchedAt(new Date())
