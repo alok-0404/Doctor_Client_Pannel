@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
@@ -8,6 +8,8 @@ import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 
 export const Login = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isSuperAdminLogin = searchParams.get('role') === 'super-admin'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -34,12 +36,9 @@ export const Login = () => {
 
     try {
       setLoading(true)
-      let result
-      try {
-        result = await authService.login({ email, password })
-      } catch {
-        result = await authService.superAdminLogin({ email, password })
-      }
+      const result = isSuperAdminLogin
+        ? await authService.superAdminLogin({ email, password })
+        : await authService.login({ email, password })
       authStorage.set(result.token, result.doctorName, result.role)
       if (result.role === 'ASSISTANT') {
         navigate('/assistant')
@@ -197,20 +196,22 @@ export const Login = () => {
               </p>
             )}
 
-            <div className="login-links">
-              <button
-                type="button"
-                className="login-link"
-                onClick={() => {
-                  setShowForgot(true)
-                  setForgotStep('phone')
-                  setForgotError(null)
-                  setForgotSuccess(null)
-                }}
-              >
-                Forgot Password?
-              </button>
-            </div>
+            {!isSuperAdminLogin && (
+              <div className="login-links">
+                <button
+                  type="button"
+                  className="login-link"
+                  onClick={() => {
+                    setShowForgot(true)
+                    setForgotStep('phone')
+                    setForgotError(null)
+                    setForgotSuccess(null)
+                  }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            )}
 
             <Button
               type="submit"

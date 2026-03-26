@@ -9,6 +9,8 @@ import {
   createVisit,
   getDiagnosticTestReportFile,
   getDocumentFile,
+  getPrescriptionSecureLink,
+  getPrescriptionSecurePreview,
   getPatientFullHistory,
   recordVitalsAndReferForExistingVisit,
   searchPatientByMobile,
@@ -44,6 +46,10 @@ router.post("/:patientId/documents", upload.single("file"), uploadPatientDocumen
 
 // GET /patients/:patientId/documents/:documentId/file - serve document for doctor/assistant
 router.get("/:patientId/documents/:documentId/file", getDocumentFile);
+// GET /patients/:patientId/documents/:documentId/secure-link - create short-lived token for lab/pharmacy
+router.get("/:patientId/documents/:documentId/secure-link", getPrescriptionSecureLink);
+// GET /patients/documents/secure-preview/:token - fetch role-limited preview (no file bytes)
+router.get("/documents/secure-preview/:token", getPrescriptionSecurePreview);
 
 // GET /patients/:patientId/full-history
 router.get("/:patientId/full-history", getPatientFullHistory);

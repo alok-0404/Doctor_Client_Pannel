@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
 import { Card } from '../components/ui/Card'
@@ -59,13 +59,6 @@ export const Dashboard = () => {
   const [availabilityUpdateSuccess, setAvailabilityUpdateSuccess] = useState<string | null>(null)
   const [availabilityUpdateError, setAvailabilityUpdateError] = useState<string | null>(null)
 
-  const [clinicLatitude, setClinicLatitude] = useState<string>('')
-  const [clinicLongitude, setClinicLongitude] = useState<string>('')
-  const [clinicAddress, setClinicAddress] = useState<string>('')
-  const [clinicAutoDetecting, setClinicAutoDetecting] = useState(false)
-  const [clinicSaveSuccess, setClinicSaveSuccess] = useState<string | null>(null)
-  const [clinicSaveError, setClinicSaveError] = useState<string | null>(null)
-  const clinicAutoAttemptedRef = useRef(false)
 
   const loadAssistants = async () => {
     try {
@@ -128,9 +121,6 @@ export const Dashboard = () => {
       if (doctor.unavailableUntil) setUnavailableUntil(doctor.unavailableUntil)
       else setUnavailableUntil(null)
 
-      setClinicLatitude(doctor.clinicLatitude != null ? String(doctor.clinicLatitude) : '')
-      setClinicLongitude(doctor.clinicLongitude != null ? String(doctor.clinicLongitude) : '')
-      setClinicAddress(doctor.clinicAddress ?? '')
     } catch {
       // ignore
     } finally {
@@ -187,53 +177,17 @@ export const Dashboard = () => {
     void loadProfileAvailability()
   }, [])
 
-  // Auto-detect clinic location (no manual typing).
-  useEffect(() => {
-    if (authStorage.getRole() !== 'DOCTOR') return
-    if (clinicAutoAttemptedRef.current) return
-    // Only auto-run when clinic lat/lng are missing.
-    if (clinicLatitude.trim() || clinicLongitude.trim()) return
-
-    clinicAutoAttemptedRef.current = true
-    if (!navigator.geolocation) return
-
-    setClinicAutoDetecting(true)
-    setClinicSaveError(null)
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const latNum = pos.coords.latitude
-        const lngNum = pos.coords.longitude
-        setClinicLatitude(String(latNum))
-        setClinicLongitude(String(lngNum))
-        try {
-          await authService.updateDoctorClinic({
-            clinicLatitude: latNum,
-            clinicLongitude: lngNum,
-            clinicAddress: undefined,
-          })
-          setClinicSaveSuccess('Clinic location updated automatically.')
-        } catch {
-          setClinicSaveError('Failed to auto-detect clinic location.')
-        } finally {
-          setClinicAutoDetecting(false)
-        }
-      },
-      () => {
-        setClinicAutoDetecting(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    )
-  }, [clinicLatitude, clinicLongitude])
-
   useEffect(() => {
     const onFocus = () => void loadNotifications()
     const onDismissed = () => void loadNotifications()
+    const onReferred = () => void loadNotifications()
     window.addEventListener('focus', onFocus)
     window.addEventListener('doctor-notification-dismissed', onDismissed)
+    window.addEventListener('doctor-patient-referred', onReferred)
     return () => {
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('doctor-notification-dismissed', onDismissed)
+      window.removeEventListener('doctor-patient-referred', onReferred)
     }
   }, [])
 
@@ -674,53 +628,6 @@ export const Dashboard = () => {
                     </div>
                   )}
                 </>
-              )}
-            </Card>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
-              <p className="dashboard-kicker">Clinic location</p>
-              <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
-                Set your clinic location so patients can see distance, and you can see patient distance on your appointment list.
-              </p>
-
-              {clinicLatitude && clinicLongitude ? (
-                <div style={{ marginTop: 6 }}>
-                  <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 6, fontSize: 13 }}>
-                    Clinic location set.
-                  </p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <a
-                      href={`https://www.google.com/maps?q=${clinicLatitude},${clinicLongitude}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12, color: '#0d47a1', textDecoration: 'underline' }}
-                    >
-                      Preview on map
-                    </a>
-                    {clinicAddress && (
-                      <span style={{ fontSize: 12, color: '#627d98' }}>{clinicAddress}</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ marginTop: 6 }}>
-                  <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 0, fontSize: 13 }}>
-                    {clinicAutoDetecting ? 'Auto-detecting clinic location…' : 'Auto-detecting clinic location…'}
-                  </p>
-                </div>
-              )}
-
-              {clinicSaveSuccess && (
-                <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 8, marginBottom: 0 }}>
-                  {clinicSaveSuccess}
-                </p>
-              )}
-              {clinicSaveError && (
-                <p style={{ fontSize: 12, color: '#c62828', marginTop: 8, marginBottom: 0 }}>
-                  {clinicSaveError}
-                </p>
               )}
             </Card>
           </div>

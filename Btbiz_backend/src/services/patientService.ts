@@ -2,25 +2,38 @@ import mongoose from "mongoose";
 
 import { Patient } from "../models/Patient";
 import { PatientDocument } from "../models/PatientDocument";
+import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
+import { PatientTestRequest } from "../models/PatientTestRequest";
 import { Visit } from "../models/Visit";
 import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
 
-export const findPatientByMobile = async (mobile: string) => {
-  // Allow matching both raw 10-digit numbers and normalized forms like +91xxxxxxxxxx
+const getMobileCandidates = (mobile: string): string[] => {
   const digits = mobile.replace(/\D/g, "");
   const last10 = digits.slice(-10);
-
   const candidates = new Set<string>();
-  if (mobile) candidates.add(mobile);
+  if (mobile.trim()) candidates.add(mobile.trim());
   if (last10) {
     candidates.add(last10);
     candidates.add(`+91${last10}`);
   }
+  return Array.from(candidates);
+};
 
-  return Patient.findOne({ mobileNumber: { $in: Array.from(candidates) } });
+export const findPatientByMobile = async (mobile: string) => {
+  const candidates = getMobileCandidates(mobile);
+  return Patient.findOne({ mobileNumber: { $in: candidates } });
+};
+
+/** Returns all patients with the given mobile (for family scenario). */
+export const findPatientsByMobile = async (mobile: string) => {
+  const candidates = getMobileCandidates(mobile);
+  return Patient.find({ mobileNumber: { $in: candidates } })
+    .select("_id firstName lastName mobileNumber")
+    .sort({ createdAt: 1 })
+    .lean();
 };
 
 export interface CreatePatientPayload {
@@ -209,13 +222,20 @@ export const getFullPatientHistory = async (patientId: string) => {
     };
   });
 
-  const [documents, pharmacyDispensations] = await Promise.all([
-    PatientDocument.find({ patient: patient._id }).sort({ createdAt: -1 }).lean(),
-    PharmacyDispensation.find({ patient: patient._id })
-      .sort({ createdAt: -1 })
-      .populate("dispensedBy", "name")
-      .lean()
-  ]);
+  const [documents, pharmacyDispensations, medicineRequests, testRequests] =
+    await Promise.all([
+      PatientDocument.find({ patient: patient._id }).sort({ createdAt: -1 }).lean(),
+      PharmacyDispensation.find({ patient: patient._id })
+        .sort({ createdAt: -1 })
+        .populate("dispensedBy", "name")
+        .lean(),
+      PatientMedicineRequest.find({ patient: patient._id })
+        .sort({ createdAt: -1 })
+        .lean(),
+      PatientTestRequest.find({ patient: patient._id })
+        .sort({ createdAt: -1 })
+        .lean()
+    ]);
 
   return {
     patient,
@@ -239,7 +259,41 @@ export const getFullPatientHistory = async (patientId: string) => {
       mimeType: d.mimeType,
       uploadedAt: d.createdAt,
       ocrText: (d as any).ocrText,
-      ocrConfidence: (d as any).ocrConfidence
+      ocrConfidence: (d as any).ocrConfidence,
+      source: (d as any).uploadedBy ? "staff" : "patient"
+    })),
+    medicineRequests: medicineRequests.map((m) => ({
+      id: (m as any)._id.toString(),
+      medicineName: (m as any).medicineName,
+      dosage: (m as any).dosage,
+      quantity: (m as any).quantity,
+      notes: (m as any).notes,
+      source: (m as any).source,
+      serviceType: (m as any).serviceType,
+      paymentMode: (m as any).paymentMode,
+      paymentStatus: (m as any).paymentStatus,
+      status: (m as any).status,
+      expectedFulfillmentMinutes: (m as any).expectedFulfillmentMinutes,
+      fulfilledAt: (m as any).fulfilledAt,
+      receiptNumber: (m as any).receiptNumber,
+      paidAt: (m as any).paidAt,
+      createdAt: (m as any).createdAt
+    })),
+    testRequests: testRequests.map((t) => ({
+      id: (t as any)._id.toString(),
+      testName: (t as any).testName,
+      notes: (t as any).notes,
+      source: (t as any).source,
+      serviceType: (t as any).serviceType,
+      paymentMode: (t as any).paymentMode,
+      paymentStatus: (t as any).paymentStatus,
+      status: (t as any).status,
+      preferredDateTime: (t as any).preferredDateTime,
+      expectedFulfillmentMinutes: (t as any).expectedFulfillmentMinutes,
+      fulfilledAt: (t as any).fulfilledAt,
+      receiptNumber: (t as any).receiptNumber,
+      paidAt: (t as any).paidAt,
+      createdAt: (t as any).createdAt
     }))
   };
 };

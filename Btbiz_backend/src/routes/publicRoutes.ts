@@ -1,5 +1,6 @@
 import { Router } from "express";
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 
 import { Doctor } from "../models/Doctor";
 import { DoctorNotification } from "../models/DoctorNotification";
@@ -14,8 +15,116 @@ import {
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
 import { getIo } from "../socket";
+import { env } from "../config/env";
 
 const router = Router();
+let patientMobileIndexChecked = false;
+
+async function ensurePatientMobileNonUniqueIndex(): Promise<void> {
+  if (patientMobileIndexChecked) return;
+  const indexes = await Patient.collection.indexes();
+  const uniqueMobileIndexes = indexes.filter(
+    (idx: any) =>
+      idx?.unique === true &&
+      idx?.key &&
+      Object.keys(idx.key).length === 1 &&
+      idx.key.mobileNumber === 1
+  );
+
+  for (const idx of uniqueMobileIndexes) {
+    if (typeof idx.name === "string" && idx.name) {
+      await Patient.collection.dropIndex(idx.name);
+    }
+  }
+
+  const hasPlainMobileIndex = indexes.some(
+    (idx: any) =>
+      idx?.key &&
+      Object.keys(idx.key).length === 1 &&
+      idx.key.mobileNumber === 1 &&
+      !idx.unique
+  );
+  if (!hasPlainMobileIndex) {
+    await Patient.collection.createIndex({ mobileNumber: 1 }, { name: "mobileNumber_1" });
+  }
+
+  // verify again; only then cache checked=true
+  const verifyIndexes = await Patient.collection.indexes();
+  const stillUnique = verifyIndexes.some(
+    (idx: any) =>
+      idx?.unique === true &&
+      idx?.key &&
+      Object.keys(idx.key).length === 1 &&
+      idx.key.mobileNumber === 1
+  );
+  if (stillUnique) {
+    throw new Error("PATIENT_MOBILE_UNIQUE_INDEX_STILL_PRESENT");
+  }
+
+  patientMobileIndexChecked = true;
+}
+
+/**
+ * Ensure each family member in an account points to a distinct Patient document.
+ * If multiple members are linked to the same patient (legacy behavior),
+ * keep the first member on original patient and clone patient profile for others.
+ */
+async function ensureDistinctPatientsPerFamilyAccount(accountId: mongoose.Types.ObjectId): Promise<void> {
+  await ensurePatientMobileNonUniqueIndex();
+  const members = await FamilyMember.find({ account: accountId }).sort({ createdAt: 1 });
+  const seenPatientIdToMember = new Map<string, string>();
+
+  for (const member of members) {
+    const patientId = member.patient?.toString();
+    if (!patientId) continue;
+
+    if (!seenPatientIdToMember.has(patientId)) {
+      seenPatientIdToMember.set(patientId, member._id.toString());
+      continue;
+    }
+
+    const sourcePatient = await Patient.findById(member.patient).lean();
+    if (!sourcePatient) continue;
+
+    let clonedPatient: any;
+    try {
+      clonedPatient = await Patient.create({
+        firstName: sourcePatient.firstName,
+        lastName: sourcePatient.lastName,
+        mobileNumber: sourcePatient.mobileNumber,
+        dateOfBirth: sourcePatient.dateOfBirth,
+        gender: member.gender ?? sourcePatient.gender,
+        address: sourcePatient.address,
+        bloodGroup: sourcePatient.bloodGroup,
+        previousHealthHistory: sourcePatient.previousHealthHistory,
+        emergencyContactName: sourcePatient.emergencyContactName,
+        emergencyContactPhone: sourcePatient.emergencyContactPhone
+      });
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        patientMobileIndexChecked = false;
+        await ensurePatientMobileNonUniqueIndex();
+        clonedPatient = await Patient.create({
+          firstName: sourcePatient.firstName,
+          lastName: sourcePatient.lastName,
+          mobileNumber: sourcePatient.mobileNumber,
+          dateOfBirth: sourcePatient.dateOfBirth,
+          gender: member.gender ?? sourcePatient.gender,
+          address: sourcePatient.address,
+          bloodGroup: sourcePatient.bloodGroup,
+          previousHealthHistory: sourcePatient.previousHealthHistory,
+          emergencyContactName: sourcePatient.emergencyContactName,
+          emergencyContactPhone: sourcePatient.emergencyContactPhone
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    member.patient = clonedPatient._id as any;
+    await member.save();
+  }
+}
 
 /** Combine appointmentDate (YYYY-MM-DD) and preferredSlot text into a Date with time.
  *  If preferredSlot can't be parsed, falls back to midnight (original behaviour).
@@ -131,6 +240,8 @@ router.get("/family/members", async (req, res) => {
       return;
     }
 
+    await ensureDistinctPatientsPerFamilyAccount((account as any)._id);
+
     const members = await FamilyMember.find({ account: (account as any)._id })
       .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
       .sort({ createdAt: 1 })
@@ -172,6 +283,8 @@ router.get("/family/members", async (req, res) => {
 // Body: { accountId, fullName, relation, gender?, dateOfBirth?, address? }
 router.post("/family/members", async (req, res) => {
   try {
+    await ensurePatientMobileNonUniqueIndex();
+
     const body = req.body as {
       accountId?: string;
       fullName?: string;
@@ -204,14 +317,10 @@ router.post("/family/members", async (req, res) => {
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(" ") || undefined;
 
-    // For family members we conceptually allow multiple people to share the same mobile number
-    // (the account phone is the shared primary phone). However, the underlying DB may still have
-    // a unique index on mobileNumber. To avoid duplicate key errors we:
-    // 1) First try to find an existing Patient with this phone.
-    // 2) If found, reuse it.
-    // 3) If not found, create a new Patient.
-    let patient = await Patient.findOne({ mobileNumber: (account as any).phone });
-    if (!patient) {
+    // Always create a dedicated patient profile for each family member.
+    // Family members can share mobile number but must not share medical records.
+    let patient: any;
+    try {
       patient = await Patient.create({
         firstName,
         lastName,
@@ -219,6 +328,20 @@ router.post("/family/members", async (req, res) => {
         gender: body.gender,
         address: body.address
       });
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        patientMobileIndexChecked = false;
+        await ensurePatientMobileNonUniqueIndex();
+        patient = await Patient.create({
+          firstName,
+          lastName,
+          mobileNumber: (account as any).phone,
+          gender: body.gender,
+          address: body.address
+        });
+      } else {
+        throw error;
+      }
     }
 
     const member = await FamilyMember.create({
@@ -403,6 +526,55 @@ router.get("/family/member-history/:id", async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /family/member-history error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /public/family/member-profile-token
+// Body: { accountId, memberId }
+// Returns patient JWT for opening full patient profile from Family Booking.
+router.post("/family/member-profile-token", async (req, res) => {
+  try {
+    const body = req.body as { accountId?: string; memberId?: string };
+    if (!body.accountId || !mongoose.isValidObjectId(body.accountId)) {
+      res.status(400).json({ message: "Valid accountId is required" });
+      return;
+    }
+    if (!body.memberId || !mongoose.isValidObjectId(body.memberId)) {
+      res.status(400).json({ message: "Valid memberId is required" });
+      return;
+    }
+
+    const member = await FamilyMember.findOne({
+      _id: body.memberId,
+      account: body.accountId
+    })
+      .populate("patient", "firstName lastName")
+      .lean();
+
+    if (!member || !member.patient) {
+      res.status(404).json({ message: "Family member not found for this account" });
+      return;
+    }
+
+    const patientId = (member.patient as any)._id.toString();
+    const token = jwt.sign(
+      { patientId, type: "patient" },
+      env.jwt.secret,
+      { expiresIn: env.jwt.expiresIn as any }
+    );
+
+    res.status(200).json({
+      token,
+      patient: {
+        id: patientId,
+        firstName: (member.patient as any).firstName,
+        lastName: (member.patient as any).lastName
+      }
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/member-profile-token error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

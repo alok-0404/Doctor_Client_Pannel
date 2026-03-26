@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { PublicHome } from './pages/PublicHome'
 import { BookAppointment } from './pages/BookAppointment'
+import { PatientLogin } from './pages/PatientLogin'
+import { PatientProfile } from './pages/PatientProfile'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -15,6 +17,7 @@ import { SuperAdminDashboard } from './pages/SuperAdminDashboard'
 import { PatientSearch } from './pages/PatientSearch'
 import { PatientDetails } from './pages/PatientDetails'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { ProtectedPatientRoute } from './components/ProtectedPatientRoute'
 import { DoctorNotificationListener } from './components/DoctorNotificationListener'
 import { GlobalBackButton } from './components/GlobalBackButton'
 import HandwritingExtractor from './components/HandwritingExtractor'
@@ -36,6 +39,18 @@ export const App = () => {
       <Route
         path="/book-appointment"
         element={<BookAppointment />}
+      />
+      <Route
+        path="/patient-login"
+        element={<PatientLogin />}
+      />
+      <Route
+        path="/patient-profile"
+        element={(
+          <ProtectedPatientRoute>
+            <PatientProfile />
+          </ProtectedPatientRoute>
+        )}
       />
       <Route
         path="/login"

@@ -42,6 +42,8 @@ export const PatientDetails = () => {
         if (cancelled) return
         const p = res.patient as any
         const documents = (res.documents || []) as Array<{ id: string; originalName: string; uploadedAt: string; ocrText?: string; source?: string }>
+        const medicineRequests = (res.medicineRequests || []) as Array<{ id: string; medicineName: string; dosage?: string; notes?: string; source?: string; createdAt: string }>
+        const testRequests = (res.testRequests || []) as Array<{ id: string; testName: string; notes?: string; source?: string; createdAt: string }>
         const pharmacyDispensations = (res.pharmacyDispensations || []) as Array<{
           id: string
           dispensedBy: string
@@ -123,6 +125,8 @@ export const PatientDetails = () => {
           medicines: [],
           pharmacyDispensations,
           tests: allTests,
+          medicineRequests,
+          testRequests,
           documents: documents.map((d) => ({
             id: d.id,
             originalName: d.originalName,

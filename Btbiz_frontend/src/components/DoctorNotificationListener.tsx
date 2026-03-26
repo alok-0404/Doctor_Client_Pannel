@@ -16,6 +16,17 @@ export const DoctorNotificationListener = () => {
   const role = authStorage.getRole()
   const isDoctor = role === 'DOCTOR'
 
+  const getSocketOrigin = (): string => {
+    const fallback = window.location.origin
+    if (!API_BASE_URL) return fallback
+    try {
+      const parsed = new URL(API_BASE_URL, window.location.origin)
+      return parsed.origin
+    } catch {
+      return fallback
+    }
+  }
+
   useEffect(() => {
     if (!isDoctor) return
 
@@ -28,7 +39,7 @@ export const DoctorNotificationListener = () => {
         const doctorId = doctor?.id
         if (!doctorId || !mounted) return
 
-        const socketUrl = API_BASE_URL || window.location.origin
+        const socketUrl = getSocketOrigin()
         socket = io(socketUrl, {
           query: { doctorId },
           transports: ['websocket', 'polling']
@@ -41,6 +52,7 @@ export const DoctorNotificationListener = () => {
               patientId: data.patientId,
               patientName: data.patientName || 'Patient'
             })
+            window.dispatchEvent(new CustomEvent('doctor-patient-referred'))
           }
         })
 

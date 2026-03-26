@@ -1,6 +1,7 @@
 import path from "path";
 
 import { Request, Response } from "express";
+import jwt from "jsonwebtoken";
 
 import { Doctor } from "../models/Doctor";
 import { DoctorNotification } from "../models/DoctorNotification";
@@ -11,11 +12,15 @@ import ocrService from "../ocrService";
 import { getIo } from "../socket";
 // import path from "path";
 import { Visit } from "../models/Visit";
+import { env } from "../config/env";
+import { sendEmailWithAttachment } from "../services/emailService";
+import { sendWhatsAppMessage } from "../services/whatsappService";
 import {
   addDiagnosticTestsToVisit,
   createPatient as createPatientService,
   createVisit as createVisitService,
   findPatientByMobile,
+  findPatientsByMobile,
   getFullPatientHistory,
   updatePatient as updatePatientService,
   updateVisitVitals
@@ -47,6 +52,106 @@ const patientToJson = (p: {
   emergencyContactPhone: p.emergencyContactPhone
 });
 
+type ConfidenceTag = "HIGH" | "MEDIUM" | "LOW";
+
+const TEST_KEYWORDS = [
+  "cbc",
+  "hba1c",
+  "lipid",
+  "thyroid",
+  "tsh",
+  "lft",
+  "kft",
+  "sugar",
+  "xray",
+  "x-ray",
+  "ecg",
+  "ultrasound",
+  "urine",
+  "blood test",
+  "test",
+  "lab",
+];
+
+const MEDICINE_HINTS = [
+  "tab",
+  "tablet",
+  "cap",
+  "capsule",
+  "syp",
+  "syrup",
+  "inj",
+  "injection",
+  "mg",
+  "ml",
+  "od",
+  "bd",
+  "tds",
+  "hs",
+  "after food",
+  "before food",
+];
+
+function detectLineType(line: string): "MEDICINE" | "TEST" | "UNKNOWN" {
+  const lower = line.toLowerCase();
+  if (TEST_KEYWORDS.some((k) => lower.includes(k))) return "TEST";
+  if (MEDICINE_HINTS.some((k) => lower.includes(k))) return "MEDICINE";
+  return "UNKNOWN";
+}
+
+function computeLineConfidence(
+  line: string,
+  lineType: "MEDICINE" | "TEST" | "UNKNOWN",
+  ocrConfidence?: number
+): ConfidenceTag {
+  const norm = line.trim();
+  if (!norm) return "LOW";
+
+  let score = typeof ocrConfidence === "number" ? Math.max(0, Math.min(100, ocrConfidence)) : 55;
+  if (lineType !== "UNKNOWN") score += 20;
+  if (/\d/.test(norm)) score += 8;
+  if (norm.length >= 12) score += 5;
+  if (/[^a-zA-Z0-9\s.,:+\-()/]/.test(norm)) score -= 12;
+  if (norm.length <= 4) score -= 15;
+
+  if (score >= 78) return "HIGH";
+  if (score >= 55) return "MEDIUM";
+  return "LOW";
+}
+
+function parsePrescriptionOcr(
+  rawOcrText: string,
+  ocrConfidence?: number
+): {
+  medicines: Array<{ text: string; confidence: ConfidenceTag }>;
+  tests: Array<{ text: string; confidence: ConfidenceTag }>;
+  unknown: Array<{ text: string; confidence: ConfidenceTag }>;
+  lowConfidenceLines: string[];
+} {
+  const lines = rawOcrText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(0, 250);
+
+  const medicines: Array<{ text: string; confidence: ConfidenceTag }> = [];
+  const tests: Array<{ text: string; confidence: ConfidenceTag }> = [];
+  const unknown: Array<{ text: string; confidence: ConfidenceTag }> = [];
+  const lowConfidenceLines: string[] = [];
+
+  for (const line of lines) {
+    const lineType = detectLineType(line);
+    const confidence = computeLineConfidence(line, lineType, ocrConfidence);
+    if (confidence === "LOW") lowConfidenceLines.push(line);
+
+    if (lineType === "MEDICINE") medicines.push({ text: line, confidence });
+    else if (lineType === "TEST") tests.push({ text: line, confidence });
+    else unknown.push({ text: line, confidence });
+  }
+
+  return { medicines, tests, unknown, lowConfidenceLines };
+}
+
 export const searchPatientByMobile = async (
   req: Request,
   res: Response
@@ -59,15 +164,15 @@ export const searchPatientByMobile = async (
       return;
     }
 
-    const patient = await findPatientByMobile(mobile);
-
-    if (!patient) {
+    const patients = await findPatientsByMobile(mobile);
+    if (!patients || patients.length === 0) {
       res.status(404).json({ message: "Patient not found" });
       return;
     }
 
     res.status(200).json({
-      patient: patientToJson(patient as any)
+      patient: patientToJson(patients[0] as any),
+      patients: patients.map((p: any) => patientToJson(p))
     });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -476,6 +581,15 @@ export const getDocumentFile = async (
 ): Promise<void> => {
   try {
     const { patientId, documentId } = req.params;
+    const role = req.doctor?.role;
+
+    if (role === "LAB_ASSISTANT" || role === "LAB_MANAGER" || role === "PHARMACY") {
+      res.status(403).json({
+        message: "Direct prescription file access is blocked for this role",
+        code: "PRESCRIPTION_FILE_ACCESS_BLOCKED"
+      });
+      return;
+    }
 
     const doc = await PatientDocument.findOne({
       _id: documentId,
@@ -498,6 +612,156 @@ export const getDocumentFile = async (
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("getDocumentFile error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getPrescriptionSecureLink = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { patientId, documentId } = req.params;
+    const role = req.doctor?.role;
+    if (!role) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    if (role !== "LAB_ASSISTANT" && role !== "LAB_MANAGER" && role !== "PHARMACY") {
+      res.status(403).json({
+        message: "Secure prescription links are only for lab/pharmacy roles"
+      });
+      return;
+    }
+
+    const doc = await PatientDocument.findOne({
+      _id: documentId,
+      patient: patientId
+    }).select("_id patient").lean();
+    if (!doc) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    const token = jwt.sign(
+      {
+        type: "prescription_preview",
+        patientId,
+        documentId,
+        role,
+        scope: "OCR_ONLY"
+      },
+      env.jwt.secret,
+      { expiresIn: "15m" }
+    );
+
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    res.status(200).json({ token, expiresAt });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("getPrescriptionSecureLink error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getPrescriptionSecurePreview = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { token } = req.params;
+    const role = req.doctor?.role;
+    if (!role) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (!token) {
+      res.status(400).json({ message: "token is required" });
+      return;
+    }
+
+    const decoded = jwt.verify(token, env.jwt.secret) as {
+      type?: string;
+      patientId?: string;
+      documentId?: string;
+      role?: string;
+      scope?: string;
+      exp?: number;
+    };
+
+    if (decoded.type !== "prescription_preview") {
+      res.status(400).json({ message: "Invalid token type" });
+      return;
+    }
+    if (!decoded.patientId || !decoded.documentId || !decoded.role) {
+      res.status(400).json({ message: "Invalid token payload" });
+      return;
+    }
+    if (decoded.role !== role) {
+      res.status(403).json({ message: "Role mismatch for this secure token" });
+      return;
+    }
+    if (role !== "LAB_ASSISTANT" && role !== "LAB_MANAGER" && role !== "PHARMACY") {
+      res.status(403).json({ message: "Only lab/pharmacy can access secure prescription preview" });
+      return;
+    }
+
+    const doc = await PatientDocument.findOne({
+      _id: decoded.documentId,
+      patient: decoded.patientId
+    })
+      .select("_id originalName mimeType createdAt ocrText ocrConfidence")
+      .lean();
+
+    if (!doc) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    const rawText = ((doc as any).ocrText ?? "").toString().trim();
+    const previewText = rawText
+      ? rawText.slice(0, 6000)
+      : "Prescription preview is not available yet. OCR text not found.";
+
+    const parsed = parsePrescriptionOcr(previewText, (doc as any).ocrConfidence);
+    const isPharmacy = role === "PHARMACY";
+    const isLab = role === "LAB_ASSISTANT" || role === "LAB_MANAGER";
+
+    const roleFilteredParsed = {
+      medicines: isPharmacy ? parsed.medicines : [],
+      tests: isLab ? parsed.tests : [],
+      unknown: parsed.unknown
+    };
+
+    res.status(200).json({
+      document: {
+        id: (doc as any)._id.toString(),
+        originalName: (doc as any).originalName,
+        mimeType: (doc as any).mimeType,
+        uploadedAt: (doc as any).createdAt,
+        previewText,
+        rawOcrText: previewText,
+        parsed: roleFilteredParsed,
+        lowConfidenceLines: parsed.lowConfidenceLines.slice(0, 20),
+        ocrConfidence: (doc as any).ocrConfidence,
+        limitedView: true,
+        scope: decoded.scope ?? "OCR_ONLY",
+        downloadable: false,
+        roleView: isPharmacy ? "PHARMACY_MEDICINES_ONLY" : "LAB_TESTS_ONLY"
+      }
+    });
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      res.status(401).json({ message: "Secure link expired" });
+      return;
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      res.status(401).json({ message: "Invalid secure link token" });
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.error("getPrescriptionSecurePreview error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -616,6 +880,49 @@ export const uploadDiagnosticTestReport = async (
       reportMimeType: file.mimetype,
       reportUploadedAt: new Date()
     });
+
+    // Notify patient on report upload (WhatsApp always via phone; Email only if patient.email is set).
+    // This runs after DB update; failures should not break the upload flow.
+    const patient = await Patient.findById(patientId)
+      .select("firstName lastName mobileNumber email")
+      .lean();
+
+    const reportToken = jwt.sign(
+      { type: "diagnostic_report", patientId, visitId, testId },
+      env.jwt.secret,
+      { expiresIn: "10m" }
+    );
+
+    const host = req.get("host");
+    const protocol = req.protocol;
+    const reportUrl = host
+      ? `${protocol}://${host}/public/patient/diagnostic-tests/${reportToken}/report/file`
+      : "";
+
+    void Promise.allSettled([
+      patient?.mobileNumber
+        ? sendWhatsAppMessage(
+            patient.mobileNumber,
+            `Your lab report for "${test.testName}" is ready. ${
+              reportUrl ? `Download: ${reportUrl}` : ""
+            }`
+          )
+        : Promise.resolve(),
+      patient?.email
+        ? sendEmailWithAttachment({
+            to: patient.email,
+            subject: `Lab report ready - ${test.testName}`,
+            text: `Hello ${patient.firstName ?? ""},\n\nYour lab report for "${test.testName}" is ready.\n${
+              reportUrl ? `Download: ${reportUrl}\n` : ""
+            }\n\nRegards,\nBTBiz Doctor`,
+            attachment: {
+              filename: file.originalname,
+              path: path.resolve(process.cwd(), file.path),
+              contentType: file.mimetype,
+            },
+          })
+        : Promise.resolve(),
+    ]);
 
     res.status(200).json({
       message: "Report uploaded successfully",

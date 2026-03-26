@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { authStorage } from '../utils/authStorage'
+import { patientStorage } from '../utils/patientStorage'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -9,6 +10,19 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = authStorage.getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+/** API instance for patient portal – uses patient JWT */
+export const patientApi = axios.create({
+  baseURL: API_BASE_URL,
+})
+
+patientApi.interceptors.request.use((config) => {
+  const token = patientStorage.getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -264,6 +278,45 @@ export interface DoctorAppointmentItem {
   distanceKm?: number
 }
 
+export interface PharmacyOrderRequest {
+  id: string
+  patientId: string
+  patientName: string
+  patientMobile: string
+  medicineName: string
+  dosage?: string
+  quantity?: number
+  notes?: string
+  serviceType: 'PICKUP' | 'HOME_DELIVERY'
+  paymentMode: 'ONLINE' | 'OFFLINE'
+  paymentStatus: 'PENDING' | 'PAID'
+  status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+  expectedFulfillmentMinutes?: number
+  fulfilledAt?: string
+  receiptNumber?: string
+  paidAt?: string
+  createdAt: string
+}
+
+export interface LabOrderRequest {
+  id: string
+  patientId: string
+  patientName: string
+  patientMobile: string
+  testName: string
+  notes?: string
+  serviceType: 'LAB_VISIT' | 'HOME_SERVICE'
+  paymentMode: 'ONLINE' | 'OFFLINE'
+  paymentStatus: 'PENDING' | 'PAID'
+  status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+  preferredDateTime?: string
+  expectedFulfillmentMinutes?: number
+  fulfilledAt?: string
+  receiptNumber?: string
+  paidAt?: string
+  createdAt: string
+}
+
 export const notificationService = {
   async getNotifications(): Promise<DoctorNotificationItem[]> {
     const res = await api.get('/notifications')
@@ -321,6 +374,37 @@ export const appointmentService = {
   async getAssistantPatientPrefill(mobile: string): Promise<AssistantPatientPrefill> {
     const res = await api.get('/appointments/assistant/patient-prefill', { params: { mobile } })
     return res.data as AssistantPatientPrefill
+  },
+}
+
+export const orderService = {
+  async getMedicineRequests(): Promise<PharmacyOrderRequest[]> {
+    const res = await api.get('/orders/medicine-requests')
+    return (res.data as { requests: PharmacyOrderRequest[] }).requests ?? []
+  },
+  async updateMedicineRequest(
+    requestId: string,
+    payload: Partial<{
+      status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+      paymentStatus: 'PENDING' | 'PAID'
+      expectedFulfillmentMinutes: number
+    }>
+  ): Promise<void> {
+    await api.patch(`/orders/medicine-requests/${requestId}`, payload)
+  },
+  async getTestRequests(): Promise<LabOrderRequest[]> {
+    const res = await api.get('/orders/test-requests')
+    return (res.data as { requests: LabOrderRequest[] }).requests ?? []
+  },
+  async updateTestRequest(
+    requestId: string,
+    payload: Partial<{
+      status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+      paymentStatus: 'PENDING' | 'PAID'
+      expectedFulfillmentMinutes: number
+    }>
+  ): Promise<void> {
+    await api.patch(`/orders/test-requests/${requestId}`, payload)
   },
 }
 
@@ -406,6 +490,29 @@ export const pharmacyService = {
   },
 }
 
+export const patientAuthService = {
+  async sendOtp(mobile: string): Promise<void> {
+    await api.post('/public/patient/send-otp', { mobile })
+  },
+  async verify(mobile: string, otp: string): Promise<
+    | { token: string; patient: { id: string; firstName: string; lastName?: string } }
+    | { selectionToken: string; patients: Array<{ id: string; firstName: string; lastName?: string }> }
+  > {
+    const res = await api.post('/public/patient/verify', { mobile, otp })
+    return res.data
+  },
+  async selectProfile(selectionToken: string, patientId: string): Promise<{
+    token: string
+    patient: { id: string; firstName: string; lastName?: string }
+  }> {
+    const res = await api.post('/public/patient/select-profile', {
+      selectionToken,
+      patientId,
+    })
+    return res.data
+  },
+}
+
 export interface FullPatientHistory {
   patient: PatientSummary & { _id: string }
   visits: Array<{
@@ -431,19 +538,122 @@ export interface FullPatientHistory {
     originalName: string
     mimeType: string
     uploadedAt: string
+    source?: 'patient' | 'staff'
+  }>
+  medicineRequests?: Array<{
+    id: string
+    medicineName: string
+    dosage?: string
+    quantity?: number
+    notes?: string
+    source?: string
+    serviceType?: 'PICKUP' | 'HOME_DELIVERY'
+    paymentMode?: 'ONLINE' | 'OFFLINE'
+    paymentStatus?: 'PENDING' | 'PAID'
+    status?: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+    expectedFulfillmentMinutes?: number
+    fulfilledAt?: string
+    receiptNumber?: string
+    paidAt?: string
+    createdAt: string
+  }>
+  testRequests?: Array<{
+    id: string
+    testName: string
+    notes?: string
+    source?: string
+    serviceType?: 'LAB_VISIT' | 'HOME_SERVICE'
+    paymentMode?: 'ONLINE' | 'OFFLINE'
+    paymentStatus?: 'PENDING' | 'PAID'
+    status?: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+    preferredDateTime?: string
+    expectedFulfillmentMinutes?: number
+    fulfilledAt?: string
+    receiptNumber?: string
+    paidAt?: string
+    createdAt: string
   }>
 }
 
+export const patientPortalService = {
+  async getProfile(): Promise<FullPatientHistory> {
+    const res = await patientApi.get('/public/patient/profile')
+    return res.data as FullPatientHistory
+  },
+  async uploadDocument(file: File): Promise<{ document: { id: string; originalName: string; uploadedAt: string } }> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await patientApi.post('/public/patient/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return res.data as any
+  },
+  async addMedicine(payload: {
+    medicineName: string
+    dosage?: string
+    quantity?: number
+    notes?: string
+    serviceType?: 'PICKUP' | 'HOME_DELIVERY'
+    paymentMode?: 'ONLINE' | 'OFFLINE'
+    expectedFulfillmentMinutes?: number
+  }): Promise<{ medicine: { id: string; medicineName: string } }> {
+    const res = await patientApi.post('/public/patient/medicines', payload)
+    return res.data as any
+  },
+  async addTest(payload: {
+    testName: string
+    notes?: string
+    serviceType?: 'LAB_VISIT' | 'HOME_SERVICE'
+    paymentMode?: 'ONLINE' | 'OFFLINE'
+    preferredDateTime?: string
+    expectedFulfillmentMinutes?: number
+  }): Promise<{
+    test: { id: string; testName: string }
+  }> {
+    const res = await patientApi.post('/public/patient/tests', payload)
+    return res.data as any
+  },
+  openDocument(documentId: string): void {
+    patientApi
+      .get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
+      .then((res) => {
+        const blob = res.data as Blob
+        const objectUrl = URL.createObjectURL(blob)
+        window.open(objectUrl, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
+      })
+      .catch(() => {})
+  },
+  openDiagnosticReport(visitId: string, testId: string): void {
+    patientApi
+      .get(`/public/patient/visits/${visitId}/diagnostic-tests/${testId}/report/file`, {
+        responseType: 'blob',
+      })
+      .then((res) => {
+        const blob = res.data as Blob
+        const objectUrl = URL.createObjectURL(blob)
+        window.open(objectUrl, '_blank', 'noopener,noreferrer')
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
+      })
+      .catch(() => {})
+  },
+}
+
 export const patientService = {
-  async searchByMobile(mobile: string): Promise<PatientSummary | null> {
+  async searchByMobileOptions(mobile: string): Promise<PatientSummary[]> {
     try {
       const res = await api.get('/patients/search', { params: { mobile } })
-      const data = res.data as { patient: PatientSummary }
-      return data.patient
+      const data = res.data as { patient?: PatientSummary; patients?: PatientSummary[] }
+      if (Array.isArray(data.patients) && data.patients.length > 0) return data.patients
+      return data.patient ? [data.patient] : []
     } catch (err: any) {
-      if (err?.response?.status === 404) return null
+      if (err?.response?.status === 404) return []
       throw err
     }
+  },
+  async searchByMobile(mobile: string): Promise<PatientSummary | null> {
+    const options = await this.searchByMobileOptions(mobile)
+    return options[0] ?? null
   },
 
   async createPatient(payload: {
@@ -532,14 +742,161 @@ export const patientService = {
   },
 
   async openDocument(patientId: string, documentId: string): Promise<void> {
-    const res = await api.get(
-      `/patients/${patientId}/documents/${documentId}/file`,
-      { responseType: 'blob' }
-    )
-    const blob = res.data as Blob
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    // Open preview window immediately in user-gesture context to avoid popup blockers.
+    const previewWin = window.open('', '_blank')
+    if (previewWin) {
+      previewWin.document.write(`
+        <html><head><title>Loading…</title><meta charset="utf-8" /></head>
+        <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+          <h2 style="margin:0 0 8px;">Loading…</h2>
+          <p style="margin:0;font-size:13px;color:#475569;">Preparing document preview.</p>
+        </body></html>
+      `)
+      previewWin.document.close()
+    }
+
+    try {
+      const res = await api.get(
+        `/patients/${patientId}/documents/${documentId}/file`,
+        { responseType: 'blob' }
+      )
+      const blob = res.data as Blob
+      const url = URL.createObjectURL(blob)
+      if (previewWin) {
+        previewWin.location.href = url
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err: any) {
+      const forbidden = err?.response?.status === 403
+      if (!forbidden) throw err
+
+      const escapeHtml = (v: string): string =>
+        v
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+
+      const win = previewWin ?? window.open('', '_blank')
+      if (!win) {
+        // eslint-disable-next-line no-alert
+        alert('Popup blocked. Please allow popups to view secure preview.')
+        return
+      }
+
+      win.document.write(`
+        <html><head><title>Secure prescription preview</title><meta charset="utf-8" /></head>
+        <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+          <h2 style="margin:0 0 8px;">Secure prescription preview</h2>
+          <p style="margin:0;font-size:13px;color:#475569;">Loading secure content…</p>
+        </body></html>
+      `)
+      win.document.close()
+
+      try {
+        const linkRes = await api.get(`/patients/${patientId}/documents/${documentId}/secure-link`)
+        const token = (linkRes.data as { token: string }).token
+        const previewRes = await api.get(`/patients/documents/secure-preview/${token}`)
+        const payload = previewRes.data as {
+          document: {
+            originalName: string
+            uploadedAt?: string
+            previewText: string
+            scope: string
+            roleView?: string
+            lowConfidenceLines?: string[]
+            parsed?: {
+              medicines?: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+              tests?: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+              unknown?: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+            }
+          }
+        }
+
+        const uploaded = payload.document.uploadedAt
+          ? new Date(payload.document.uploadedAt).toLocaleString('en-IN')
+          : '—'
+
+        const renderRows = (rows: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }> | undefined) =>
+          (rows ?? [])
+            .map((r) => {
+              const color =
+                r.confidence === 'HIGH' ? '#166534' : r.confidence === 'MEDIUM' ? '#92400e' : '#991b1b'
+              return `<li style="margin:0 0 6px;">
+                <span>${escapeHtml(r.text)}</span>
+                <small style="margin-left:8px;color:${color};font-weight:600;">${escapeHtml(r.confidence)}</small>
+              </li>`
+            })
+            .join('')
+
+        const medicinesHtml = renderRows(payload.document.parsed?.medicines)
+        const testsHtml = renderRows(payload.document.parsed?.tests)
+        const lowLines = (payload.document.lowConfidenceLines ?? [])
+          .map((l) => `<li style="margin:0 0 4px;color:#991b1b;">${escapeHtml(l)}</li>`)
+          .join('')
+
+        win.document.open()
+        win.document.write(`
+          <html>
+            <head>
+              <title>Secure prescription preview</title>
+              <meta charset="utf-8" />
+            </head>
+            <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+              <h2 style="margin:0 0 8px;">Secure prescription preview</h2>
+              <p style="margin:0 0 4px;font-size:13px;color:#475569;"><strong>File:</strong> ${escapeHtml(payload.document.originalName || 'Prescription')}</p>
+              <p style="margin:0 0 12px;font-size:13px;color:#475569;"><strong>Uploaded:</strong> ${escapeHtml(uploaded)} · <strong>Scope:</strong> ${escapeHtml(payload.document.scope || 'OCR_ONLY')}</p>
+              <p style="margin:0 0 8px;font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:8px 10px;">
+                Download is disabled for this role. Only limited preview is shown.
+              </p>
+              <p style="margin:0 0 10px;font-size:12px;color:#334155;"><strong>Role filter:</strong> ${escapeHtml(payload.document.roleView || 'ROLE_FILTERED')}</p>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <section style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                  <h3 style="margin:0 0 8px;font-size:13px;">Parsed medicines (pharmacy view)</h3>
+                  <ul style="margin:0;padding-left:16px;font-size:12px;line-height:1.45;">
+                    ${medicinesHtml || '<li style="color:#64748b;">No medicine lines available for this role.</li>'}
+                  </ul>
+                </section>
+                <section style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                  <h3 style="margin:0 0 8px;font-size:13px;">Parsed tests (lab view)</h3>
+                  <ul style="margin:0;padding-left:16px;font-size:12px;line-height:1.45;">
+                    ${testsHtml || '<li style="color:#64748b;">No test lines available for this role.</li>'}
+                  </ul>
+                </section>
+              </div>
+
+              <section style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px;">
+                <h3 style="margin:0 0 8px;font-size:13px;">Low-confidence lines (verify manually)</h3>
+                <ul style="margin:0;padding-left:16px;font-size:12px;line-height:1.4;">
+                  ${lowLines || '<li style="color:#64748b;">No low-confidence lines.</li>'}
+                </ul>
+              </section>
+
+              <h3 style="margin:0 0 8px;font-size:13px;">Raw OCR</h3>
+              <pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">${escapeHtml(payload.document.previewText || '')}</pre>
+            </body>
+          </html>
+        `)
+        win.document.close()
+      } catch (previewErr: any) {
+        const msg =
+          previewErr?.response?.data?.message ??
+          'Secure preview could not be loaded. Please try again.'
+        win.document.open()
+        win.document.write(`
+          <html><head><title>Secure prescription preview</title><meta charset="utf-8" /></head>
+          <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+            <h2 style="margin:0 0 8px;">Secure prescription preview</h2>
+            <p style="margin:0;font-size:13px;color:#991b1b;">${escapeHtml(msg)}</p>
+          </body></html>
+        `)
+        win.document.close()
+      }
+    }
   },
 
   async createVisit(
@@ -748,6 +1105,17 @@ export const publicAppointmentService = {
 
   async getFamilyMemberHistory(memberId: string): Promise<FamilyMemberHistory> {
     const res = await api.get(`/public/family/member-history/${memberId}`)
+    return res.data as any
+  },
+
+  async getFamilyMemberProfileToken(accountId: string, memberId: string): Promise<{
+    token: string
+    patient: { id: string; firstName: string; lastName?: string }
+  }> {
+    const res = await api.post('/public/family/member-profile-token', {
+      accountId,
+      memberId,
+    })
     return res.data as any
   },
 

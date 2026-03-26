@@ -25,6 +25,8 @@ export const Header: FC<HeaderProps> = ({
         ? 'Lab panel'
         : role === 'LAB_MANAGER'
           ? 'Lab Manager panel'
+          : role === 'PHARMACY'
+            ? 'Pharmacy panel'
           : role === 'SUPER_ADMIN'
             ? 'Super Admin panel'
           : 'Doctor panel'

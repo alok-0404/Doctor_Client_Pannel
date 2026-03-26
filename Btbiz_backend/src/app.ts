@@ -9,9 +9,11 @@ import patientRoutes from "./routes/patientRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import ocrRoutes from "./routes/ocr";
 import publicRoutes from "./routes/publicRoutes";
+import publicPatientRoutes from "./routes/publicPatientRoutes";
 import appointmentRoutes from "./routes/appointmentRoutes";
 import pharmacyRoutes from "./routes/pharmacyRoutes";
 import superAdminRoutes from "./routes/superAdminRoutes";
+import orderRoutes from "./routes/orderRoutes";
 
 const app = express();
 
@@ -81,8 +83,10 @@ app.use("/patients", patientRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/api/ocr", ocrRoutes);
 app.use("/public", publicRoutes);
+app.use("/public/patient", publicPatientRoutes);
 app.use("/appointments", appointmentRoutes);
 app.use("/pharmacy", pharmacyRoutes);
+app.use("/orders", orderRoutes);
 app.use("/super-admin", superAdminRoutes);
 
 if (process.env.NODE_ENV === "production") {

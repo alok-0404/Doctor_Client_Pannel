@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
@@ -6,9 +6,11 @@ import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
 import {
   patientService,
+  orderService,
   type PatientSummary,
   type FullPatientHistory,
   type DiagnosticTestItem,
+  type LabOrderRequest,
 } from '../services/api'
 // import { Button } from '../components/ui/Button'
 
@@ -36,6 +38,8 @@ export const LabDashboard = () => {
 
   const [patient, setPatient] = useState<PatientSummary | null>(null)
   const [history, setHistory] = useState<FullPatientHistory | null>(null)
+  const [matchedPatients, setMatchedPatients] = useState<PatientSummary[]>([])
+  const [selectedPatientId, setSelectedPatientId] = useState('')
   const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null)
 
   const [addTestSelect, setAddTestSelect] = useState('')
@@ -46,6 +50,8 @@ export const LabDashboard = () => {
   const [uploadingReportForTestId, setUploadingReportForTestId] = useState<string | null>(null)
 
   const [showReceipt, setShowReceipt] = useState(false)
+  const [incomingTestRequests, setIncomingTestRequests] = useState<LabOrderRequest[]>([])
+  const [requestsLoading, setRequestsLoading] = useState(false)
   const [receiptData, setReceiptData] = useState<{
     patient: { name: string; mobile: string }
     visit: { visitDate: string; reason?: string }
@@ -56,10 +62,24 @@ export const LabDashboard = () => {
     paidAt?: string
   } | null>(null)
 
+  const loadPatientProfile = async (p: PatientSummary) => {
+    setPatient(p)
+    setSelectedPatientId(p.id)
+    const h = await patientService.getFullHistory(p.id)
+    setHistory(h)
+    if (h.visits?.length) {
+      setSelectedVisitId(h.visits[0]._id)
+    } else {
+      setSelectedVisitId(null)
+    }
+  }
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setSearchError(null)
     setHistory(null)
+    setMatchedPatients([])
+    setSelectedPatientId('')
     setSelectedVisitId(null)
     setAddTestError(null)
     setShowReceipt(false)
@@ -71,16 +91,10 @@ export const LabDashboard = () => {
     }
     setSearchLoading(true)
     try {
-      const found = await patientService.searchByMobile(digits)
-      if (found) {
-        setPatient(found)
-        const h = await patientService.getFullHistory(found.id)
-        setHistory(h)
-        if (h.visits?.length) {
-          setSelectedVisitId(h.visits[0]._id)
-        } else {
-          setSelectedVisitId(null)
-        }
+      const options = await patientService.searchByMobileOptions(digits)
+      if (options.length > 0) {
+        setMatchedPatients(options)
+        await loadPatientProfile(options[0])
       } else {
         setPatient(null)
         setHistory(null)
@@ -186,6 +200,28 @@ export const LabDashboard = () => {
     }
   }
 
+  const loadIncomingTestRequests = async () => {
+    setRequestsLoading(true)
+    try {
+      const list = await orderService.getTestRequests()
+      setIncomingTestRequests(list.filter((r) => r.paymentStatus !== 'PAID'))
+    } finally {
+      setRequestsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadIncomingTestRequests()
+  }, [])
+
+  const handleQuickUpdateTestRequest = async (
+    requestId: string,
+    patch: Partial<{ status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'; paymentStatus: 'PENDING' | 'PAID' }>
+  ) => {
+    await orderService.updateTestRequest(requestId, patch)
+    await loadIncomingTestRequests()
+  }
+
   const handleViewReport = async (testId: string) => {
     if (!patient?.id || !selectedVisitId) return
     try {
@@ -199,7 +235,56 @@ export const LabDashboard = () => {
     <div className="app-shell">
       <Header doctorName={name} />
       <main className="dashboard-main" style={{ maxWidth: '100%' }}>
-        <section style={{ maxWidth: 900, margin: '0 auto' }}>
+        <section style={{ maxWidth: 1280, margin: '0 auto' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(340px, 400px) minmax(0, 1fr)',
+              gap: 20,
+              alignItems: 'start',
+            }}
+          >
+            <div>
+              <Card className="dashboard-overview-card" style={{ marginBottom: 0, position: 'sticky', top: 88 }}>
+            <p className="dashboard-kicker">Patient test orders</p>
+            <h2 className="dashboard-heading">Incoming test requests</h2>
+            <p className="dashboard-body" style={{ marginBottom: 12 }}>
+              Requests created by patients are shown here with home service and payment preference.
+            </p>
+            {requestsLoading ? (
+              <p className="dashboard-body">Loading requests…</p>
+            ) : incomingTestRequests.length === 0 ? (
+              <p className="dashboard-body">No test requests yet.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 560, overflowY: 'auto', paddingRight: 6 }}>
+                {incomingTestRequests.map((r) => (
+                  <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+                    <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
+                    <p style={{ margin: '4px 0', fontSize: 13 }}>{r.testName}{r.notes ? ` · ${r.notes}` : ''}</p>
+                    <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                      {r.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
+                      {r.preferredDateTime ? ` · Preferred ${new Date(r.preferredDateTime).toLocaleString('en-IN')}` : ''}
+                      {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
+                    </p>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { status: 'ACCEPTED' })}>
+                        Accept
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { status: 'COMPLETED' })}>
+                        Ready
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { paymentStatus: 'PAID' })}>
+                        Mark paid
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+              </Card>
+            </div>
+
+            <div>
           <Card className="dashboard-overview-card">
             <p className="dashboard-kicker">Diagnostic panel</p>
             <h2 className="dashboard-heading">Search patient by mobile</h2>
@@ -232,6 +317,38 @@ export const LabDashboard = () => {
 
           {patient && history && (
             <>
+              {matchedPatients.length > 1 && (
+                <div style={{ marginTop: 16 }}>
+                  <Card className="dashboard-overview-card">
+                    <p className="dashboard-kicker">Family profiles</p>
+                    <p className="dashboard-body" style={{ marginBottom: 8 }}>
+                      This mobile has multiple family members. Select the profile to continue.
+                    </p>
+                    <select
+                      value={selectedPatientId}
+                      onChange={(e) => {
+                        const next = matchedPatients.find((p) => p.id === e.target.value)
+                        if (next) void loadPatientProfile(next)
+                      }}
+                      style={{
+                        width: '100%',
+                        maxWidth: 460,
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid var(--color-border)',
+                        fontSize: 14,
+                      }}
+                    >
+                      {matchedPatients.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {[p.firstName, p.lastName].filter(Boolean).join(' ') || 'Patient'} ({p.mobileNumber})
+                        </option>
+                      ))}
+                    </select>
+                  </Card>
+                </div>
+              )}
+
               <div style={{ marginTop: 16 }}>
                 <Card className="dashboard-overview-card">
                   <p className="dashboard-kicker">Patient details</p>
@@ -243,6 +360,24 @@ export const LabDashboard = () => {
                     {patient.bloodGroup && ` · Blood group: ${patient.bloodGroup}`}
                     {patient.address && ` · ${patient.address}`}
                   </p>
+                  {history.documents?.length ? (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void patientService.openDocument(patient.id, history.documents[0].id)}
+                      >
+                        View prescription (secure)
+                      </Button>
+                      <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>
+                        Latest uploaded prescription
+                      </span>
+                    </div>
+                  ) : (
+                    <p style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>
+                      No prescription uploaded for this patient yet.
+                    </p>
+                  )}
                 </Card>
               </div>
 
@@ -486,6 +621,8 @@ export const LabDashboard = () => {
               </div>
             </>
           )}
+            </div>
+          </div>
         </section>
       </main>
 

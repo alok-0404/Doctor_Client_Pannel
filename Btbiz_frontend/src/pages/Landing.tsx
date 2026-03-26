@@ -12,6 +12,7 @@ const roles = [
   { title: 'Lab Manager', description: 'Register your lab, then add and manage lab assistants.', path: '/login', cta: 'Login as Lab Manager', registerPath: '/register-lab-manager' },
   { title: 'Assistant / Lab', description: 'Check-in patients, upload documents, or record lab tests.', path: '/login', cta: 'Login as Assistant / Lab', registerPath: null },
   { title: 'Medicine', description: 'Dispense medicines to patients. Search by mobile, add items with MRP and discount, collect payment and generate receipt.', path: '/login', cta: 'Login as Medicine', registerPath: '/register-medicine' },
+  { title: 'Super Admin', description: 'Platform-level dashboard for users and system overview.', path: '/login?role=super-admin', cta: 'Login as Super Admin', registerPath: null },
 ]
 
 export const Landing = () => {

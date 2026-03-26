@@ -11,6 +11,7 @@ export const PatientSearch = () => {
   const [mobile, setMobile] = useState('')
   const [loading, setLoading] = useState(false)
   const [notFound, setNotFound] = useState(false)
+  const [matches, setMatches] = useState<Array<{ id: string; firstName: string; lastName?: string; mobileNumber: string }>>([])
   const navigate = useNavigate()
 
   const doctorName = authStorage.getName() ?? 'Doctor'
@@ -18,6 +19,7 @@ export const PatientSearch = () => {
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setNotFound(false)
+    setMatches([])
 
     const digits = mobile.replace(/\D/g, '')
     if (digits.length < 10) {
@@ -27,9 +29,11 @@ export const PatientSearch = () => {
 
     setLoading(true)
     try {
-      const patient = await patientService.searchByMobile(digits)
-      if (patient) {
-        navigate(`/patient/${patient.id}`)
+      const patients = await patientService.searchByMobileOptions(digits)
+      if (patients.length === 1) {
+        navigate(`/patient/${patients[0].id}`)
+      } else if (patients.length > 1) {
+        setMatches(patients)
       } else {
         setNotFound(true)
       }
@@ -76,6 +80,32 @@ export const PatientSearch = () => {
               <p className="search-error">
                 Patient not found. Please check the number and try again.
               </p>
+            )}
+            {matches.length > 1 && (
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, background: '#fff' }}>
+                <p className="search-hint" style={{ marginTop: 0 }}>
+                  Multiple family members found. Select a profile:
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {matches.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => navigate(`/patient/${m.id}`)}
+                      style={{
+                        textAlign: 'left',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 8,
+                        background: '#f8fafc',
+                        padding: '8px 10px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {[m.firstName, m.lastName].filter(Boolean).join(' ') || 'Patient'} ({m.mobileNumber})
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             <div className="search-footer">

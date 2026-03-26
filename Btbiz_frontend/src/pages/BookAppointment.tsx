@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { publicAppointmentService, type PatientSummary, type ConsultantOption, type FamilyMemberSummary, type FamilyRelation } from '../services/api'
+import { patientStorage } from '../utils/patientStorage'
 
-type Mode = 'none' | 'family' | 'old' | 'new'
+type Mode = 'none' | 'family' | 'old'
 type Step = 'details' | 'payment' | 'confirm'
 type PaymentMode = 'online_now' | 'cash_at_clinic'
 
@@ -49,6 +50,7 @@ function distanceKm(
 }
 
 export const BookAppointment = () => {
+  const navigate = useNavigate()
   const [policyAccepted, setPolicyAccepted] = useState(false)
   const [mode, setMode] = useState<Mode>('none')
   const [step, setStep] = useState<Step>('details')
@@ -83,9 +85,6 @@ export const BookAppointment = () => {
   const [newMemberGender, setNewMemberGender] = useState<'MALE' | 'FEMALE' | 'OTHER' | ''>('')
   const [newMemberDob, setNewMemberDob] = useState('')
   const [newMemberAddress, setNewMemberAddress] = useState('')
-  const [viewingHistoryForId, setViewingHistoryForId] = useState<string | null>(null)
-  const [memberHistory, setMemberHistory] = useState<Awaited<ReturnType<typeof publicAppointmentService.getFamilyMemberHistory>> | null>(null)
-  const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Old patient state
   const [oldCountryCode, setOldCountryCode] = useState('+91')
@@ -101,23 +100,23 @@ export const BookAppointment = () => {
   const [appointmentDate, setAppointmentDate] = useState('')
   const [preferredSlot, setPreferredSlot] = useState('')
 
-  // New patient state
-  const [newConsultantId, setNewConsultantId] = useState('')
-  const [newName, setNewName] = useState('')
-  const [newAge, setNewAge] = useState('')
-  const [newGender, setNewGender] = useState<string>('')
-  const [newCountryCode, setNewCountryCode] = useState('+91')
-  const [newMobile, setNewMobile] = useState('')
-  const [newEmail, setNewEmail] = useState('')
-  const [newCity, setNewCity] = useState('')
-  const [newAddress, setNewAddress] = useState('')
-
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null)
   const liveShareWatchIdRef = useRef<number | null>(null)
   const lastSentMsRef = useRef<number>(0)
+  const familyConsultantRef = useRef<HTMLSelectElement | null>(null)
+  const focusFamilyBookingFields = useCallback(() => {
+    setTimeout(() => {
+      familyConsultantRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+      familyConsultantRef.current?.focus()
+    }, 80)
+  }, [])
+
 
   useEffect(() => {
     setLoadingConsultants(true)
@@ -127,7 +126,6 @@ export const BookAppointment = () => {
         setConsultants(list)
         if (list.length > 0) {
           setOldConsultantId((prev) => prev || list[0].id)
-          setNewConsultantId((prev) => prev || list[0].id)
           setFamilyConsultantId((prev) => prev || list[0].id)
         }
       })
@@ -231,9 +229,8 @@ export const BookAppointment = () => {
 
   const selectedConsultantId =
     mode === 'old' ? oldConsultantId
-      : mode === 'new' ? newConsultantId
-        : mode === 'family' ? familyConsultantId
-          : ''
+      : mode === 'family' ? familyConsultantId
+        : ''
   const selectedConsultant = consultants.find((c) => c.id === selectedConsultantId)
   const hasClinicLocation = selectedConsultant && selectedConsultant.clinicLatitude != null && selectedConsultant.clinicLongitude != null
   const distanceKmValue = userLocation && hasClinicLocation && selectedConsultant
@@ -252,11 +249,6 @@ export const BookAppointment = () => {
     resetState()
   }
 
-  const selectNew = () => {
-    setMode('new')
-    resetState()
-  }
-
   const selectFamily = () => {
     setMode('family')
     resetState()
@@ -268,6 +260,28 @@ export const BookAppointment = () => {
   )
 
   const selectedFamilyPatientId = selectedFamilyMember?.patientId ?? selectedFamilyMember?.patient?.id ?? null
+
+  const applyFamilyMemberToBooking = useCallback((member: FamilyMemberSummary | null) => {
+    if (!member) {
+      setFamilyPatientName('')
+      setFamilyGender('')
+      setFamilyAddress('')
+      return
+    }
+    const p = member.patient
+    setFamilyPatientName(
+      (p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : member.fullName) || ''
+    )
+    setFamilyGender(p?.gender ?? member.gender ?? '')
+    setFamilyAddress(p?.address ?? '')
+  }, [])
+
+  const handleSelectFamilyMember = useCallback((memberId: string, sourceMembers?: FamilyMemberSummary[]) => {
+    setSelectedFamilyMemberId(memberId)
+    const members = sourceMembers ?? familyMembers
+    const member = members.find((m) => m.id === memberId) ?? null
+    applyFamilyMemberToBooking(member)
+  }, [familyMembers, applyFamilyMemberToBooking])
 
   const handleFamilyLogin = async () => {
     setError(null)
@@ -286,7 +300,8 @@ export const BookAppointment = () => {
       const list = await publicAppointmentService.listFamilyMembers({ accountId: account.id })
       setFamilyMembers(list.members ?? [])
       if ((list.members ?? []).length === 1) {
-        setSelectedFamilyMemberId(list.members[0].id)
+        handleSelectFamilyMember(list.members[0].id, list.members ?? [])
+        focusFamilyBookingFields()
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message
@@ -327,7 +342,10 @@ export const BookAppointment = () => {
       setFamilyMembers(list.members ?? [])
       if (!editingMemberId) {
         const last = (list.members ?? [])[list.members.length - 1]
-        if (last?.id) setSelectedFamilyMemberId(last.id)
+        if (last?.id) {
+          handleSelectFamilyMember(last.id, list.members ?? [])
+          focusFamilyBookingFields()
+        }
       }
       setAddingMember(false)
       setEditingMemberId(null)
@@ -368,18 +386,22 @@ export const BookAppointment = () => {
   }
 
   const handleViewHistory = async (memberId: string) => {
-    setViewingHistoryForId(memberId)
-    setMemberHistory(null)
-    setLoadingHistory(true)
     setError(null)
+    if (!familyAccountId) {
+      setError('Please load family first.')
+      return
+    }
     try {
-      const hist = await publicAppointmentService.getFamilyMemberHistory(memberId)
-      setMemberHistory(hist)
+      const result = await publicAppointmentService.getFamilyMemberProfileToken(
+        familyAccountId,
+        memberId
+      )
+      const name = [result.patient.firstName, result.patient.lastName].filter(Boolean).join(' ')
+      patientStorage.set(result.token, result.patient.id, name || 'Patient')
+      navigate('/patient-profile')
     } catch (err: any) {
       const msg = err?.response?.data?.message
-      setError(typeof msg === 'string' ? msg : 'Failed to load health records. Please try again.')
-    } finally {
-      setLoadingHistory(false)
+      setError(typeof msg === 'string' ? msg : 'Failed to open full health profile. Please try again.')
     }
   }
 
@@ -387,13 +409,8 @@ export const BookAppointment = () => {
   useEffect(() => {
     if (mode !== 'family') return
     if (!selectedFamilyMember) return
-    const p = selectedFamilyMember.patient
-    setFamilyPatientName(
-      (p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : selectedFamilyMember.fullName) || ''
-    )
-    setFamilyGender(p?.gender ?? selectedFamilyMember.gender ?? '')
-    setFamilyAddress(p?.address ?? '')
-  }, [mode, selectedFamilyMember])
+    applyFamilyMemberToBooking(selectedFamilyMember)
+  }, [mode, selectedFamilyMember, applyFamilyMemberToBooking])
 
   const handleFetchOldPatient = async () => {
     setError(null)
@@ -446,16 +463,6 @@ export const BookAppointment = () => {
         setError('Please fill all mandatory fields.')
         return
       }
-    } else if (mode === 'new') {
-      if (!newConsultantId || !newName || !newGender || !newMobile) {
-        setError('Please fill all mandatory fields.')
-        return
-      }
-      const ageNum = newAge ? Number(newAge) : NaN
-      if (!newAge || isNaN(ageNum) || ageNum < 18) {
-        setError('Age must be 18 or above.')
-        return
-      }
     }
     setStep('payment')
   }
@@ -492,18 +499,8 @@ export const BookAppointment = () => {
           ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
         })
       } else {
-        res = await publicAppointmentService.bookNewPatientAppointment({
-          consultantId: newConsultantId,
-          patientName: newName,
-          age: newAge ? Number(newAge) : undefined,
-          gender: newGender,
-          mobileNumber: `${newCountryCode}${newMobile.replace(/\D/g, '').trim()}`,
-          city: newCity || undefined,
-          address: newAddress || undefined,
-          appointmentDate,
-          preferredSlot: preferredSlot || undefined,
-          ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
-        })
+        setError('Please select New Patient or Old Patient.')
+        return
       }
       setAppointmentId(res.appointmentId)
       setSelectedPaymentMode(paymentMode)
@@ -631,20 +628,17 @@ export const BookAppointment = () => {
   const renderModeChooser = () => (
     <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 32 }}>
       <button type="button" className="public-cta" onClick={selectFamily}>
-        Family Booking
+        New Patient
       </button>
       <button type="button" className="public-cta" onClick={selectOld}>
         Old Patient
-      </button>
-      <button type="button" className="public-cta" onClick={selectNew}>
-        New Patient
       </button>
     </div>
   )
 
   const renderFamilyForm = () => (
     <div className="appt-card">
-      <h2 className="public-section-title" style={{ marginBottom: 6 }}>Family Booking</h2>
+      <h2 className="public-section-title" style={{ marginBottom: 6 }}>New Patient</h2>
       <p className="public-section-text" style={{ marginBottom: 16 }}>
         Enter your <strong>primary mobile number</strong>, then select a family member (or add a new one).
       </p>
@@ -682,7 +676,7 @@ export const BookAppointment = () => {
             <label>Select Family Member *</label>
             <select
               value={selectedFamilyMemberId}
-              onChange={(e) => setSelectedFamilyMemberId(e.target.value)}
+              onChange={(e) => handleSelectFamilyMember(e.target.value)}
             >
               <option value="">Select member</option>
               {familyMembers.map((m) => (
@@ -725,7 +719,11 @@ export const BookAppointment = () => {
                         type="button"
                         className="public-cta"
                         style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                        onClick={() => setSelectedFamilyMemberId(m.id)}
+                        onClick={() => {
+                          handleSelectFamilyMember(m.id, familyMembers)
+                          setError(null)
+                          focusFamilyBookingFields()
+                        }}
                       >
                         Use for booking
                       </button>
@@ -835,6 +833,7 @@ export const BookAppointment = () => {
             <div className="appt-field">
               <label>Name of Consultant *</label>
               <select
+                ref={familyConsultantRef}
                 value={familyConsultantId}
                 onChange={(e) => setFamilyConsultantId(e.target.value)}
                 disabled={loadingConsultants}
@@ -916,59 +915,6 @@ export const BookAppointment = () => {
             Next
           </button>
 
-          {viewingHistoryForId && (
-            <div className="appt-card" style={{ marginTop: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                <h3 className="public-section-title" style={{ marginBottom: 0, fontSize: '1.05rem' }}>Health Records</h3>
-                <button
-                  type="button"
-                  className="public-cta"
-                  style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#334155' }}
-                  onClick={() => {
-                    setViewingHistoryForId(null)
-                    setMemberHistory(null)
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-              {loadingHistory && (
-                <p className="public-section-text">Loading health records…</p>
-              )}
-              {!loadingHistory && memberHistory && (
-                <>
-                  <p className="public-section-text" style={{ marginBottom: 10 }}>
-                    <strong>{memberHistory.member.fullName}</strong> ({memberHistory.member.relation}) – {memberHistory.member.patient.mobileNumber}
-                  </p>
-                  {memberHistory.visits.length === 0 && (
-                    <p className="public-section-text">No visits found for this member yet.</p>
-                  )}
-                  {memberHistory.visits.length > 0 && (
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
-                      {memberHistory.visits.map((v) => (
-                        <li key={v.id} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff' }}>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a' }}>
-                            <strong>{new Date(v.visitDate).toLocaleDateString()}</strong>
-                            {v.doctorName && <span style={{ color: '#64748b' }}> · {v.doctorName}</span>}
-                          </div>
-                          {v.reason && (
-                            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                              Reason: {v.reason}
-                            </div>
-                          )}
-                          {v.notes && (
-                            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                              Notes: {v.notes}
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </div>
-          )}
         </>
       )}
     </div>
@@ -1018,6 +964,13 @@ export const BookAppointment = () => {
               </div>
             </div>
           </div>
+          <p style={{ marginTop: 8 }}>
+            <Link to="/patient-login" className="public-cta" style={{ display: 'inline-block', padding: '8px 16px', fontSize: '0.9rem' }}>
+              Open My Profile
+            </Link>
+            {' '}
+            <span style={{ color: '#64748b', fontSize: '0.9rem' }}>View appointments, reports &amp; documents</span>
+          </p>
         </div>
       )}
       <div className="appt-field">
@@ -1090,132 +1043,6 @@ export const BookAppointment = () => {
     </div>
   )
 
-  const renderNewForm = () => (
-    <div className="appt-card">
-      <h2 className="public-section-title" style={{ marginBottom: 16 }}>New Patient Appointment</h2>
-      <div className="appt-field">
-        <label>Name of Consultant for Appointment *</label>
-        <select
-          value={newConsultantId}
-          onChange={(e) => setNewConsultantId(e.target.value)}
-          disabled={loadingConsultants}
-        >
-          {consultants.length === 0 && <option value="">Loading…</option>}
-          {consultants.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
-      {renderDistanceBlock()}
-      <div className="appt-field">
-        <label>Name of the Patient *</label>
-        <input
-          type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-        />
-      </div>
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>Age *</label>
-          <input
-            type="number"
-            value={newAge}
-            onChange={(e) => setNewAge(e.target.value)}
-            min={18}
-            placeholder="18 or above"
-            style={{
-              borderColor: newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) ? '#dc2626' : undefined,
-              boxShadow: newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) ? '0 0 0 2px rgba(220, 38, 38, 0.2)' : undefined,
-            }}
-          />
-          {newAge && (isNaN(Number(newAge)) || Number(newAge) < 18) && (
-            <p style={{ color: '#dc2626', fontSize: '0.8rem', marginTop: 4 }}>Age must be 18 or above</p>
-          )}
-        </div>
-        <div className="appt-field">
-          <label>Gender *</label>
-          <select value={newGender} onChange={(e) => setNewGender(e.target.value)}>
-            <option value="">Select Gender</option>
-            {GENDERS.map((g) => (
-              <option key={g} value={g}>{g}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div className="appt-field">
-        <label>Mobile No *</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
-          <select value={newCountryCode} onChange={(e) => setNewCountryCode(e.target.value)}>
-            <option value="+91">IN (+91)</option>
-            <option value="+1">US/CA (+1)</option>
-            <option value="+44">UK (+44)</option>
-            <option value="+61">AU (+61)</option>
-            <option value="+971">UAE (+971)</option>
-          </select>
-          <input
-            type="tel"
-            value={newMobile}
-            onChange={(e) => setNewMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
-          />
-        </div>
-      </div>
-      <div className="appt-field">
-        <label>Email (optional)</label>
-        <input
-          type="email"
-          value={newEmail}
-          onChange={(e) => setNewEmail(e.target.value)}
-          placeholder="your@email.com"
-        />
-      </div>
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>City Name</label>
-          <input
-            type="text"
-            value={newCity}
-            onChange={(e) => setNewCity(e.target.value)}
-          />
-        </div>
-        <div className="appt-field">
-          <label>Address</label>
-          <input
-            type="text"
-            value={newAddress}
-            onChange={(e) => setNewAddress(e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>Appointment Date *</label>
-          <input
-            type="date"
-            value={appointmentDate}
-            onChange={(e) => setAppointmentDate(e.target.value)}
-            min={new Date().toISOString().slice(0, 10)}
-          />
-        </div>
-        <div className="appt-field">
-          <label>Preferred time (approx)</label>
-          <select value={preferredSlot} onChange={(e) => setPreferredSlot(e.target.value)}>
-            <option value="">Select slot</option>
-            {TIME_SLOTS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <p className="appt-timing-msg">
-        You may come anytime between <strong>10 AM and 3 PM</strong>.
-      </p>
-      <button type="button" className="public-cta" style={{ marginTop: 16 }} onClick={goToPayment}>
-        Next
-      </button>
-    </div>
-  )
-
   const renderPayment = () => (
     <div className="appt-card" style={{ textAlign: 'center' }}>
       <h2 className="public-section-title" style={{ marginBottom: 16 }}>Payment</h2>
@@ -1249,16 +1076,15 @@ export const BookAppointment = () => {
 
   const getConfirmName = () => {
     if (mode === 'family') return familyPatientName || selectedFamilyMember?.fullName || '—'
-    if (mode === 'old') return (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—'
-    return newName || '—'
+    return (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—'
   }
   const getConfirmMobile = () => {
     if (mode === 'family') return familyMobile || '—'
-    return (mode === 'old' ? oldMobile : newMobile) || '—'
+    return oldMobile || '—'
   }
   const getConfirmEmail = () => {
     if (mode === 'family') return '—'
-    return (mode === 'old' ? oldEmail : newEmail).trim() || '—'
+    return oldEmail.trim() || '—'
   }
 
   const renderConfirm = () => (
@@ -1319,7 +1145,6 @@ export const BookAppointment = () => {
         )}
         {policyAccepted && step === 'details' && mode === 'family' && renderFamilyForm()}
         {policyAccepted && step === 'details' && mode === 'old' && renderOldForm()}
-        {policyAccepted && step === 'details' && mode === 'new' && renderNewForm()}
         {policyAccepted && step === 'payment' && renderPayment()}
         {policyAccepted && step === 'confirm' && renderConfirm()}
         {step !== 'confirm' && (

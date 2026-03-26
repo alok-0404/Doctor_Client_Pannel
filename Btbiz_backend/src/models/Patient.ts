@@ -4,6 +4,8 @@ export interface IPatient extends Document {
   firstName: string;
   lastName?: string;
   mobileNumber: string;
+  /** Optional, used for sending lab reports by email */
+  email?: string;
   dateOfBirth?: Date;
   gender?: "MALE" | "FEMALE" | "OTHER";
   address?: string;
@@ -27,6 +29,7 @@ const PatientSchema = new Schema<IPatient>(
       // We keep the index for faster lookups by mobile.
       index: true
     },
+    email: { type: String },
     dateOfBirth: { type: Date },
     gender: {
       type: String,

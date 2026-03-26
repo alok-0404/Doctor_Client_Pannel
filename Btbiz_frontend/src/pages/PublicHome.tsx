@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { patientStorage } from '../utils/patientStorage'
 
 const navLinks = [
   { label: 'Home', to: '/' },
@@ -10,6 +11,9 @@ const navLinks = [
 ]
 
 export const PublicHome = () => {
+  const patientToken = patientStorage.getToken()
+  const myProfileTo = patientToken ? '/patient-profile' : '/patient-login'
+
   return (
     <div className="public-home">
       {/* Header + Navbar */}
@@ -25,6 +29,9 @@ export const PublicHome = () => {
                   {item.label}
                 </Link>
               ))}
+              <Link to={myProfileTo} className="public-nav-link">
+                My Profile
+              </Link>
             </nav>
             <Link to="/portal" className="public-nav-staff">
               For staff only
@@ -85,6 +92,7 @@ export const PublicHome = () => {
             <Link to="/#about">About</Link>
             <Link to="/#services">Services</Link>
             <Link to="/book-appointment">Book Appointment</Link>
+            <Link to={myProfileTo}>My Profile</Link>
           </div>
           <p className="public-footer-copy">
             © {new Date().getFullYear()} MEDIGRAPH. All rights reserved.

@@ -135,6 +135,24 @@ export interface PharmacyDispensationItem {
   createdAt: string
 }
 
+export interface MedicineRequestItem {
+  id: string
+  medicineName: string
+  dosage?: string
+  quantity?: number
+  notes?: string
+  source?: string
+  createdAt: string
+}
+
+export interface TestRequestItem {
+  id: string
+  testName: string
+  notes?: string
+  source?: string
+  createdAt: string
+}
+
 export interface PatientDetailsData {
   id: string
   name: string
@@ -160,8 +178,10 @@ export interface PatientDetailsData {
   visits: VisitItem[]
   prescriptions: PrescriptionItem[]
   medicines: MedicineItem[]
+  medicineRequests?: MedicineRequestItem[]
   pharmacyDispensations?: PharmacyDispensationItem[]
   tests: DiagnosticTestItem[]
+  testRequests?: TestRequestItem[]
   documents?: DocumentItem[]
 }
 
@@ -411,6 +431,7 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                               minute: '2-digit',
                             })}
                             {' · Uploaded prescription'}
+                            {doc.source === 'patient' && ' · Uploaded by patient'}
                             {doc.source === 'WHATSAPP' && ' · WhatsApp'}
                           </span>
                           {doc.ocrText && (
@@ -450,27 +471,38 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
               Medicines
             </h3>
             {openMedicines && (
-              <ul className="patient-list">
-                {data.medicines.map((m) => (
-                  <li
-                    key={`${m.name}-${m.dosage}`}
-                    className="patient-list-item">
-                    <div className="patient-list-copy">
-                      <p className="patient-list-primary">
-                        {m.name}
-                      </p>
-                      {m.dosage && (
-                        <p className="patient-list-secondary">
-                          {m.dosage}
-                        </p>
-                      )}
-                    </div>
-                    <PillTag variant={m.worked ? 'worked' : 'notWorked'}>
-                      {m.worked ? 'Worked' : 'Not worked'}
-                    </PillTag>
-                  </li>
-                ))}
-              </ul>
+              (data.medicines.length > 0 || (data.medicineRequests?.length ?? 0) > 0) ? (
+                <ul className="patient-list">
+                  {(data.medicineRequests ?? []).map((m) => (
+                    <li key={m.id} className="patient-list-item" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div className="patient-list-copy">
+                        <p className="patient-list-primary">{m.medicineName}</p>
+                        {(m.dosage || m.notes) && (
+                          <p className="patient-list-secondary">
+                            {[m.dosage, m.notes].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 11, background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: 9999, whiteSpace: 'nowrap' }}>
+                        Patient request
+                      </span>
+                    </li>
+                  ))}
+                  {data.medicines.map((m) => (
+                    <li key={`${m.name}-${m.dosage}`} className="patient-list-item">
+                      <div className="patient-list-copy">
+                        <p className="patient-list-primary">{m.name}</p>
+                        {m.dosage && <p className="patient-list-secondary">{m.dosage}</p>}
+                      </div>
+                      <PillTag variant={m.worked ? 'worked' : 'notWorked'}>
+                        {m.worked ? 'Worked' : 'Not worked'}
+                      </PillTag>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="patient-list-secondary" style={{ margin: 0 }}>No medicines recorded.</p>
+              )
             )}
           </div>
 
@@ -525,45 +557,54 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
               Diagnostic Tests
             </h3>
             {openTests && (
-              <ul className="patient-list">
-                {data.tests.map((t, idx) => (
-                  <li
-                    key={`test-${idx}-${t.name}`}
-                    className="patient-list-item"
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <p className="patient-list-primary">
-                        {t.name}
-                      </p>
-                      <span className="patient-list-meta">
-                        {t.status}
+              (data.tests.length > 0 || (data.testRequests?.length ?? 0) > 0) ? (
+                <ul className="patient-list">
+                  {(data.testRequests ?? []).map((tr) => (
+                    <li key={tr.id} className="patient-list-item" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <p className="patient-list-primary">{tr.testName}</p>
+                        {tr.notes && <span className="patient-list-meta">{tr.notes}</span>}
+                      </div>
+                      <span style={{ fontSize: 11, background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: 9999, whiteSpace: 'nowrap' }}>
+                        Patient request
                       </span>
-                    </div>
-                    {t.hasReport && t.testId && t.visitId ? (
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation()
-                          try {
-                            await patientService.openDiagnosticTestReport(patientId, t.visitId!, t.testId!)
-                          } catch {
-                            alert('Failed to open report')
-                          }
-                        }}
-                        className="ui-button ui-button-primary"
-                        style={{ fontSize: 12, padding: '4px 10px' }}
-                      >
-                        View
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: 12, color: '#627d98', fontStyle: 'italic' }}>
-                        Waiting
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  ))}
+                  {data.tests.map((t, idx) => (
+                    <li
+                      key={`test-${idx}-${t.name}`}
+                      className="patient-list-item"
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <p className="patient-list-primary">{t.name}</p>
+                        <span className="patient-list-meta">{t.status}</span>
+                      </div>
+                      {t.hasReport && t.testId && t.visitId ? (
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              await patientService.openDiagnosticTestReport(patientId, t.visitId!, t.testId!)
+                            } catch {
+                              alert('Failed to open report')
+                            }
+                          }}
+                          className="ui-button ui-button-primary"
+                          style={{ fontSize: 12, padding: '4px 10px' }}
+                        >
+                          View
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: '#627d98', fontStyle: 'italic' }}>Waiting</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="patient-list-secondary" style={{ margin: 0 }}>No tests recorded.</p>
+              )
             )}
           </div>
         </div>
