@@ -20,6 +20,8 @@ export interface IFamilyMember extends Document {
   relation: FamilyRelation;
   gender?: "MALE" | "FEMALE" | "OTHER";
   dateOfBirth?: Date;
+  isDeleted?: boolean;
+  deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +64,14 @@ const FamilyMemberSchema = new Schema<IFamilyMember>(
       enum: ["MALE", "FEMALE", "OTHER"]
     },
     dateOfBirth: {
+      type: Date
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    deletedAt: {
       type: Date
     }
   },

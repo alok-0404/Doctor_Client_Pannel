@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import path from "path";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const multer = require("multer") as any;
 
@@ -8,6 +9,7 @@ import { env } from "../config/env";
 import { PatientDocument } from "../models/PatientDocument";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
+import { Doctor } from "../models/Doctor";
 import { authenticatePatient } from "../middleware/authMiddleware";
 import ocrService from "../ocrService";
 import { getFullPatientHistory } from "../services/patientService";
@@ -19,6 +21,25 @@ import {
 
 const router = Router();
 const upload = multer({ dest: "uploads/" });
+
+function haversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 // POST /public/patient/send-otp - send OTP to mobile (patient must exist)
 router.post("/send-otp", async (req: Request, res: Response): Promise<void> => {
@@ -117,6 +138,74 @@ router.get("/profile", authenticatePatient, async (req: Request, res: Response):
   }
 });
 
+// GET /public/patient/providers?kind=pharmacy|lab&lat=&lng=
+// Returns available tied-up providers for patient selection.
+router.get(
+  "/providers",
+  authenticatePatient,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const kind = String(req.query.kind ?? "").toLowerCase();
+      if (kind !== "pharmacy" && kind !== "lab") {
+        res.status(400).json({ message: "kind must be pharmacy or lab" });
+        return;
+      }
+
+      const lat = req.query.lat != null ? Number(req.query.lat) : undefined;
+      const lng = req.query.lng != null ? Number(req.query.lng) : undefined;
+      const hasUserCoords =
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !Number.isNaN(lat) &&
+        !Number.isNaN(lng);
+
+      const roles = kind === "pharmacy" ? ["PHARMACY"] : ["LAB_MANAGER"];
+
+      const providers = await Doctor.find({
+        role: { $in: roles },
+        status: true,
+        createdByDoctorId: { $exists: true, $ne: null },
+      })
+        .select("_id name role clinicLatitude clinicLongitude clinicAddress")
+        .lean();
+
+      const mapped = providers.map((p: any) => {
+        const providerLat =
+          typeof p.clinicLatitude === "number" ? p.clinicLatitude : undefined;
+        const providerLng =
+          typeof p.clinicLongitude === "number" ? p.clinicLongitude : undefined;
+        const distanceKm =
+          hasUserCoords &&
+          providerLat != null &&
+          providerLng != null
+            ? haversineKm(lat!, lng!, providerLat, providerLng)
+            : undefined;
+        return {
+          id: p._id.toString(),
+          name: p.name,
+          role: p.role,
+          clinicAddress: p.clinicAddress,
+          clinicLatitude: providerLat,
+          clinicLongitude: providerLng,
+          distanceKm,
+        };
+      });
+
+      mapped.sort((a, b) => {
+        const ad = a.distanceKm ?? Number.POSITIVE_INFINITY;
+        const bd = b.distanceKm ?? Number.POSITIVE_INFINITY;
+        return ad - bd;
+      });
+
+      res.status(200).json({ providers: mapped });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("list providers error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+);
+
 // POST /public/patient/documents - patient uploads own document
 router.post(
   "/documents",
@@ -173,7 +262,16 @@ router.post(
   authenticatePatient,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { medicineName, dosage, quantity, notes, serviceType, paymentMode, expectedFulfillmentMinutes } = req.body as {
+      const {
+        medicineName,
+        dosage,
+        quantity,
+        notes,
+        serviceType,
+        paymentMode,
+        expectedFulfillmentMinutes,
+        preferredProviderId,
+      } = req.body as {
         medicineName?: string;
         dosage?: string;
         quantity?: number;
@@ -181,15 +279,35 @@ router.post(
         serviceType?: "PICKUP" | "HOME_DELIVERY";
         paymentMode?: "ONLINE" | "OFFLINE";
         expectedFulfillmentMinutes?: number;
+        preferredProviderId?: string;
       };
       if (!medicineName || typeof medicineName !== "string" || !medicineName.trim()) {
         res.status(400).json({ message: "medicineName is required" });
         return;
       }
       const patientId = req.patient!._id;
+      let preferredProvider:
+        | mongoose.Types.ObjectId
+        | undefined;
+      if (preferredProviderId) {
+        if (!mongoose.isValidObjectId(preferredProviderId)) {
+          res.status(400).json({ message: "Invalid preferredProviderId" });
+          return;
+        }
+        const provider = await Doctor.findById(preferredProviderId)
+          .select("role status createdByDoctorId")
+          .lean();
+        const isTieUp = !!(provider as any)?.createdByDoctorId;
+        if (!provider || provider.role !== "PHARMACY" || provider.status !== true || !isTieUp) {
+          res.status(400).json({ message: "Selected pharmacy is not available" });
+          return;
+        }
+        preferredProvider = new mongoose.Types.ObjectId(preferredProviderId);
+      }
 
       const entry = await PatientMedicineRequest.create({
         patient: patientId,
+        preferredProvider,
         medicineName: medicineName.trim(),
         dosage: dosage?.trim?.() || undefined,
         quantity: typeof quantity === "number" ? quantity : undefined,
@@ -216,6 +334,7 @@ router.post(
           paymentStatus: entry.paymentStatus,
           status: entry.status,
           expectedFulfillmentMinutes: entry.expectedFulfillmentMinutes,
+          preferredProviderId: (entry as any).preferredProvider?.toString?.(),
           createdAt: entry.createdAt,
         },
       });
@@ -233,22 +352,51 @@ router.post(
   authenticatePatient,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { testName, notes, serviceType, paymentMode, preferredDateTime, expectedFulfillmentMinutes } = req.body as {
+      const {
+        testName,
+        notes,
+        serviceType,
+        paymentMode,
+        preferredDateTime,
+        expectedFulfillmentMinutes,
+        preferredProviderId,
+      } = req.body as {
         testName?: string;
         notes?: string;
         serviceType?: "LAB_VISIT" | "HOME_SERVICE";
         paymentMode?: "ONLINE" | "OFFLINE";
         preferredDateTime?: string;
         expectedFulfillmentMinutes?: number;
+        preferredProviderId?: string;
       };
       if (!testName || typeof testName !== "string" || !testName.trim()) {
         res.status(400).json({ message: "testName is required" });
         return;
       }
       const patientId = req.patient!._id;
+      let preferredProvider:
+        | mongoose.Types.ObjectId
+        | undefined;
+      if (preferredProviderId) {
+        if (!mongoose.isValidObjectId(preferredProviderId)) {
+          res.status(400).json({ message: "Invalid preferredProviderId" });
+          return;
+        }
+        const provider = await Doctor.findById(preferredProviderId)
+          .select("role status createdByDoctorId")
+          .lean();
+        const isLabRole = provider?.role === "LAB_MANAGER";
+        const isTieUp = !!(provider as any)?.createdByDoctorId;
+        if (!provider || !isLabRole || provider.status !== true || !isTieUp) {
+          res.status(400).json({ message: "Selected lab is not available" });
+          return;
+        }
+        preferredProvider = new mongoose.Types.ObjectId(preferredProviderId);
+      }
 
       const entry = await PatientTestRequest.create({
         patient: patientId,
+        preferredProvider,
         testName: testName.trim(),
         notes: notes?.trim?.() || undefined,
         source: "patient",
@@ -272,6 +420,7 @@ router.post(
           status: entry.status,
           preferredDateTime: entry.preferredDateTime,
           expectedFulfillmentMinutes: entry.expectedFulfillmentMinutes,
+          preferredProviderId: (entry as any).preferredProvider?.toString?.(),
           createdAt: entry.createdAt,
         },
       });
@@ -361,6 +510,31 @@ router.get(
         return;
       }
 
+      // Security gate: patient should access report only after lab marks payment as PAID.
+      // We match by patientId + testName and compare visit day with paid/created day.
+      const visitDayKey = new Date((visit as any).visitDate).toISOString().slice(0, 10);
+      const testName = String((test as any).testName ?? "").trim();
+      if (!testName) {
+        res.status(403).json({ message: "Payment required to access report" });
+        return;
+      }
+      const paidRequests = await PatientTestRequest.find({
+        patient: patientId,
+        testName,
+        paymentStatus: "PAID",
+      })
+        .lean();
+
+      const canAccess = paidRequests.some((r: any) => {
+        const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
+        const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
+        return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
+      });
+      if (!canAccess) {
+        res.status(403).json({ message: "Payment required to access report" });
+        return;
+      }
+
       const fullPath = path.resolve(process.cwd(), (test as any).reportPath);
       res.setHeader("Content-Type", (test as any).reportMimeType || "application/pdf");
       res.setHeader(
@@ -403,6 +577,32 @@ router.get(
       }).lean();
       if (!test || !(test as any).reportPath) {
         res.status(404).json({ message: "Report not found" });
+        return;
+      }
+
+      // Security gate: patient should access report only after lab marks payment as PAID.
+      const visitDayKey = new Date((visit as any).visitDate).toISOString().slice(0, 10);
+      const testName = String((test as any).testName ?? "").trim();
+      if (!testName) {
+        res.status(403).json({ message: "Payment required to access report" });
+        return;
+      }
+
+      const paidRequests = await PatientTestRequest.find({
+        patient: patientId,
+        testName,
+        paymentStatus: "PAID",
+      })
+        .lean();
+
+      const canAccess = paidRequests.some((r: any) => {
+        const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
+        const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
+        return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
+      });
+
+      if (!canAccess) {
+        res.status(403).json({ message: "Payment required to access report" });
         return;
       }
 

@@ -228,7 +228,16 @@ export const MedicineDashboard = () => {
             ) : incomingRequests.length === 0 ? (
               <p className="dashboard-body">No medicine requests yet.</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 560, overflowY: 'auto', paddingRight: 6 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  maxHeight: incomingRequests.length > 5 ? 420 : undefined,
+                  overflowY: incomingRequests.length > 5 ? 'auto' : undefined,
+                  paddingRight: incomingRequests.length > 5 ? 6 : undefined,
+                }}
+              >
                 {incomingRequests.map((r) => (
                   <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
                     <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
@@ -358,7 +367,14 @@ export const MedicineDashboard = () => {
                   <p className="dashboard-body" style={{ marginBottom: 12 }}>
                     Enter medicine name, MRP, discount (₹) and quantity. Amount = (MRP × Qty) − Discount per row.
                   </p>
-                  <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+                  <div
+                    style={{
+                      overflowX: 'auto',
+                      overflowY: rows.length > 5 ? 'auto' : undefined,
+                      maxHeight: rows.length > 5 ? 320 : undefined,
+                      marginBottom: 12,
+                    }}
+                  >
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                       <thead>
                         <tr style={{ background: '#f0f4f8', borderBottom: '2px solid #d9e2ec' }}>

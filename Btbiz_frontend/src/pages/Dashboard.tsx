@@ -59,6 +59,10 @@ export const Dashboard = () => {
   const [availabilityUpdateSuccess, setAvailabilityUpdateSuccess] = useState<string | null>(null)
   const [availabilityUpdateError, setAvailabilityUpdateError] = useState<string | null>(null)
 
+  const [dailyOnlineLimit, setDailyOnlineLimit] = useState('')
+  const [dailyWalkInLimit, setDailyWalkInLimit] = useState('')
+  const [limitsSaving, setLimitsSaving] = useState(false)
+  const [limitsMsg, setLimitsMsg] = useState<string | null>(null)
 
   const loadAssistants = async () => {
     try {
@@ -120,7 +124,16 @@ export const Dashboard = () => {
       if (doctor.unavailableReason) setUnavailableReason(doctor.unavailableReason)
       if (doctor.unavailableUntil) setUnavailableUntil(doctor.unavailableUntil)
       else setUnavailableUntil(null)
-
+      if (typeof doctor.dailyOnlineAppointmentLimit === 'number') {
+        setDailyOnlineLimit(String(doctor.dailyOnlineAppointmentLimit))
+      } else {
+        setDailyOnlineLimit('')
+      }
+      if (typeof doctor.dailyWalkInAppointmentLimit === 'number') {
+        setDailyWalkInLimit(String(doctor.dailyWalkInAppointmentLimit))
+      } else {
+        setDailyWalkInLimit('')
+      }
     } catch {
       // ignore
     } finally {
@@ -144,10 +157,11 @@ export const Dashboard = () => {
     setAvailabilityUpdateError(null)
     setAvailabilityUpdating(true)
     try {
-      const until = status !== 'available' ? getUnavailableUntilISO() : undefined
+      // Only "unavailable" requires a reason and time period. "busy" is a simple status.
+      const until = status === 'unavailable' ? getUnavailableUntilISO() : undefined
       const res = await authService.updateDoctorAvailability({
         availabilityStatus: status,
-        unavailableReason: status !== 'available' ? unavailableReason : undefined,
+        unavailableReason: status === 'unavailable' ? unavailableReason : undefined,
         unavailableUntil: until,
       })
       setAvailabilityStatus(status)
@@ -158,13 +172,54 @@ export const Dashboard = () => {
       } else {
         setUnavailableUntil(null)
       }
-      setAvailabilityUpdateSuccess(status === 'available' ? 'You are now available.' : 'Reason and time period saved.')
+      setAvailabilityUpdateSuccess(
+        status === 'available'
+          ? 'You are now available.'
+          : status === 'unavailable'
+            ? 'Reason and time period saved.'
+            : 'You are now marked as busy.'
+      )
       setTimeout(() => setAvailabilityUpdateSuccess(null), 4000)
     } catch (err: any) {
       const msg = err?.response?.data?.message ?? 'Failed to save. Please try again.'
       setAvailabilityUpdateError(msg)
     } finally {
       setAvailabilityUpdating(false)
+    }
+  }
+
+  const parseDailyLimitInput = (s: string): number | null => {
+    const t = s.trim()
+    if (t === '') return null
+    const n = Math.floor(Number(t))
+    if (!Number.isFinite(n) || n < 0) throw new Error('invalid')
+    return n
+  }
+
+  const handleSaveAppointmentLimits = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLimitsMsg(null)
+    let online: number | null
+    let walk: number | null
+    try {
+      online = parseDailyLimitInput(dailyOnlineLimit)
+      walk = parseDailyLimitInput(dailyWalkInLimit)
+    } catch {
+      setLimitsMsg('Enter whole numbers ≥ 0, or leave blank for unlimited.')
+      return
+    }
+    try {
+      setLimitsSaving(true)
+      await authService.updateDoctorAppointmentLimits({
+        dailyOnlineAppointmentLimit: online,
+        dailyWalkInAppointmentLimit: walk,
+      })
+      setLimitsMsg('Daily limits saved.')
+      setTimeout(() => setLimitsMsg(null), 4000)
+    } catch (err: any) {
+      setLimitsMsg(err?.response?.data?.message ?? 'Failed to save limits.')
+    } finally {
+      setLimitsSaving(false)
     }
   }
 
@@ -204,9 +259,8 @@ export const Dashboard = () => {
   }, [])
 
   const pendingNotifications = notifications.filter((n) => n.status === 'unread' || n.status === 'dismissed')
-  const referralNotifications = pendingNotifications.filter(
-    (n) => n.source === 'ASSISTANT_REFERRAL' || !n.source
-  )
+  /** Include assistant referrals and online/family bookings so the doctor opens the same patient as the visit. */
+  const referralNotifications = pendingNotifications
   const handleNotificationClick = async (n: DoctorNotificationItem) => {
     if (n.status !== 'read') {
       try {
@@ -345,6 +399,8 @@ export const Dashboard = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         gap: 6,
+                        maxHeight: todayAppointments.length > 5 ? 280 : undefined,
+                        overflowY: todayAppointments.length > 5 ? 'auto' : undefined,
                       }}
                     >
                       {todayAppointments.map((a) => (
@@ -430,8 +486,8 @@ export const Dashboard = () => {
                           display: 'flex',
                           flexDirection: 'column',
                           gap: 6,
-                          maxHeight: 280,
-                          overflowY: 'auto',
+                          maxHeight: upcomingAppointments.length > 5 ? 280 : undefined,
+                          overflowY: upcomingAppointments.length > 5 ? 'auto' : undefined,
                         }}
                       >
                         {upcomingAppointments.map((a) => (
@@ -531,7 +587,7 @@ export const Dashboard = () => {
                       </button>
                     ))}
                   </div>
-                  {(availabilityStatus === 'unavailable' || availabilityStatus === 'busy') && (
+                  {availabilityStatus === 'unavailable' && (
                     <div style={{ marginTop: 8 }}>
                       <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
                         Reason (optional)
@@ -670,9 +726,20 @@ export const Dashboard = () => {
                 {notificationsOpen && (
                   <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <p className="dashboard-body" style={{ margin: 0, fontSize: 12, color: '#627d98' }}>
-                      Assistant referrals
+                      Referrals &amp; appointment alerts
                     </p>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <ul
+                      style={{
+                        listStyle: 'none',
+                        padding: 0,
+                        margin: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        maxHeight: referralNotifications.length > 5 ? 320 : undefined,
+                        overflowY: referralNotifications.length > 5 ? 'auto' : undefined,
+                      }}
+                    >
                       {referralNotifications.length === 0 && (
                         <li>
                           <span style={{ fontSize: 12, color: '#9fb3c8' }}>No referred patients yet.</span>
@@ -771,7 +838,18 @@ export const Dashboard = () => {
                     </p>
                   )}
                   {assistants.length > 0 && (
-                    <ul style={{ listStyle: 'none', padding: 0, marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <ul
+                      style={{
+                        listStyle: 'none',
+                        padding: 0,
+                        marginTop: 10,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        maxHeight: assistants.length > 5 ? 300 : undefined,
+                        overflowY: assistants.length > 5 ? 'auto' : undefined,
+                      }}
+                    >
                       {assistants.map((c) => (
                         <li
                           key={c.id}
@@ -854,6 +932,8 @@ export const Dashboard = () => {
                           display: 'flex',
                           flexDirection: 'column',
                           gap: 6,
+                          maxHeight: labAssistants.length > 5 ? 320 : undefined,
+                          overflowY: labAssistants.length > 5 ? 'auto' : undefined,
                         }}
                       >
                         {labAssistants.map((c) => (
@@ -940,28 +1020,78 @@ export const Dashboard = () => {
           </div>
         </section>
 
-        {/* Right: Search CTA */}
-        <section className="dashboard-search-panel">
-          <div className="dashboard-search-copy">
-            <p className="dashboard-kicker">
-              Patient search
-            </p>
-            <h3 className="dashboard-search-title">
-              Find a patient by mobile
-            </h3>
-            <p className="dashboard-search-text">
-              Ideal for reception and nursing stations. One field, one search
-              action – nothing else on screen.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => { window.location.href = '/search-patients' }}
-            className="ui-button ui-button-primary dashboard-search-button"
-          >
-            Open search workspace
-          </button>
-        </section>
+        {/* Right: patient search card + separate daily caps card (doctor) */}
+        <div className="dashboard-sidebar">
+          <section className="dashboard-search-panel">
+            <div className="dashboard-search-copy">
+              <p className="dashboard-kicker">
+                Patient search
+              </p>
+              <h3 className="dashboard-search-title">
+                Find a patient by mobile
+              </h3>
+              <p className="dashboard-search-text">
+                Ideal for reception and nursing stations. One field, one search
+                action – nothing else on screen.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/search-patients' }}
+              className="ui-button ui-button-primary dashboard-search-button"
+            >
+              Open search workspace
+            </button>
+          </section>
+          {authStorage.getRole() === 'DOCTOR' && (
+            <Card className="dashboard-overview-card dashboard-daily-caps-card">
+              <p className="dashboard-kicker">Daily caps (IST)</p>
+              <p className="dashboard-daily-caps-hint">
+                Online portal vs walk-in limits per day. Leave blank for unlimited.
+              </p>
+              <form onSubmit={handleSaveAppointmentLimits} className="dashboard-daily-caps-form">
+                <label className="dashboard-daily-caps-label">
+                  Online / day
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={dailyOnlineLimit}
+                    onChange={(e) => setDailyOnlineLimit(e.target.value)}
+                    placeholder="e.g. 25"
+                    className="dashboard-daily-caps-input"
+                  />
+                </label>
+                <label className="dashboard-daily-caps-label">
+                  Walk-in / day
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={dailyWalkInLimit}
+                    onChange={(e) => setDailyWalkInLimit(e.target.value)}
+                    placeholder="e.g. 20"
+                    className="dashboard-daily-caps-input"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={limitsSaving}
+                  className="ui-button ui-button-primary dashboard-daily-caps-save"
+                >
+                  {limitsSaving ? 'Saving…' : 'Save limits'}
+                </button>
+                {limitsMsg && (
+                  <p
+                    className={`dashboard-daily-caps-msg ${limitsMsg.startsWith('Daily') ? 'dashboard-daily-caps-msg--ok' : 'dashboard-daily-caps-msg--err'}`}
+                  >
+                    {limitsMsg}
+                  </p>
+                )}
+              </form>
+            </Card>
+          )}
+        </div>
       </main>
 
       {showAddAssistant && (

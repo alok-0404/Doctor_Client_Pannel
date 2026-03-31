@@ -2,6 +2,8 @@ import mongoose, { Schema, Types } from "mongoose";
 
 export interface IPatientTestRequest {
   patient: Types.ObjectId;
+  /** Preferred lab chosen by patient (optional). */
+  preferredProvider?: Types.ObjectId;
   testName: string;
   notes?: string;
   source: "patient" | "assistant";
@@ -24,6 +26,11 @@ const PatientTestRequestSchema = new Schema<IPatientTestRequest>(
       type: Schema.Types.ObjectId,
       ref: "Patient",
       required: true,
+      index: true,
+    },
+    preferredProvider: {
+      type: Schema.Types.ObjectId,
+      ref: "Doctor",
       index: true,
     },
     testName: { type: String, required: true },

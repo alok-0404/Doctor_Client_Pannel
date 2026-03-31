@@ -2,6 +2,7 @@ import { Router } from "express";
 import mongoose from "mongoose";
 
 import { authenticateDoctor } from "../middleware/authMiddleware";
+import { Doctor } from "../models/Doctor";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 
@@ -16,9 +17,16 @@ router.get("/medicine-requests", async (req, res) => {
       return;
     }
 
-    const requests = await PatientMedicineRequest.find({})
+    const requests = await PatientMedicineRequest.find({
+      $or: [
+        { preferredProvider: { $exists: false } },
+        { preferredProvider: null },
+        { preferredProvider: req.doctor._id },
+      ],
+    })
       .sort({ createdAt: -1 })
       .populate("patient", "firstName lastName mobileNumber")
+      .populate("preferredProvider", "name")
       .lean();
 
     res.status(200).json({
@@ -39,6 +47,8 @@ router.get("/medicine-requests", async (req, res) => {
         fulfilledAt: r.fulfilledAt,
         receiptNumber: r.receiptNumber,
         paidAt: r.paidAt,
+        preferredProviderId: r.preferredProvider?._id?.toString?.(),
+        preferredProviderName: r.preferredProvider?.name,
         createdAt: r.createdAt,
       })),
     });
@@ -101,9 +111,24 @@ router.get("/test-requests", async (req, res) => {
       return;
     }
 
-    const requests = await PatientTestRequest.find({})
+    let labProviderId = req.doctor._id;
+    if (req.doctor.role === "LAB_ASSISTANT") {
+      const assistant = await Doctor.findById(req.doctor._id)
+        .select("createdByDoctorId")
+        .lean();
+      labProviderId = (assistant as any)?.createdByDoctorId?.toString?.() || req.doctor._id;
+    }
+
+    const requests = await PatientTestRequest.find({
+      $or: [
+        { preferredProvider: { $exists: false } },
+        { preferredProvider: null },
+        { preferredProvider: labProviderId },
+      ],
+    })
       .sort({ createdAt: -1 })
       .populate("patient", "firstName lastName mobileNumber")
+      .populate("preferredProvider", "name")
       .lean();
 
     res.status(200).json({
@@ -123,6 +148,8 @@ router.get("/test-requests", async (req, res) => {
         fulfilledAt: r.fulfilledAt,
         receiptNumber: r.receiptNumber,
         paidAt: r.paidAt,
+        preferredProviderId: r.preferredProvider?._id?.toString?.(),
+        preferredProviderName: r.preferredProvider?.name,
         createdAt: r.createdAt,
       })),
     });

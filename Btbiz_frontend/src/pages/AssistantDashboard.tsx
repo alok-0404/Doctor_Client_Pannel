@@ -5,7 +5,17 @@ import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
-import { API_BASE_URL, authService, patientService, appointmentService, type PatientSummary, type DoctorAppointmentItem } from '../services/api'
+import {
+  API_BASE_URL,
+  authService,
+  patientService,
+  appointmentService,
+  type PatientSummary,
+  type DoctorAppointmentItem,
+  type AssistantFamilyOption,
+  type AssistantPatientPrefill,
+} from '../services/api'
+import { parseAssistantReferralError } from '../utils/assistantErrors'
 
 type Step = 'search' | 'new_patient' | 'checkin'
 type AvailabilityStatus = 'available' | 'unavailable' | 'busy'
@@ -78,7 +88,45 @@ export const AssistantDashboard = () => {
   const [saveLoading, setSaveLoading] = useState(false)
   const [referLoading, setReferLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  /** Walk-in daily quota (409) uses a calmer “capacity” alert instead of red error text. */
+  const [formErrorVariant, setFormErrorVariant] = useState<'quota' | 'standard'>('standard')
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
+
+  const clearFormError = () => {
+    setFormError(null)
+    setFormErrorVariant('standard')
+  }
+
+  const renderFormError = () => {
+    if (!formError) return null
+    if (formErrorVariant === 'quota') {
+      return (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid #fcd34d',
+            background: '#fffbeb',
+            color: '#78350f',
+          }}
+        >
+          <p style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 700, letterSpacing: '0.02em', color: '#92400e' }}>
+            Walk-in limit reached for today
+          </p>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>{formError}</p>
+          <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.45, color: '#a16207' }}>
+            Ask the doctor to adjust <strong>Daily caps</strong> on their dashboard if more walk-ins are needed today.
+          </p>
+        </div>
+      )
+    }
+    return <p className="text-sm" style={{ color: '#c62828' }}>{formError}</p>
+  }
+
+  const [familyOptions, setFamilyOptions] = useState<AssistantFamilyOption[] | null>(null)
+  const [familyPickMobile, setFamilyPickMobile] = useState<string | null>(null)
 
   const loadProfile = async () => {
     try {
@@ -115,10 +163,11 @@ export const AssistantDashboard = () => {
     setAvailabilityUpdateError(null)
     setAvailabilityUpdating(true)
     try {
-      const until = status !== 'available' ? getUnavailableUntilISO() : undefined
+      // Only "unavailable" requires a reason and time period. "busy" is simple.
+      const until = status === 'unavailable' ? getUnavailableUntilISO() : undefined
       const res = await authService.updateDoctorAvailability({
         availabilityStatus: status,
-        unavailableReason: status !== 'available' ? unavailableReason : undefined,
+        unavailableReason: status === 'unavailable' ? unavailableReason : undefined,
         unavailableUntil: until
       })
       setDoctorAvailabilityStatus(status)
@@ -129,8 +178,10 @@ export const AssistantDashboard = () => {
       } else {
         setDoctorUnavailableUntil(null)
       }
-      setDoctorUnavailableReason(status !== 'available' ? unavailableReason || null : null)
-      setAvailabilityUpdateSuccess(status === 'available' ? 'Doctor is now available.' : 'Status updated.')
+      setDoctorUnavailableReason(status === 'unavailable' ? unavailableReason || null : null)
+      setAvailabilityUpdateSuccess(
+        status === 'available' ? 'Doctor is now available.' : status === 'unavailable' ? 'Reason and time period saved.' : 'Doctor marked as busy.'
+      )
       setTimeout(() => setAvailabilityUpdateSuccess(null), 4000)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to save. Please try again.'
@@ -166,9 +217,148 @@ export const AssistantDashboard = () => {
     }
   }
 
+  const loadCheckinFromPrefill = async (prefill: AssistantPatientPrefill, backendMobile: string) => {
+    const found = prefill.patient
+    if (!found) return
+
+    setFamilyOptions(null)
+    setFamilyPickMobile(null)
+
+    setPatient(found)
+    setPatientId(found.id)
+    setFirstName(found.firstName)
+    setLastName(found.lastName ?? '')
+    setMobileNumber(found.mobileNumber || backendMobile)
+    setAddress(found.address ?? '')
+    setPreviousHealthHistory(found.previousHealthHistory ?? '')
+    setBloodGroup(found.bloodGroup ?? '')
+    setEmergencyName(found.emergencyContactName ?? '')
+    setEmergencyPhone(found.emergencyContactPhone ?? '')
+    setStep('checkin')
+
+    const latestVisit = prefill.latestVisit ?? null
+    if (latestVisit) {
+      const today = new Date()
+      const d = new Date(latestVisit.visitDate)
+      const isToday =
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      if (isToday) {
+        setHasTodayVisit(true)
+        setTodayVisitId(latestVisit.id)
+
+        try {
+          const history = await patientService.getFullHistory(found.id)
+          const todaysVisit = (history.visits as any[] | undefined)?.find((v) => v._id === latestVisit.id)
+          if (todaysVisit) {
+            setDiseaseReason(todaysVisit.reason ?? '')
+            setNotesForDoctor(todaysVisit.notes ?? '')
+            setBpSystolic(
+              typeof todaysVisit.bloodPressureSystolic === 'number' ? String(todaysVisit.bloodPressureSystolic) : ''
+            )
+            setBpDiastolic(
+              typeof todaysVisit.bloodPressureDiastolic === 'number' ? String(todaysVisit.bloodPressureDiastolic) : ''
+            )
+            setBloodSugar(
+              typeof todaysVisit.bloodSugarFasting === 'number' ? String(todaysVisit.bloodSugarFasting) : ''
+            )
+            setWeightKg(typeof todaysVisit.weightKg === 'number' ? String(todaysVisit.weightKg) : '')
+            setTemperature(typeof todaysVisit.temperature === 'number' ? String(todaysVisit.temperature) : '')
+            setOtherVitalsNotes(todaysVisit.otherVitalsNotes ?? '')
+          } else {
+            setDiseaseReason('')
+            setNotesForDoctor('')
+            setBpSystolic('')
+            setBpDiastolic('')
+            setBloodSugar('')
+            setWeightKg('')
+            setTemperature('')
+            setOtherVitalsNotes('')
+          }
+        } catch {
+          setDiseaseReason('')
+          setNotesForDoctor('')
+          setBpSystolic('')
+          setBpDiastolic('')
+          setBloodSugar('')
+          setWeightKg('')
+          setTemperature('')
+          setOtherVitalsNotes('')
+        }
+      } else {
+        setHasTodayVisit(false)
+        setTodayVisitId(null)
+        setDiseaseReason('')
+        setNotesForDoctor('')
+        setBpSystolic('')
+        setBpDiastolic('')
+        setBloodSugar('')
+        setWeightKg('')
+        setTemperature('')
+        setOtherVitalsNotes('')
+      }
+    } else {
+      setHasTodayVisit(false)
+      setTodayVisitId(null)
+      setDiseaseReason('')
+      setNotesForDoctor('')
+      setBpSystolic('')
+      setBpDiastolic('')
+      setBloodSugar('')
+      setWeightKg('')
+      setTemperature('')
+      setOtherVitalsNotes('')
+    }
+  }
+
+  const handleFamilyMemberSelect = async (memberId: string) => {
+    if (!familyPickMobile) return
+    setSearchError(null)
+    setSearchLoading(true)
+    try {
+      const prefill = await appointmentService.getAssistantPatientPrefill(familyPickMobile, memberId)
+      if (!prefill.patient) {
+        setSearchError('Could not load this patient.')
+        return
+      }
+      await loadCheckinFromPrefill(prefill, familyPickMobile)
+    } catch {
+      setSearchError('Could not load this patient.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const startCheckInFromAppointment = async (a: DoctorAppointmentItem) => {
+    if (!a.patientMobile) {
+      setSearchError('This appointment has no mobile on file — use mobile search.')
+      return
+    }
+    setSearchError(null)
+    setSearchLoading(true)
+    const digits = String(a.patientMobile).replace(/\D/g, '')
+    const backendMobile = normalizeMobileForBackend(digits.slice(-10))
+    try {
+      const prefill = await appointmentService.getAssistantPatientPrefill(backendMobile, a.patientId)
+      if (!prefill.patient) {
+        setSearchError('Could not load this patient.')
+        return
+      }
+      await loadCheckinFromPrefill(prefill, backendMobile)
+      setMobileSearch(digits.slice(-10))
+    } catch {
+      setSearchError('Could not open check-in for this appointment.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setSearchError(null)
+    setFamilyOptions(null)
+    setFamilyPickMobile(null)
     // Reset any previous document upload messages when starting a new search
     setDocUploadError(null)
     setDocUploadSuccess(null)
@@ -181,131 +371,27 @@ export const AssistantDashboard = () => {
     const backendMobile = normalizeMobileForBackend(digits)
     setSearchLoading(true)
     try {
-      // Use assistant-specific prefill API so bot-created patients/appointments also work.
-      let found: PatientSummary | null = null
-      let prefill: Awaited<ReturnType<typeof appointmentService.getAssistantPatientPrefill>> | null = null
+      let prefill: AssistantPatientPrefill | null = null
       try {
         prefill = await appointmentService.getAssistantPatientPrefill(backendMobile)
-        found = prefill.patient
-        // Optionally we could use prefill.latestVisit for display, but vitals remain manual.
       } catch (err: any) {
         if (err?.response?.status === 404) {
-          found = null
+          prefill = null
         } else {
           throw err
         }
       }
 
-      if (found) {
-        // Prefill demographics from patient record
-        setPatient(found)
-        setPatientId(found.id)
-        setFirstName(found.firstName)
-        setLastName(found.lastName ?? '')
-        setMobileNumber(found.mobileNumber || backendMobile)
-        setAddress(found.address ?? '')
-        setPreviousHealthHistory(found.previousHealthHistory ?? '')
-        setBloodGroup(found.bloodGroup ?? '')
-        setEmergencyName(found.emergencyContactName ?? '')
-        setEmergencyPhone(found.emergencyContactPhone ?? '')
-        setStep('checkin')
+      if (prefill?.familyOptions?.length && !prefill.patient) {
+        setFamilyOptions(prefill.familyOptions)
+        setFamilyPickMobile(backendMobile)
+        setSearchError(null)
+        setSearchLoading(false)
+        return
+      }
 
-        // Detect if there is already a visit for today with the assistant's linked doctor.
-        // We use the assistant-specific prefill latestVisit (already filtered by that doctor),
-        // and then fetch full history only to prefill vitals for that specific visit.
-        const latestVisit = prefill?.latestVisit ?? null
-        if (latestVisit) {
-          const today = new Date()
-          const d = new Date(latestVisit.visitDate)
-          const isToday =
-            d.getFullYear() === today.getFullYear() &&
-            d.getMonth() === today.getMonth() &&
-            d.getDate() === today.getDate()
-          if (isToday) {
-            setHasTodayVisit(true)
-            setTodayVisitId(latestVisit.id)
-
-            // Try to prefill vitals from today's visit so assistant doesn't have to retype
-            try {
-              const history = await patientService.getFullHistory(found.id)
-              const todaysVisit = (history.visits as any[] | undefined)?.find(
-                (v) => v._id === latestVisit.id
-              )
-              if (todaysVisit) {
-                setDiseaseReason(todaysVisit.reason ?? '')
-                setNotesForDoctor(todaysVisit.notes ?? '')
-                setBpSystolic(
-                  typeof todaysVisit.bloodPressureSystolic === 'number'
-                    ? String(todaysVisit.bloodPressureSystolic)
-                    : ''
-                )
-                setBpDiastolic(
-                  typeof todaysVisit.bloodPressureDiastolic === 'number'
-                    ? String(todaysVisit.bloodPressureDiastolic)
-                    : ''
-                )
-                setBloodSugar(
-                  typeof todaysVisit.bloodSugarFasting === 'number'
-                    ? String(todaysVisit.bloodSugarFasting)
-                    : ''
-                )
-                setWeightKg(
-                  typeof todaysVisit.weightKg === 'number'
-                    ? String(todaysVisit.weightKg)
-                    : ''
-                )
-                setTemperature(
-                  typeof todaysVisit.temperature === 'number'
-                    ? String(todaysVisit.temperature)
-                    : ''
-                )
-                setOtherVitalsNotes(todaysVisit.otherVitalsNotes ?? '')
-              } else {
-                // No matching visit details – start with blank vitals
-                setDiseaseReason('')
-                setNotesForDoctor('')
-                setBpSystolic('')
-                setBpDiastolic('')
-                setBloodSugar('')
-                setWeightKg('')
-                setTemperature('')
-                setOtherVitalsNotes('')
-              }
-            } catch {
-              // If history load fails, keep vitals blank so assistant can enter fresh values
-              setDiseaseReason('')
-              setNotesForDoctor('')
-              setBpSystolic('')
-              setBpDiastolic('')
-              setBloodSugar('')
-              setWeightKg('')
-              setTemperature('')
-              setOtherVitalsNotes('')
-            }
-          } else {
-            setHasTodayVisit(false)
-            setTodayVisitId(null)
-            setDiseaseReason('')
-            setNotesForDoctor('')
-            setBpSystolic('')
-            setBpDiastolic('')
-            setBloodSugar('')
-            setWeightKg('')
-            setTemperature('')
-            setOtherVitalsNotes('')
-          }
-        } else {
-          setHasTodayVisit(false)
-          setTodayVisitId(null)
-          setDiseaseReason('')
-          setNotesForDoctor('')
-          setBpSystolic('')
-          setBpDiastolic('')
-          setBloodSugar('')
-          setWeightKg('')
-          setTemperature('')
-          setOtherVitalsNotes('')
-        }
+      if (prefill?.patient) {
+        await loadCheckinFromPrefill(prefill, backendMobile)
       } else {
         setMobileNumber(backendMobile)
         setFirstName('')
@@ -336,7 +422,7 @@ export const AssistantDashboard = () => {
 
   const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault()
-    setFormError(null)
+    clearFormError()
     setFormSuccess(null)
     if (!firstName.trim()) {
       setFormError('First name is required.')
@@ -375,7 +461,7 @@ export const AssistantDashboard = () => {
   const handleUpdatePatient = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!patientId) return
-    setFormError(null)
+    clearFormError()
     setFormSuccess(null)
     setSaveLoading(true)
     try {
@@ -401,7 +487,7 @@ export const AssistantDashboard = () => {
   const handleReferToDoctor = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!patientId) return
-    setFormError(null)
+    clearFormError()
     const sys = parseInt(bpSystolic, 10)
     const dia = parseInt(bpDiastolic, 10)
     const sugar = bloodSugar.trim() ? parseInt(bloodSugar, 10) : undefined
@@ -434,8 +520,10 @@ export const AssistantDashboard = () => {
       setPatientId(null)
       setTodayVisitId(null)
       setMobileSearch('')
-    } catch (err: any) {
-      setFormError(err?.response?.data?.message ?? 'Could not refer patient.')
+    } catch (err: unknown) {
+      const parsed = parseAssistantReferralError(err)
+      setFormError(parsed.message)
+      setFormErrorVariant(parsed.variant)
     } finally {
       setReferLoading(false)
     }
@@ -476,7 +564,9 @@ export const AssistantDashboard = () => {
     setHasTodayVisit(false)
     setTodayVisitId(null)
     setMobileSearch('')
-    setFormError(null)
+    setFamilyOptions(null)
+    setFamilyPickMobile(null)
+    clearFormError()
     setFormSuccess(null)
     setDocFile(null)
     setDocUploadError(null)
@@ -583,7 +673,7 @@ export const AssistantDashboard = () => {
                 </button>
               ))}
             </div>
-            {(doctorAvailabilityStatus === 'unavailable' || doctorAvailabilityStatus === 'busy') && (
+            {doctorAvailabilityStatus === 'unavailable' && (
               <div style={{ marginTop: 8 }}>
                 <label style={{ fontSize: 12, color: '#627d98', display: 'block', marginBottom: 4 }}>
                   Reason (optional)
@@ -711,7 +801,18 @@ export const AssistantDashboard = () => {
                     No patients are within <strong>500 meters</strong> of the clinic right now.
                   </p>
                 ) : (
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <ul
+                    style={{
+                      listStyle: 'none',
+                      padding: 0,
+                      margin: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      maxHeight: todayPatientsToContact.length > 5 ? 320 : undefined,
+                      overflowY: todayPatientsToContact.length > 5 ? 'auto' : undefined,
+                    }}
+                  >
                     {todayPatientsToContact.map((a) => (
                       <li
                         key={a.id}
@@ -749,11 +850,16 @@ export const AssistantDashboard = () => {
                             </div>
                           )}
                         </div>
-                        {a.patientMobile && (
-                          <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
-                            {a.patientMobile}
-                          </a>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          {a.patientMobile && (
+                            <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                              {a.patientMobile}
+                            </a>
+                          )}
+                          <Button type="button" variant="secondary" onClick={() => void startCheckInFromAppointment(a)} style={{ fontSize: 12, padding: '4px 10px' }}>
+                            Check-in this patient
+                          </Button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -772,7 +878,18 @@ export const AssistantDashboard = () => {
             ) : todayAppointments.length === 0 ? (
               <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No appointments scheduled for today.</p>
             ) : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  maxHeight: todayAppointments.length > 5 ? 320 : undefined,
+                  overflowY: todayAppointments.length > 5 ? 'auto' : undefined,
+                }}
+              >
                 {todayAppointments.map((a) => (
                   <li
                     key={a.id}
@@ -807,11 +924,16 @@ export const AssistantDashboard = () => {
                         </div>
                       )}
                     </div>
-                    {a.patientMobile && (
-                      <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
-                        {a.patientMobile}
-                      </a>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {a.patientMobile && (
+                        <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                          {a.patientMobile}
+                        </a>
+                      )}
+                      <Button type="button" variant="secondary" onClick={() => void startCheckInFromAppointment(a)} style={{ fontSize: 12, padding: '4px 10px' }}>
+                        Check-in this patient
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -827,7 +949,18 @@ export const AssistantDashboard = () => {
             ) : upcomingAppointments.length === 0 ? (
               <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No upcoming appointments.</p>
             ) : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  maxHeight: upcomingAppointments.length > 5 ? 320 : undefined,
+                  overflowY: upcomingAppointments.length > 5 ? 'auto' : undefined,
+                }}
+              >
                 {upcomingAppointments.map((a) => (
                   <li
                     key={a.id}
@@ -849,11 +982,16 @@ export const AssistantDashboard = () => {
                         {new Date(a.visitDate).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
                       </div>
                     </div>
-                    {a.patientMobile && (
-                      <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
-                        {a.patientMobile}
-                      </a>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {a.patientMobile && (
+                        <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                          {a.patientMobile}
+                        </a>
+                      )}
+                      <Button type="button" variant="secondary" onClick={() => void startCheckInFromAppointment(a)} style={{ fontSize: 12, padding: '4px 10px' }}>
+                        Check-in this patient
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -890,6 +1028,39 @@ export const AssistantDashboard = () => {
                   {searchLoading ? 'Searching…' : 'Search'}
                 </Button>
               </div>
+              {familyOptions && familyOptions.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <p className="dashboard-body" style={{ fontSize: 13, marginBottom: 8, color: '#0d47a1', fontWeight: 600 }}>
+                    Several family members use this number — choose who is visiting:
+                  </p>
+                  <ul
+                    style={{
+                      listStyle: 'none',
+                      padding: 0,
+                      margin: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      maxHeight: familyOptions.length > 5 ? 260 : undefined,
+                      overflowY: familyOptions.length > 5 ? 'auto' : undefined,
+                    }}
+                  >
+                    {familyOptions.map((m) => (
+                      <li key={m.id}>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={searchLoading}
+                          onClick={() => void handleFamilyMemberSelect(m.id)}
+                          style={{ width: '100%', justifyContent: 'flex-start' }}
+                        >
+                          {[m.firstName, m.lastName].filter(Boolean).join(' ') || 'Patient'}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </form>
           </Card>
         )}
@@ -935,7 +1106,7 @@ export const AssistantDashboard = () => {
                   <TextField id="emergency-name" label="Emergency contact name" value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} />
                   <TextField id="emergency-phone" type="tel" label="Emergency contact phone" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} />
                 </div>
-                {formError && <p className="text-sm" style={{ color: '#c62828' }}>{formError}</p>}
+                {renderFormError()}
                 {formSuccess && <p className="text-sm" style={{ color: '#2e7d32' }}>{formSuccess}</p>}
                 <div className="dialog-actions" style={{ marginTop: 8 }}>
                   <Button type="button" variant="secondary" onClick={goBackToSearch}>Back</Button>
@@ -1106,7 +1277,7 @@ export const AssistantDashboard = () => {
                   {docUploadLoading ? 'Uploading…' : 'Upload to patient record'}
                 </Button>
               </div>
-              {formError && <p className="text-sm" style={{ color: '#c62828' }}>{formError}</p>}
+              {renderFormError()}
               {formSuccess && <p className="text-sm" style={{ color: '#2e7d32' }}>{formSuccess}</p>}
               <div className="dialog-actions" style={{ marginTop: 8 }}>
                 <Button type="button" variant="secondary" onClick={goBackToSearch}>Back to search</Button>

@@ -5,7 +5,7 @@ import { authenticateDoctor } from "../middleware/authMiddleware";
 import { Doctor } from "../models/Doctor";
 import { Visit } from "../models/Visit";
 import { Patient } from "../models/Patient";
-import { findPatientByMobile } from "../services/patientService";
+import { findPatientsByMobile } from "../services/patientService";
 
 const router = Router();
 
@@ -235,8 +235,9 @@ router.get("/assistant/doctor-upcoming", async (req, res) => {
   }
 });
 
-// GET /appointments/assistant/patient-prefill?mobile=...
+// GET /appointments/assistant/patient-prefill?mobile=...&patientId=... (optional)
 // For assistant check-in desk: fetch patient basic info + latest visit for that doctor's clinic.
+// When several family members share one mobile, omit patientId to receive familyOptions; repeat with patientId to load that profile.
 router.get("/assistant/patient-prefill", async (req, res) => {
   try {
     if (!req.doctor?._id) {
@@ -259,12 +260,48 @@ router.get("/assistant/patient-prefill", async (req, res) => {
     }
 
     const mobile = (req.query.mobile as string | undefined)?.trim();
+    const selectedPatientId = (req.query.patientId as string | undefined)?.trim();
     if (!mobile) {
       res.status(400).json({ message: "Query parameter 'mobile' is required" });
       return;
     }
 
-    const patient = await findPatientByMobile(mobile);
+    const candidates = await findPatientsByMobile(mobile);
+    if (!candidates.length) {
+      res.status(404).json({ message: "Patient not found" });
+      return;
+    }
+
+    let chosenId: mongoose.Types.ObjectId | undefined;
+
+    if (selectedPatientId) {
+      if (!mongoose.isValidObjectId(selectedPatientId)) {
+        res.status(400).json({ message: "Invalid patientId" });
+        return;
+      }
+      const allowed = candidates.some((c) => c._id.toString() === selectedPatientId);
+      if (!allowed) {
+        res.status(400).json({ message: "Selected profile does not match this mobile number." });
+        return;
+      }
+      chosenId = new mongoose.Types.ObjectId(selectedPatientId);
+    } else if (candidates.length === 1) {
+      chosenId = candidates[0]._id as mongoose.Types.ObjectId;
+    } else {
+      res.status(200).json({
+        patient: null,
+        latestVisit: null,
+        familyOptions: candidates.map((c) => ({
+          id: c._id.toString(),
+          firstName: c.firstName,
+          lastName: c.lastName,
+          mobileNumber: c.mobileNumber
+        }))
+      });
+      return;
+    }
+
+    const patient = await Patient.findById(chosenId).lean();
     if (!patient) {
       res.status(404).json({ message: "Patient not found" });
       return;

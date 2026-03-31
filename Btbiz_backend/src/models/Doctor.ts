@@ -20,6 +20,10 @@ export interface IDoctor extends Document {
   unavailableUntil?: Date;
   resetOtpHash?: string;
   resetOtpExpiresAt?: Date;
+  /** Max portal/online bookings per calendar day (IST); unset or ≤0 = unlimited */
+  dailyOnlineAppointmentLimit?: number;
+  /** Max walk-in / clinic-registered visits per calendar day (IST); unset or ≤0 = unlimited */
+  dailyWalkInAppointmentLimit?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,7 +64,9 @@ const DoctorSchema = new Schema<IDoctor>(
     },
     resetOtpExpiresAt: {
       type: Date
-    }
+    },
+    dailyOnlineAppointmentLimit: { type: Number, min: 0 },
+    dailyWalkInAppointmentLimit: { type: Number, min: 0 }
   },
   { timestamps: true }
 );

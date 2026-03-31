@@ -311,7 +311,8 @@ export const createVisit = async (
       bloodSugarFasting: body.bloodSugarFasting,
       weightKg: body.weightKg,
       temperature: body.temperature,
-      otherVitalsNotes: body.otherVitalsNotes
+      otherVitalsNotes: body.otherVitalsNotes,
+      appointmentChannel: "WALK_IN"
     });
 
     const patient = await Patient.findById(visit.patient).select("firstName lastName").lean();
@@ -362,6 +363,13 @@ export const createVisit = async (
       }
       if (error.message === "INVALID_DOCTOR_ID" || error.message === "DOCTOR_NOT_FOUND") {
         res.status(400).json({ message: "Invalid or missing doctor for visit" });
+        return;
+      }
+      if (error.message === "DAILY_WALKIN_QUOTA_FULL") {
+        res.status(409).json({
+          message:
+            "Walk-in slots for this doctor today are full. Try another day or ask the doctor to increase the daily walk-in limit."
+        });
         return;
       }
     }

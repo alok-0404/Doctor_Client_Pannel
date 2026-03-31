@@ -256,7 +256,16 @@ export const LabDashboard = () => {
             ) : incomingTestRequests.length === 0 ? (
               <p className="dashboard-body">No test requests yet.</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 560, overflowY: 'auto', paddingRight: 6 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  maxHeight: incomingTestRequests.length > 5 ? 420 : undefined,
+                  overflowY: incomingTestRequests.length > 5 ? 'auto' : undefined,
+                  paddingRight: incomingTestRequests.length > 5 ? 6 : undefined,
+                }}
+              >
                 {incomingTestRequests.map((r) => (
                   <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
                     <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
@@ -431,7 +440,14 @@ export const LabDashboard = () => {
                       <p className="dashboard-body" style={{ marginBottom: 12 }}>
                         Tests added for this visit:
                       </p>
-                      <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                      <div
+                        style={{
+                          overflowX: 'auto',
+                          overflowY: diagnosticTests.length > 5 ? 'auto' : undefined,
+                          maxHeight: diagnosticTests.length > 5 ? 320 : undefined,
+                          marginBottom: 16,
+                        }}
+                      >
                         <table
                           style={{
                             width: '100%',

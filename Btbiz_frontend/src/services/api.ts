@@ -217,10 +217,19 @@ export const authService = {
       clinicLatitude?: number
       clinicLongitude?: number
       clinicAddress?: string
+      dailyOnlineAppointmentLimit?: number | null
+      dailyWalkInAppointmentLimit?: number | null
     }
   }> {
     const res = await api.get('/auth/doctor/profile')
     return res.data as any
+  },
+
+  async updateDoctorAppointmentLimits(payload: {
+    dailyOnlineAppointmentLimit?: number | null
+    dailyWalkInAppointmentLimit?: number | null
+  }): Promise<void> {
+    await api.patch('/auth/doctor/appointment-limits', payload)
   },
 
   async updateDoctorClinic(payload: {
@@ -332,14 +341,23 @@ export const notificationService = {
   },
 }
 
+export interface AssistantFamilyOption {
+  id: string
+  firstName: string
+  lastName?: string
+  mobileNumber?: string
+}
+
 export interface AssistantPatientPrefill {
-  patient: PatientSummary
+  patient: PatientSummary | null
   latestVisit: {
     id: string
     visitDate: string
     reason?: string
     notes?: string
   } | null
+  /** Present when several profiles share this mobile — choose one and call prefill again with patientId. */
+  familyOptions?: AssistantFamilyOption[]
 }
 
 export const appointmentService = {
@@ -370,9 +388,11 @@ export const appointmentService = {
     return data
   },
 
-  /** For assistant check-in desk: prefill patient + latest visit (works for bot-created appointments too). */
-  async getAssistantPatientPrefill(mobile: string): Promise<AssistantPatientPrefill> {
-    const res = await api.get('/appointments/assistant/patient-prefill', { params: { mobile } })
+  /** For assistant check-in desk: prefill patient + latest visit (works for bot-created appointments too). Pass patientId when multiple family members share the mobile. */
+  async getAssistantPatientPrefill(mobile: string, patientId?: string): Promise<AssistantPatientPrefill> {
+    const res = await api.get('/appointments/assistant/patient-prefill', {
+      params: patientId ? { mobile, patientId } : { mobile },
+    })
     return res.data as AssistantPatientPrefill
   },
 }
@@ -555,6 +575,9 @@ export interface FullPatientHistory {
     fulfilledAt?: string
     receiptNumber?: string
     paidAt?: string
+    preferredProviderId?: string
+    preferredProviderName?: string
+    preferredProviderAddress?: string
     createdAt: string
   }>
   testRequests?: Array<{
@@ -571,8 +594,21 @@ export interface FullPatientHistory {
     fulfilledAt?: string
     receiptNumber?: string
     paidAt?: string
+    preferredProviderId?: string
+    preferredProviderName?: string
+    preferredProviderAddress?: string
     createdAt: string
   }>
+}
+
+export interface ServiceProviderOption {
+  id: string
+  name: string
+  role: 'PHARMACY' | 'LAB_MANAGER' | 'LAB_ASSISTANT'
+  clinicAddress?: string
+  clinicLatitude?: number
+  clinicLongitude?: number
+  distanceKm?: number
 }
 
 export const patientPortalService = {
@@ -596,6 +632,7 @@ export const patientPortalService = {
     serviceType?: 'PICKUP' | 'HOME_DELIVERY'
     paymentMode?: 'ONLINE' | 'OFFLINE'
     expectedFulfillmentMinutes?: number
+    preferredProviderId?: string
   }): Promise<{ medicine: { id: string; medicineName: string } }> {
     const res = await patientApi.post('/public/patient/medicines', payload)
     return res.data as any
@@ -607,11 +644,22 @@ export const patientPortalService = {
     paymentMode?: 'ONLINE' | 'OFFLINE'
     preferredDateTime?: string
     expectedFulfillmentMinutes?: number
+    preferredProviderId?: string
   }): Promise<{
     test: { id: string; testName: string }
   }> {
     const res = await patientApi.post('/public/patient/tests', payload)
     return res.data as any
+  },
+  async getServiceProviders(kind: 'pharmacy' | 'lab', lat?: number, lng?: number): Promise<ServiceProviderOption[]> {
+    const res = await patientApi.get('/public/patient/providers', {
+      params: {
+        kind,
+        ...(typeof lat === 'number' ? { lat } : {}),
+        ...(typeof lng === 'number' ? { lng } : {}),
+      },
+    })
+    return ((res.data as any)?.providers ?? []) as ServiceProviderOption[]
   },
   openDocument(documentId: string): void {
     patientApi
@@ -1008,11 +1056,23 @@ export interface FamilyMemberHistory {
   }>
 }
 
+export interface DoctorAppointmentQuotaSnapshot {
+  online: { limit: number | null; booked: number; remaining: number | null }
+  walkIn: { limit: number | null; booked: number; remaining: number | null }
+}
+
 export const publicAppointmentService = {
   async listConsultants(): Promise<ConsultantOption[]> {
     const res = await api.get('/public/doctors')
     const data = res.data as { doctors: ConsultantOption[] }
     return data.doctors
+  },
+
+  async getAppointmentQuota(doctorId: string, dateYyyyMmDd: string): Promise<DoctorAppointmentQuotaSnapshot> {
+    const res = await api.get(`/public/doctors/${doctorId}/appointment-quota`, {
+      params: { date: dateYyyyMmDd },
+    })
+    return res.data as DoctorAppointmentQuotaSnapshot
   },
 
   async findPatientByMobile(mobile: string): Promise<PatientSummary | null> {

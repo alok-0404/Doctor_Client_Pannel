@@ -16,8 +16,13 @@ import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
 import { getIo } from "../socket";
 import { env } from "../config/env";
+import { completedAgeYears } from "../utils/age";
+import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
 
 const router = Router();
+
+const SELF_MIN_AGE_MSG =
+  "For Self, age must be 18 years or above. Please enter a valid date of birth.";
 let patientMobileIndexChecked = false;
 
 async function ensurePatientMobileNonUniqueIndex(): Promise<void> {
@@ -71,7 +76,10 @@ async function ensurePatientMobileNonUniqueIndex(): Promise<void> {
  */
 async function ensureDistinctPatientsPerFamilyAccount(accountId: mongoose.Types.ObjectId): Promise<void> {
   await ensurePatientMobileNonUniqueIndex();
-  const members = await FamilyMember.find({ account: accountId }).sort({ createdAt: 1 });
+  const members = await FamilyMember.find({
+    account: accountId,
+    isDeleted: { $ne: true }
+  }).sort({ createdAt: 1 });
   const seenPatientIdToMember = new Map<string, string>();
 
   for (const member of members) {
@@ -179,6 +187,30 @@ router.get("/doctors", async (_req, res) => {
   }
 });
 
+// GET /public/doctors/:doctorId/appointment-quota?date=YYYY-MM-DD
+// Remaining slots for online (portal) vs walk-in for that IST calendar day.
+router.get("/doctors/:doctorId/appointment-quota", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const dateStr = (req.query.date as string | undefined)?.trim();
+    if (!doctorId || !mongoose.isValidObjectId(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      res.status(400).json({ message: "Query ?date=YYYY-MM-DD is required" });
+      return;
+    }
+    const visitDate = new Date(`${dateStr}T12:00:00+05:30`);
+    const snapshot = await getDailyAppointmentQuotaSnapshot(doctorId, visitDate);
+    res.status(200).json(snapshot);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /doctors/:id/appointment-quota error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // POST /public/family/login-or-create
 // Body: { mobileNumber: string }
 // Creates or finds a FamilyAccount for the given phone.
@@ -242,7 +274,10 @@ router.get("/family/members", async (req, res) => {
 
     await ensureDistinctPatientsPerFamilyAccount((account as any)._id);
 
-    const members = await FamilyMember.find({ account: (account as any)._id })
+    const members = await FamilyMember.find({
+      account: (account as any)._id,
+      isDeleted: { $ne: true }
+    })
       .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
       .sort({ createdAt: 1 })
       .lean();
@@ -305,6 +340,18 @@ router.post("/family/members", async (req, res) => {
     if (!body.relation) {
       res.status(400).json({ message: "relation is required" });
       return;
+    }
+
+    if (body.dateOfBirth) {
+      const dob = new Date(body.dateOfBirth);
+      if (Number.isNaN(dob.getTime())) {
+        res.status(400).json({ message: "Invalid date of birth" });
+        return;
+      }
+      if (body.relation === "SELF" && completedAgeYears(dob) < 18) {
+        res.status(400).json({ message: SELF_MIN_AGE_MSG });
+        return;
+      }
     }
 
     const account = await FamilyAccount.findById(body.accountId).lean();
@@ -388,9 +435,33 @@ router.patch("/family/members/:id", async (req, res) => {
       address?: string;
     };
 
-    const member = await FamilyMember.findById(memberId);
+    const member = await FamilyMember.findOne({
+      _id: new mongoose.Types.ObjectId(memberId),
+      isDeleted: { $ne: true }
+    });
     if (!member) {
       res.status(404).json({ message: "Family member not found" });
+      return;
+    }
+
+    const nextRelation = (body.relation ?? member.relation) as string;
+    let nextDob: Date | undefined;
+    if (body.dateOfBirth !== undefined) {
+      if (!body.dateOfBirth) {
+        nextDob = undefined;
+      } else {
+        const parsed = new Date(body.dateOfBirth);
+        if (Number.isNaN(parsed.getTime())) {
+          res.status(400).json({ message: "Invalid date of birth" });
+          return;
+        }
+        nextDob = parsed;
+      }
+    } else {
+      nextDob = member.dateOfBirth ? new Date(member.dateOfBirth) : undefined;
+    }
+    if (nextRelation === "SELF" && nextDob && completedAgeYears(nextDob) < 18) {
+      res.status(400).json({ message: SELF_MIN_AGE_MSG });
       return;
     }
 
@@ -452,8 +523,8 @@ router.patch("/family/members/:id", async (req, res) => {
 });
 
 // DELETE /public/family/members/:id
-// Note: We only remove the FamilyMember link; the underlying Patient and visits remain
-// so that doctor-side history is preserved.
+// Soft delete: only hide the FamilyMember link; underlying Patient/visits remain
+// so doctor-side history is preserved and member can be restored later if needed.
 router.delete("/family/members/:id", async (req, res) => {
   try {
     const memberId = req.params.id;
@@ -461,7 +532,19 @@ router.delete("/family/members/:id", async (req, res) => {
       res.status(400).json({ message: "Invalid member id" });
       return;
     }
-    const result = await FamilyMember.findByIdAndDelete(memberId);
+    const result = await FamilyMember.findOneAndUpdate(
+      {
+        _id: new mongoose.Types.ObjectId(memberId),
+        isDeleted: { $ne: true }
+      },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date()
+        }
+      },
+      { new: false }
+    );
     if (!result) {
       res.status(404).json({ message: "Family member not found" });
       return;
@@ -484,7 +567,10 @@ router.get("/family/member-history/:id", async (req, res) => {
       return;
     }
 
-    const member = await FamilyMember.findById(memberId)
+    const member = await FamilyMember.findOne({
+      _id: new mongoose.Types.ObjectId(memberId),
+      isDeleted: { $ne: true }
+    })
       .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
       .lean();
     if (!member || !member.patient) {
@@ -547,7 +633,8 @@ router.post("/family/member-profile-token", async (req, res) => {
 
     const member = await FamilyMember.findOne({
       _id: body.memberId,
-      account: body.accountId
+      account: body.accountId,
+      isDeleted: { $ne: true }
     })
       .populate("patient", "firstName lastName")
       .lean();
@@ -685,7 +772,8 @@ router.post("/appointments/old", async (req, res) => {
       reason: body.consultationType,
       notes: notesParts.join(". "),
       patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude
+      patientLongitude: body.patientLongitude,
+      appointmentChannel: "ONLINE_BOOKING"
     });
 
     res.status(201).json({
@@ -702,6 +790,13 @@ router.post("/appointments/old", async (req, res) => {
       }
       if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
         res.status(404).json({ message: "Patient not found. Please check the mobile number." });
+        return;
+      }
+      if (error.message === "DAILY_ONLINE_QUOTA_FULL") {
+        res.status(409).json({
+          message:
+            "Online booking slots for this doctor on this date are full. Please choose another date or contact the clinic."
+        });
         return;
       }
     }
@@ -764,7 +859,8 @@ router.post("/appointments/new", async (req, res) => {
       reason: "New appointment",
       notes: notesParts.join(". "),
       patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude
+      patientLongitude: body.patientLongitude,
+      appointmentChannel: "ONLINE_BOOKING"
     });
 
     res.status(201).json({
@@ -781,6 +877,13 @@ router.post("/appointments/new", async (req, res) => {
       }
       if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
         res.status(400).json({ message: "Could not create or find patient. Please try again." });
+        return;
+      }
+      if (error.message === "DAILY_ONLINE_QUOTA_FULL") {
+        res.status(409).json({
+          message:
+            "Online booking slots for this doctor on this date are full. Please choose another date or contact the clinic."
+        });
         return;
       }
     }
@@ -849,7 +952,8 @@ router.post("/appointments/family", async (req, res) => {
       reason: body.consultationType || "Family appointment",
       notes: notesParts.join(". ") || undefined,
       patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude
+      patientLongitude: body.patientLongitude,
+      appointmentChannel: "ONLINE_BOOKING"
     });
 
     // Notify doctor similarly to online appointment flow (optional, matches existing pattern if you already do it elsewhere).
@@ -863,8 +967,11 @@ router.post("/appointments/family", async (req, res) => {
       });
       const io = getIo();
       if (io) {
-        io.to(body.consultantId).emit("doctor_notification", {
-          id: (notification as any)._id.toString()
+        io.to(`doctor:${body.consultantId}`).emit("patientReferred", {
+          notificationId: (notification as any)._id.toString(),
+          patientId: (patient as any)._id.toString(),
+          patientName: `${patient.firstName} ${patient.lastName ?? ""}`.trim(),
+          visitId: (visit as any)._id.toString()
         });
       }
     } catch {
@@ -885,6 +992,13 @@ router.post("/appointments/family", async (req, res) => {
       }
       if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
         res.status(404).json({ message: "Patient not found. Please check the selected member." });
+        return;
+      }
+      if (error.message === "DAILY_ONLINE_QUOTA_FULL") {
+        res.status(409).json({
+          message:
+            "Online booking slots for this doctor on this date are full. Please choose another date or contact the clinic."
+        });
         return;
       }
     }

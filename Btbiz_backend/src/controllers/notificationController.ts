@@ -28,9 +28,20 @@ export const getNotifications = async (
       .lean();
 
     res.status(200).json({
-      notifications: notifications.map((n) => ({
+      notifications: notifications.map((n) => {
+        const rawPatient = n.patient as unknown;
+        const patientIdStr =
+          rawPatient &&
+          typeof rawPatient === "object" &&
+          rawPatient !== null &&
+          "_id" in rawPatient &&
+          (rawPatient as { _id: mongoose.Types.ObjectId })._id
+            ? (rawPatient as { _id: mongoose.Types.ObjectId })._id.toString()
+            : String(rawPatient as mongoose.Types.ObjectId);
+
+        return {
         id: (n._id as mongoose.Types.ObjectId).toString(),
-        patientId: (n.patient as mongoose.Types.ObjectId).toString(),
+        patientId: patientIdStr,
         patientName: n.patientName,
         patientMobile: (n as any)?.patient?.mobileNumber ?? undefined,
         emergencyContactName: (n as any)?.patient?.emergencyContactName ?? undefined,
@@ -41,7 +52,8 @@ export const getNotifications = async (
         status: n.status,
         source: n.source,
         createdAt: (n as { createdAt: Date }).createdAt
-      }))
+        };
+      })
     });
   } catch (error) {
     // eslint-disable-next-line no-console

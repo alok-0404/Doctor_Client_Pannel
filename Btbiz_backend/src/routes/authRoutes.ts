@@ -16,6 +16,7 @@ import {
   createLabAssistantAccount,
   listLabAssistants,
   updateDoctorAvailability,
+  updateDoctorAppointmentLimits,
   superAdminLogin
 } from "../controllers/authController";
 
@@ -78,6 +79,9 @@ router.get("/doctor/profile", authenticateDoctor, getDoctorProfile);
 
 // PATCH /auth/doctor/clinic (doctor only – set clinic location for distance on booking)
 router.patch("/doctor/clinic", authenticateDoctor, updateDoctorClinic);
+
+// PATCH /auth/doctor/appointment-limits (doctor only – daily online vs walk-in caps)
+router.patch("/doctor/appointment-limits", authenticateDoctor, updateDoctorAppointmentLimits);
 
 // PATCH /auth/doctor/availability (doctor only – mark unavailable/busy)
 router.patch("/doctor/availability", authenticateDoctor, updateDoctorAvailability);

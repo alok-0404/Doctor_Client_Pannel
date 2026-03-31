@@ -8,6 +8,8 @@ import { Visit } from "../models/Visit";
 import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
+import type { AppointmentChannel } from "../models/Visit";
+import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
 
 const getMobileCandidates = (mobile: string): string[] => {
@@ -94,6 +96,8 @@ export interface CreateVisitPayload {
   otherVitalsNotes?: string;
   patientLatitude?: number;
   patientLongitude?: number;
+  /** Portal bookings vs clinic walk-in; counts toward separate daily quotas. */
+  appointmentChannel?: AppointmentChannel;
 }
 
 export const createVisit = async (payload: CreateVisitPayload) => {
@@ -109,13 +113,16 @@ export const createVisit = async (payload: CreateVisitPayload) => {
   ]);
   if (!patient) throw new Error("PATIENT_NOT_FOUND");
   if (!doctor) throw new Error("DOCTOR_NOT_FOUND");
+  const visitDate = payload.visitDate ? new Date(payload.visitDate) : new Date();
+  const channel: AppointmentChannel = payload.appointmentChannel ?? "ONLINE_BOOKING";
+  await assertDailyAppointmentQuotaAllowed(payload.doctorId, visitDate, channel);
   return Visit.create({
     patient: patient._id,
     doctor: doctor._id,
     recordedBy: payload.recordedById
       ? new mongoose.Types.ObjectId(payload.recordedById)
       : undefined,
-    visitDate: payload.visitDate ? new Date(payload.visitDate) : new Date(),
+    visitDate,
     reason: payload.reason,
     notes: payload.notes,
     bloodPressureSystolic: payload.bloodPressureSystolic,
@@ -125,7 +132,8 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     temperature: payload.temperature,
     otherVitalsNotes: payload.otherVitalsNotes,
     patientLatitude: payload.patientLatitude,
-    patientLongitude: payload.patientLongitude
+    patientLongitude: payload.patientLongitude,
+    appointmentChannel: channel
   });
 };
 
@@ -231,9 +239,11 @@ export const getFullPatientHistory = async (patientId: string) => {
         .lean(),
       PatientMedicineRequest.find({ patient: patient._id })
         .sort({ createdAt: -1 })
+        .populate("preferredProvider", "name clinicAddress")
         .lean(),
       PatientTestRequest.find({ patient: patient._id })
         .sort({ createdAt: -1 })
+        .populate("preferredProvider", "name clinicAddress")
         .lean()
     ]);
 
@@ -277,6 +287,9 @@ export const getFullPatientHistory = async (patientId: string) => {
       fulfilledAt: (m as any).fulfilledAt,
       receiptNumber: (m as any).receiptNumber,
       paidAt: (m as any).paidAt,
+      preferredProviderId: (m as any).preferredProvider?._id?.toString?.(),
+      preferredProviderName: (m as any).preferredProvider?.name,
+      preferredProviderAddress: (m as any).preferredProvider?.clinicAddress,
       createdAt: (m as any).createdAt
     })),
     testRequests: testRequests.map((t) => ({
@@ -293,6 +306,9 @@ export const getFullPatientHistory = async (patientId: string) => {
       fulfilledAt: (t as any).fulfilledAt,
       receiptNumber: (t as any).receiptNumber,
       paidAt: (t as any).paidAt,
+      preferredProviderId: (t as any).preferredProvider?._id?.toString?.(),
+      preferredProviderName: (t as any).preferredProvider?.name,
+      preferredProviderAddress: (t as any).preferredProvider?.clinicAddress,
       createdAt: (t as any).createdAt
     }))
   };

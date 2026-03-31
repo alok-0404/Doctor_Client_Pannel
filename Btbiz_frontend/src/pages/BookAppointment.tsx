@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { publicAppointmentService, type PatientSummary, type ConsultantOption, type FamilyMemberSummary, type FamilyRelation } from '../services/api'
+import {
+  publicAppointmentService,
+  type ConsultantOption,
+  type DoctorAppointmentQuotaSnapshot,
+  type FamilyMemberSummary,
+  type FamilyRelation,
+} from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
+import { completedAgeYears } from '../utils/age'
 
-type Mode = 'none' | 'family' | 'old'
+type Mode = 'none' | 'family'
 type Step = 'details' | 'payment' | 'confirm'
 type PaymentMode = 'online_now' | 'cash_at_clinic'
 
@@ -27,6 +34,11 @@ const TIME_SLOTS = [
   '1:00 - 2:00 PM',
   '2:00 - 3:00 PM',
 ]
+
+const MSG_SELF_MIN_AGE =
+  'For Self, age must be 18 years or above. Please enter a valid date of birth.'
+const MSG_MINOR_FAMILY_DISCLAIMER =
+  'Disclaimer: The date of birth shows age below 18 years. Online booking on this portal is for patients aged 18 years or above. For minors, a parent or guardian should manage this profile.'
 
 /** Check if coordinates are likely invalid (e.g. DevTools override 0,0) */
 function isInvalidCoords(lat: number, lng: number): boolean {
@@ -86,17 +98,6 @@ export const BookAppointment = () => {
   const [newMemberDob, setNewMemberDob] = useState('')
   const [newMemberAddress, setNewMemberAddress] = useState('')
 
-  // Old patient state
-  const [oldCountryCode, setOldCountryCode] = useState('+91')
-  const [oldMobile, setOldMobile] = useState('')
-  const [oldPatient, setOldPatient] = useState<PatientSummary | null>(null)
-  const [oldConsultationType, setOldConsultationType] = useState(CONSULTATION_TYPES[0])
-  const [oldConsultantId, setOldConsultantId] = useState('')
-  const [oldOpdNo, setOldOpdNo] = useState('')
-  const [oldName, setOldName] = useState('')
-  const [oldEmail, setOldEmail] = useState('')
-  const [oldGender, setOldGender] = useState<string>('')
-  const [oldAddress, setOldAddress] = useState('')
   const [appointmentDate, setAppointmentDate] = useState('')
   const [preferredSlot, setPreferredSlot] = useState('')
 
@@ -104,6 +105,9 @@ export const BookAppointment = () => {
   const [error, setError] = useState<string | null>(null)
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null)
+  const [deleteMemberTarget, setDeleteMemberTarget] = useState<FamilyMemberSummary | null>(null)
+  const [appointmentQuota, setAppointmentQuota] = useState<DoctorAppointmentQuotaSnapshot | null>(null)
+  const [appointmentQuotaLoading, setAppointmentQuotaLoading] = useState(false)
   const liveShareWatchIdRef = useRef<number | null>(null)
   const lastSentMsRef = useRef<number>(0)
   const familyConsultantRef = useRef<HTMLSelectElement | null>(null)
@@ -125,7 +129,6 @@ export const BookAppointment = () => {
       .then((list) => {
         setConsultants(list)
         if (list.length > 0) {
-          setOldConsultantId((prev) => prev || list[0].id)
           setFamilyConsultantId((prev) => prev || list[0].id)
         }
       })
@@ -227,10 +230,7 @@ export const BookAppointment = () => {
     }
   }, [appointmentId, policyAccepted])
 
-  const selectedConsultantId =
-    mode === 'old' ? oldConsultantId
-      : mode === 'family' ? familyConsultantId
-        : ''
+  const selectedConsultantId = mode === 'family' ? familyConsultantId : ''
   const selectedConsultant = consultants.find((c) => c.id === selectedConsultantId)
   const hasClinicLocation = selectedConsultant && selectedConsultant.clinicLatitude != null && selectedConsultant.clinicLongitude != null
   const distanceKmValue = userLocation && hasClinicLocation && selectedConsultant
@@ -242,11 +242,6 @@ export const BookAppointment = () => {
     setError(null)
     setAppointmentId(null)
     setSelectedPaymentMode(null)
-  }
-
-  const selectOld = () => {
-    setMode('old')
-    resetState()
   }
 
   const selectFamily = () => {
@@ -309,6 +304,13 @@ export const BookAppointment = () => {
     }
   }
 
+  const newMemberDobAge = useMemo(() => {
+    if (!newMemberDob) return null
+    const d = new Date(newMemberDob)
+    if (Number.isNaN(d.getTime())) return null
+    return completedAgeYears(d)
+  }, [newMemberDob])
+
   const handleAddFamilyMember = async () => {
     setError(null)
     if (!familyAccountId) {
@@ -317,6 +319,10 @@ export const BookAppointment = () => {
     }
     if (!newMemberFullName.trim()) {
       setError('Please enter member full name.')
+      return
+    }
+    if (newMemberDobAge !== null && newMemberRelation === 'SELF' && newMemberDobAge < 18) {
+      setError(MSG_SELF_MIN_AGE)
       return
     }
     try {
@@ -379,10 +385,19 @@ export const BookAppointment = () => {
       if (selectedFamilyMemberId === memberId) {
         setSelectedFamilyMemberId('')
       }
+      setDeleteMemberTarget(null)
     } catch (err: any) {
       const msg = err?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'Failed to delete family member. Please try again.')
     }
+  }
+
+  const openDeleteMemberModal = (member: FamilyMemberSummary) => {
+    setDeleteMemberTarget(member)
+  }
+
+  const closeDeleteMemberModal = () => {
+    setDeleteMemberTarget(null)
   }
 
   const handleViewHistory = async (memberId: string) => {
@@ -412,28 +427,28 @@ export const BookAppointment = () => {
     applyFamilyMemberToBooking(selectedFamilyMember)
   }, [mode, selectedFamilyMember, applyFamilyMemberToBooking])
 
-  const handleFetchOldPatient = async () => {
-    setError(null)
-    setOldPatient(null)
-    const oldMobileNormalized = `${oldCountryCode}${oldMobile.replace(/\D/g, '').trim()}`
-    if (!oldMobile || oldMobileNormalized.length < 8) {
+  useEffect(() => {
+    if (mode !== 'family' || !familyConsultantId || !appointmentDate) {
+      setAppointmentQuota(null)
       return
     }
-    try {
-      const p = await publicAppointmentService.findPatientByMobile(oldMobileNormalized)
-      if (!p) {
-        setError('No patient found with this mobile number.')
-        return
-      }
-      setOldPatient(p)
-      setOldName(`${p.firstName} ${p.lastName ?? ''}`.trim())
-      setOldGender(p.gender ?? '')
-      setOldAddress(p.address ?? '')
-    } catch (err: any) {
-      const msg = err?.response?.data?.message
-      setError(typeof msg === 'string' ? msg : 'Failed to fetch patient details. Please try again.')
+    let cancelled = false
+    setAppointmentQuotaLoading(true)
+    void publicAppointmentService
+      .getAppointmentQuota(familyConsultantId, appointmentDate)
+      .then((snap) => {
+        if (!cancelled) setAppointmentQuota(snap)
+      })
+      .catch(() => {
+        if (!cancelled) setAppointmentQuota(null)
+      })
+      .finally(() => {
+        if (!cancelled) setAppointmentQuotaLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
-  }
+  }, [mode, familyConsultantId, appointmentDate])
 
   const goToPayment = () => {
     setError(null)
@@ -441,28 +456,35 @@ export const BookAppointment = () => {
       setError('Please select appointment date.')
       return
     }
-    if (mode === 'family') {
-      if (!familyAccountId) {
-        setError('Please login with your mobile number first.')
-        return
-      }
-      if (!selectedFamilyMemberId || !selectedFamilyPatientId) {
-        setError('Please select a family member.')
-        return
-      }
-      if (!familyConsultantId) {
-        setError('Please select a consultant.')
-        return
-      }
-      if (!familyPatientName || !familyGender) {
-        setError('Please fill patient name and gender.')
-        return
-      }
-    } else if (mode === 'old') {
-      if (!oldMobile || !oldConsultationType || !oldConsultantId || !oldOpdNo) {
-        setError('Please fill all mandatory fields.')
-        return
-      }
+    if (mode !== 'family') {
+      setError('Please select New Patient.')
+      return
+    }
+    if (!familyAccountId) {
+      setError('Please login with your mobile number first.')
+      return
+    }
+    if (!selectedFamilyMemberId || !selectedFamilyPatientId) {
+      setError('Please select a family member.')
+      return
+    }
+    if (!familyConsultantId) {
+      setError('Please select a consultant.')
+      return
+    }
+    if (!familyPatientName || !familyGender) {
+      setError('Please fill patient name and gender.')
+      return
+    }
+    if (
+      appointmentQuota &&
+      appointmentQuota.online.limit != null &&
+      appointmentQuota.online.remaining === 0
+    ) {
+      setError(
+        'Online booking slots for this doctor on the selected date are full. Please choose another date or contact the clinic.'
+      )
+      return
     }
     setStep('payment')
   }
@@ -485,21 +507,8 @@ export const BookAppointment = () => {
           address: familyAddress || undefined,
           ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
         })
-      } else if (mode === 'old') {
-        res = await publicAppointmentService.bookOldPatientAppointment({
-          mobileNumber: `${oldCountryCode}${oldMobile.replace(/\D/g, '').trim()}`,
-          consultationType: oldConsultationType,
-          consultantId: oldConsultantId,
-          opdNumber: oldOpdNo,
-          appointmentDate,
-          preferredSlot: preferredSlot || undefined,
-          patientName: oldName || undefined,
-          gender: oldGender || undefined,
-          address: oldAddress || undefined,
-          ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
-        })
       } else {
-        setError('Please select New Patient or Old Patient.')
+        setError('Please select New Patient.')
         return
       }
       setAppointmentId(res.appointmentId)
@@ -630,9 +639,6 @@ export const BookAppointment = () => {
       <button type="button" className="public-cta" onClick={selectFamily}>
         New Patient
       </button>
-      <button type="button" className="public-cta" onClick={selectOld}>
-        Old Patient
-      </button>
     </div>
   )
 
@@ -701,7 +707,19 @@ export const BookAppointment = () => {
               <p className="public-section-text" style={{ margin: '0 0 8px' }}>
                 Your family members:
               </p>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  maxHeight: familyMembers.length > 5 ? 320 : undefined,
+                  overflowY: familyMembers.length > 5 ? 'auto' : undefined,
+                  paddingRight: familyMembers.length > 5 ? 4 : undefined,
+                }}
+              >
                 {familyMembers.map((m) => (
                   <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
@@ -747,7 +765,7 @@ export const BookAppointment = () => {
                         type="button"
                         className="public-cta"
                         style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#b91c1c' }}
-                        onClick={() => handleDeleteMember(m.id)}
+                        onClick={() => openDeleteMemberModal(m)}
                       >
                         Delete
                       </button>
@@ -795,6 +813,31 @@ export const BookAppointment = () => {
                 <div className="appt-field">
                   <label>Date of Birth</label>
                   <input type="date" value={newMemberDob} onChange={(e) => setNewMemberDob(e.target.value)} />
+                  <p style={{ margin: '8px 0 0', fontSize: '0.82rem', color: '#475569', lineHeight: 1.45 }}>
+                    Self: age must be <strong>18 years or above</strong>. For other relations, minors may be added; see disclaimer below if age is under 18.
+                  </p>
+                  {newMemberDobAge !== null && newMemberDobAge < 18 && newMemberRelation !== 'SELF' && (
+                    <p
+                      role="note"
+                      style={{
+                        margin: '10px 0 0',
+                        padding: '10px 12px',
+                        fontSize: '0.82rem',
+                        lineHeight: 1.45,
+                        color: '#92400e',
+                        background: '#fffbeb',
+                        border: '1px solid #fcd34d',
+                        borderRadius: 8,
+                      }}
+                    >
+                      {MSG_MINOR_FAMILY_DISCLAIMER}
+                    </p>
+                  )}
+                  {newMemberDobAge !== null && newMemberDobAge < 18 && newMemberRelation === 'SELF' && (
+                    <p style={{ margin: '10px 0 0', fontSize: '0.82rem', color: '#b91c1c', lineHeight: 1.45 }}>
+                      {MSG_SELF_MIN_AGE}
+                    </p>
+                  )}
                 </div>
                 <div className="appt-field">
                   <label>Address</label>
@@ -802,7 +845,16 @@ export const BookAppointment = () => {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-                <button type="button" className="public-cta" onClick={handleAddFamilyMember}>
+                <button
+                  type="button"
+                  className="public-cta"
+                  onClick={handleAddFamilyMember}
+                  disabled={
+                    newMemberDobAge !== null &&
+                    newMemberRelation === 'SELF' &&
+                    newMemberDobAge < 18
+                  }
+                >
                   Save Member
                 </button>
                 <button
@@ -907,6 +959,52 @@ export const BookAppointment = () => {
             </div>
           </div>
 
+          {familyConsultantId && appointmentDate && (
+            <p
+              className="public-section-text"
+              style={{
+                margin: '12px 0 0',
+                fontSize: '0.88rem',
+                lineHeight: 1.45,
+                color: '#334155',
+                padding: '10px 12px',
+                background: '#f1f5f9',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              {appointmentQuotaLoading ? (
+                <>Checking slot availability…</>
+              ) : appointmentQuota ? (
+                <>
+                  <strong>Slots (IST, this date)</strong>
+                  <br />
+                  Online / portal:{' '}
+                  {appointmentQuota.online.limit == null ? (
+                    `${appointmentQuota.online.booked} booked (no limit set)`
+                  ) : (
+                    <>
+                      {appointmentQuota.online.remaining} left of {appointmentQuota.online.limit}{' '}
+                      ({appointmentQuota.online.booked} booked)
+                    </>
+                  )}
+                  <br />
+                  Walk-in (clinic):{' '}
+                  {appointmentQuota.walkIn.limit == null ? (
+                    `${appointmentQuota.walkIn.booked} registered (no limit set)`
+                  ) : (
+                    <>
+                      {appointmentQuota.walkIn.remaining} left of {appointmentQuota.walkIn.limit}{' '}
+                      ({appointmentQuota.walkIn.booked} used)
+                    </>
+                  )}
+                </>
+              ) : (
+                <>Could not load slot counts. You can still try to continue.</>
+              )}
+            </p>
+          )}
+
           <p className="appt-timing-msg">
             You may come anytime between <strong>10 AM and 3 PM</strong>.
           </p>
@@ -917,129 +1015,6 @@ export const BookAppointment = () => {
 
         </>
       )}
-    </div>
-  )
-
-  const renderOldForm = () => (
-    <div className="appt-card">
-      <h2 className="public-section-title" style={{ marginBottom: 16 }}>Old Patient Appointment</h2>
-      <div className="appt-field">
-        <label>Mobile No *</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
-          <select value={oldCountryCode} onChange={(e) => setOldCountryCode(e.target.value)}>
-            <option value="+91">IN (+91)</option>
-            <option value="+1">US/CA (+1)</option>
-            <option value="+44">UK (+44)</option>
-            <option value="+61">AU (+61)</option>
-            <option value="+971">UAE (+971)</option>
-          </select>
-          <input
-            type="tel"
-            value={oldMobile}
-            onChange={(e) => setOldMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
-            onBlur={handleFetchOldPatient}
-            placeholder="Enter registered mobile number"
-          />
-        </div>
-      </div>
-      {oldPatient && (
-        <div className="appt-summary">
-          <div className="appt-field">
-            <label>Patient Name</label>
-            <div className="appt-readonly-value">
-              {oldName || '—'}
-            </div>
-          </div>
-          <div className="appt-two-cols">
-            <div className="appt-field">
-              <label>Gender</label>
-              <div className="appt-readonly-value">
-                {oldGender || '—'}
-              </div>
-            </div>
-            <div className="appt-field">
-              <label>Address</label>
-              <div className="appt-readonly-value">
-                {oldAddress || '—'}
-              </div>
-            </div>
-          </div>
-          <p style={{ marginTop: 8 }}>
-            <Link to="/patient-login" className="public-cta" style={{ display: 'inline-block', padding: '8px 16px', fontSize: '0.9rem' }}>
-              Open My Profile
-            </Link>
-            {' '}
-            <span style={{ color: '#64748b', fontSize: '0.9rem' }}>View appointments, reports &amp; documents</span>
-          </p>
-        </div>
-      )}
-      <div className="appt-field">
-        <label>Email (optional)</label>
-        <input
-          type="email"
-          value={oldEmail}
-          onChange={(e) => setOldEmail(e.target.value)}
-          placeholder="your@email.com"
-        />
-      </div>
-      <div className="appt-field">
-        <label>Consultation Type *</label>
-        <select value={oldConsultationType} onChange={(e) => setOldConsultationType(e.target.value)}>
-          {CONSULTATION_TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-      </div>
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>Name of Consultant *</label>
-          <select
-            value={oldConsultantId}
-            onChange={(e) => setOldConsultantId(e.target.value)}
-            disabled={loadingConsultants}
-          >
-            {consultants.length === 0 && <option value="">Loading…</option>}
-            {consultants.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="appt-field">
-          <label>Patient OPD No *</label>
-          <input
-            type="text"
-            value={oldOpdNo}
-            onChange={(e) => setOldOpdNo(e.target.value)}
-          />
-        </div>
-      </div>
-      {renderDistanceBlock()}
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>Appointment Date *</label>
-          <input
-            type="date"
-            value={appointmentDate}
-            onChange={(e) => setAppointmentDate(e.target.value)}
-            min={new Date().toISOString().slice(0, 10)}
-          />
-        </div>
-        <div className="appt-field">
-          <label>Preferred time (approx)</label>
-          <select value={preferredSlot} onChange={(e) => setPreferredSlot(e.target.value)}>
-            <option value="">Select slot</option>
-            {TIME_SLOTS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <p className="appt-timing-msg">
-        You may come anytime between <strong>10 AM and 3 PM</strong>.
-      </p>
-      <button type="button" className="public-cta" style={{ marginTop: 16 }} onClick={goToPayment}>
-        Next
-      </button>
     </div>
   )
 
@@ -1074,18 +1049,9 @@ export const BookAppointment = () => {
     </div>
   )
 
-  const getConfirmName = () => {
-    if (mode === 'family') return familyPatientName || selectedFamilyMember?.fullName || '—'
-    return (oldPatient ? `${oldPatient.firstName} ${oldPatient.lastName ?? ''}`.trim() : oldName) || '—'
-  }
-  const getConfirmMobile = () => {
-    if (mode === 'family') return familyMobile || '—'
-    return oldMobile || '—'
-  }
-  const getConfirmEmail = () => {
-    if (mode === 'family') return '—'
-    return oldEmail.trim() || '—'
-  }
+  const getConfirmName = () => familyPatientName || selectedFamilyMember?.fullName || '—'
+  const getConfirmMobile = () => familyMobile || '—'
+  const getConfirmEmail = () => '—'
 
   const renderConfirm = () => (
     <div className="appt-card" style={{ textAlign: 'center' }}>
@@ -1144,7 +1110,6 @@ export const BookAppointment = () => {
           </p>
         )}
         {policyAccepted && step === 'details' && mode === 'family' && renderFamilyForm()}
-        {policyAccepted && step === 'details' && mode === 'old' && renderOldForm()}
         {policyAccepted && step === 'payment' && renderPayment()}
         {policyAccepted && step === 'confirm' && renderConfirm()}
         {step !== 'confirm' && (
@@ -1158,6 +1123,30 @@ export const BookAppointment = () => {
           <p className="public-footer-copy">© {new Date().getFullYear()} MEDIGRAPH. All rights reserved.</p>
         </div>
       </footer>
+      {deleteMemberTarget && (
+        <div className="appt-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-member-title">
+          <div className="appt-modal-card">
+            <h3 id="delete-member-title">Delete family member?</h3>
+            <p>
+              Are you sure you want to delete <strong>{deleteMemberTarget.fullName}</strong> from this family list?
+            </p>
+            <div className="appt-modal-actions">
+              <button type="button" className="appt-modal-btn cancel" onClick={closeDeleteMemberModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="appt-modal-btn delete"
+                onClick={() => {
+                  void handleDeleteMember(deleteMemberTarget.id)
+                }}
+              >
+                Yes, delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <style>{`
         .public-home { min-height: 100vh; display: flex; flex-direction: column; background: #f8fafc; color: #0f172a; }
         .public-header { background: #fff; border-bottom: 1px solid #e2e8f0; }
@@ -1180,6 +1169,16 @@ export const BookAppointment = () => {
         @media (max-width: 640px) { .appt-two-cols { grid-template-columns: 1fr; } }
         .appt-readonly-value { padding: 8px 10px; border-radius: 8px; background: #f1f5f9; font-size: 0.95rem; color: #111827; }
         .appt-timing-msg { font-size: 0.9rem; color: #475569; margin: 12px 0 0; padding: 10px 12px; background: #f0fdf4; border-radius: 8px; border: 1px solid #bbf7d0; }
+        .appt-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.52); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }
+        .appt-modal-card { width: min(460px, 100%); background: #fff; border-radius: 16px; border: 1px solid #dbeafe; box-shadow: 0 22px 45px rgba(15, 23, 42, 0.25); padding: 18px; }
+        .appt-modal-card h3 { margin: 0 0 8px; font-size: 1.1rem; color: #0f172a; }
+        .appt-modal-card p { margin: 0; color: #475569; line-height: 1.5; font-size: 0.95rem; }
+        .appt-modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; }
+        .appt-modal-btn { border: none; border-radius: 10px; padding: 9px 14px; font-weight: 600; cursor: pointer; }
+        .appt-modal-btn.cancel { background: #e2e8f0; color: #0f172a; }
+        .appt-modal-btn.cancel:hover { background: #cbd5e1; }
+        .appt-modal-btn.delete { background: #b91c1c; color: #fff; }
+        .appt-modal-btn.delete:hover { background: #991b1b; }
         .public-footer { margin-top: auto; background: #0f172a; color: #94a3b8; padding: 28px 20px; }
         .public-footer-inner { max-width: 1100px; margin: 0 auto; text-align: center; }
         .public-footer-copy { font-size: 0.875rem; margin: 0; color: #64748b; }

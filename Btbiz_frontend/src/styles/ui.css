@@ -218,6 +218,76 @@ body {
   color: #1f2933;
 }
 
+/* Right column: patient search (gradient) + daily caps card stacked */
+.dashboard-sidebar {
+  display: none;
+}
+
+.dashboard-daily-caps-card {
+  padding: 16px 16px 14px;
+}
+
+.dashboard-daily-caps-hint {
+  margin: 6px 0 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--med-text-muted);
+}
+
+.dashboard-daily-caps-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-daily-caps-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.dashboard-daily-caps-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font-size: 14px;
+  color: #1f2933;
+  background: #fff;
+}
+
+.dashboard-daily-caps-input:focus {
+  outline: none;
+  border-color: #90caf9;
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.15);
+}
+
+.dashboard-daily-caps-save {
+  width: 100%;
+  margin-top: 4px;
+  justify-content: center;
+}
+
+.dashboard-daily-caps-msg {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.dashboard-daily-caps-msg--ok {
+  color: #2e7d32;
+}
+
+.dashboard-daily-caps-msg--err {
+  color: #c62828;
+}
+
 .dashboard-search-panel {
   display: none;
 }
@@ -245,11 +315,19 @@ body {
 }
 
 @media (min-width: 992px) {
+  .dashboard-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 280px;
+    flex: 0 0 auto;
+  }
+
   .dashboard-search-panel {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    width: 260px;
+    width: 100%;
     flex: 0 0 auto;
     padding: 20px 18px 16px;
     border-radius: 24px;
@@ -918,10 +996,22 @@ body {
   #pharmacy-receipt * {
     visibility: visible;
   }
+  #lab-receipt,
+  #lab-receipt * {
+    visibility: visible;
+  }
   body * {
     visibility: hidden;
   }
   #pharmacy-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    max-width: none;
+    box-shadow: none;
+    padding: 16px;
+  }
+  #lab-receipt {
     position: absolute;
     left: 0;
     top: 0;

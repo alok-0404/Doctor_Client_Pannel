@@ -294,6 +294,8 @@ export const getDoctorProfile = async (
     clinicLatitude?: number;
     clinicLongitude?: number;
     clinicAddress?: string;
+    dailyOnlineAppointmentLimit?: number | null;
+    dailyWalkInAppointmentLimit?: number | null;
   } = {
     id: req.doctor._id.toString(),
     name: req.doctor.name,
@@ -316,7 +318,9 @@ export const getDoctorProfile = async (
     }
   } else if (req.doctor.role === "DOCTOR") {
     const doc = await Doctor.findById(req.doctor._id)
-      .select("availabilityStatus unavailableReason unavailableUntil clinicLatitude clinicLongitude clinicAddress")
+      .select(
+        "availabilityStatus unavailableReason unavailableUntil clinicLatitude clinicLongitude clinicAddress dailyOnlineAppointmentLimit dailyWalkInAppointmentLimit"
+      )
       .lean();
     if (doc) {
       payload.availabilityStatus = doc.availabilityStatus ?? "available";
@@ -325,6 +329,14 @@ export const getDoctorProfile = async (
       payload.clinicLatitude = (doc as any).clinicLatitude;
       payload.clinicLongitude = (doc as any).clinicLongitude;
       payload.clinicAddress = (doc as any).clinicAddress;
+      payload.dailyOnlineAppointmentLimit =
+        typeof (doc as any).dailyOnlineAppointmentLimit === "number"
+          ? (doc as any).dailyOnlineAppointmentLimit
+          : null;
+      payload.dailyWalkInAppointmentLimit =
+        typeof (doc as any).dailyWalkInAppointmentLimit === "number"
+          ? (doc as any).dailyWalkInAppointmentLimit
+          : null;
     }
   }
 
@@ -348,6 +360,62 @@ export const updateDoctorClinic = async (
     ...(body.clinicAddress !== undefined && { clinicAddress: body.clinicAddress })
   });
   res.status(200).json({ message: "Clinic location updated" });
+};
+
+export const updateDoctorAppointmentLimits = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  if (!req.doctor || req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can update appointment limits" });
+    return;
+  }
+  const body = req.body as {
+    dailyOnlineAppointmentLimit?: number | null;
+    dailyWalkInAppointmentLimit?: number | null;
+  };
+  const $set: Record<string, number> = {};
+  const $unset: Record<string, 1> = {};
+
+  if (body.dailyOnlineAppointmentLimit !== undefined) {
+    if (body.dailyOnlineAppointmentLimit === null) {
+      $unset.dailyOnlineAppointmentLimit = 1;
+    } else if (
+      typeof body.dailyOnlineAppointmentLimit === "number" &&
+      Number.isFinite(body.dailyOnlineAppointmentLimit) &&
+      body.dailyOnlineAppointmentLimit >= 0
+    ) {
+      $set.dailyOnlineAppointmentLimit = Math.floor(body.dailyOnlineAppointmentLimit);
+    } else {
+      res.status(400).json({ message: "dailyOnlineAppointmentLimit must be a non-negative number or null" });
+      return;
+    }
+  }
+  if (body.dailyWalkInAppointmentLimit !== undefined) {
+    if (body.dailyWalkInAppointmentLimit === null) {
+      $unset.dailyWalkInAppointmentLimit = 1;
+    } else if (
+      typeof body.dailyWalkInAppointmentLimit === "number" &&
+      Number.isFinite(body.dailyWalkInAppointmentLimit) &&
+      body.dailyWalkInAppointmentLimit >= 0
+    ) {
+      $set.dailyWalkInAppointmentLimit = Math.floor(body.dailyWalkInAppointmentLimit);
+    } else {
+      res.status(400).json({ message: "dailyWalkInAppointmentLimit must be a non-negative number or null" });
+      return;
+    }
+  }
+
+  if (Object.keys($set).length === 0 && Object.keys($unset).length === 0) {
+    res.status(400).json({ message: "Provide dailyOnlineAppointmentLimit and/or dailyWalkInAppointmentLimit" });
+    return;
+  }
+
+  await Doctor.findByIdAndUpdate(req.doctor._id, {
+    ...(Object.keys($set).length > 0 && { $set }),
+    ...(Object.keys($unset).length > 0 && { $unset })
+  });
+  res.status(200).json({ message: "Appointment limits updated" });
 };
 
 export const createAssistantAccount = async (

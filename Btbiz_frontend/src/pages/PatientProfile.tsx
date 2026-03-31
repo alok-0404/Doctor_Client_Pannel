@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   patientPortalService,
   type FullPatientHistory,
+  type PharmacyDispensationSummary,
   type DiagnosticTestItem,
+  type ServiceProviderOption,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 
@@ -47,6 +49,81 @@ function formatMedicinePaymentLabel(
   return 'Pay at medical (offline)'
 }
 
+function escapeHtml(s: unknown): string {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function dateOnly(input: string | Date | undefined): string | null {
+  if (!input) return null
+  const d = typeof input === 'string' ? new Date(input) : input
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString().slice(0, 10) // YYYY-MM-DD
+}
+
+function normalizeLabName(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '') // remove spaces and punctuation
+}
+
+/** Label for provider dropdown: always show km when we can compute it. */
+function formatProviderOptionLabel(
+  p: ServiceProviderOption,
+  geo: 'loading' | 'ok' | 'none'
+): string {
+  if (typeof p.distanceKm === 'number') {
+    return `${p.name} · ${p.distanceKm.toFixed(1)} km`
+  }
+  if (geo === 'loading') {
+    return `${p.name} · …`
+  }
+  if (geo === 'ok') {
+    return `${p.name} · — km (no map location on file)`
+  }
+  return `${p.name} · — (allow location for km)`
+}
+
+function ProviderDistanceHint({
+  geo,
+  providers,
+}: {
+  geo: 'loading' | 'ok' | 'none'
+  providers: ServiceProviderOption[]
+}) {
+  if (geo === 'loading') {
+    return <p className="patient-profile-distance-hint">Getting distances…</p>
+  }
+  if (providers.length === 0) {
+    return null
+  }
+  const withKm = providers.filter((p) => typeof p.distanceKm === 'number')
+  if (geo === 'none') {
+    return (
+      <p className="patient-profile-distance-hint">
+        Turn on / allow location for this site to see straight-line distance (km) from you for each tie-up.
+      </p>
+    )
+  }
+  if (withKm.length === 0) {
+    return (
+      <p className="patient-profile-distance-hint">
+        Tie-ups have no map coordinates yet — distance (km) will show after clinic location is saved.
+      </p>
+    )
+  }
+  return (
+    <p className="patient-profile-distance-hint">
+      Distance is approximate straight-line km from your location; list is sorted nearest first.
+    </p>
+  )
+}
+
 export const PatientProfile = () => {
   const [data, setData] = useState<FullPatientHistory | null>(null)
   const [loading, setLoading] = useState(true)
@@ -60,12 +137,17 @@ export const PatientProfile = () => {
   const [addMedicineServiceType, setAddMedicineServiceType] = useState<'PICKUP' | 'HOME_DELIVERY'>('PICKUP')
   const [addMedicinePaymentMode, setAddMedicinePaymentMode] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE')
   const [addMedicineEtaMinutes, setAddMedicineEtaMinutes] = useState('')
+  const [pharmacyProviders, setPharmacyProviders] = useState<ServiceProviderOption[]>([])
+  const [selectedPharmacyProviderId, setSelectedPharmacyProviderId] = useState('')
   const [addTestName, setAddTestName] = useState('')
   const [addTestNotes, setAddTestNotes] = useState('')
   const [addTestServiceType, setAddTestServiceType] = useState<'LAB_VISIT' | 'HOME_SERVICE'>('LAB_VISIT')
   const [addTestPaymentMode, setAddTestPaymentMode] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE')
   const [addTestPreferredDateTime, setAddTestPreferredDateTime] = useState('')
   const [addTestEtaMinutes, setAddTestEtaMinutes] = useState('')
+  const [labProviders, setLabProviders] = useState<ServiceProviderOption[]>([])
+  const [selectedLabProviderId, setSelectedLabProviderId] = useState('')
+  const [providerGeoStatus, setProviderGeoStatus] = useState<'loading' | 'ok' | 'none'>('loading')
 
   const loadProfile = useCallback(() => {
     setLoading(true)
@@ -79,6 +161,58 @@ export const PatientProfile = () => {
   useEffect(() => {
     loadProfile()
   }, [loadProfile])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadProviders = async (lat?: number, lng?: number) => {
+      try {
+        const [labs, pharmacies] = await Promise.all([
+          patientPortalService.getServiceProviders('lab', lat, lng),
+          patientPortalService.getServiceProviders('pharmacy', lat, lng),
+        ])
+        if (!cancelled) {
+          setLabProviders(labs)
+          setPharmacyProviders(pharmacies)
+        }
+      } catch {
+        if (!cancelled) {
+          setLabProviders([])
+          setPharmacyProviders([])
+        }
+      }
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!cancelled) setProviderGeoStatus('ok')
+          loadProviders(pos.coords.latitude, pos.coords.longitude)
+        },
+        () => {
+          if (!cancelled) setProviderGeoStatus('none')
+          loadProviders()
+        },
+        { timeout: 12000, maximumAge: 300000, enableHighAccuracy: false }
+      )
+    } else {
+      setProviderGeoStatus('none')
+      loadProviders()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const selectedLabProvider = useMemo(
+    () => labProviders.find((p) => p.id === selectedLabProviderId),
+    [labProviders, selectedLabProviderId]
+  )
+  const selectedPharmacyProvider = useMemo(
+    () => pharmacyProviders.find((p) => p.id === selectedPharmacyProviderId),
+    [pharmacyProviders, selectedPharmacyProviderId]
+  )
 
   const handleLogout = () => {
     patientStorage.clear()
@@ -121,6 +255,7 @@ export const PatientProfile = () => {
     (m) => m.status === 'COMPLETED' && m.paymentStatus === 'PAID'
   )
   const paidLabTestsNotify = testRequests.filter((t) => t.paymentStatus === 'PAID')
+  const labPaidRequests = testRequests.filter((t) => t.paymentStatus === 'PAID')
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -152,11 +287,13 @@ export const PatientProfile = () => {
         expectedFulfillmentMinutes: addMedicineEtaMinutes.trim()
           ? Number(addMedicineEtaMinutes)
           : undefined,
+        preferredProviderId: selectedPharmacyProviderId || undefined,
       })
       setAddMedicineName('')
       setAddMedicineDosage('')
       setAddMedicineNotes('')
       setAddMedicineEtaMinutes('')
+      setSelectedPharmacyProviderId('')
       loadProfile()
     } catch {
       // eslint-disable-next-line no-alert
@@ -178,11 +315,13 @@ export const PatientProfile = () => {
         paymentMode: addTestPaymentMode,
         preferredDateTime: addTestPreferredDateTime || undefined,
         expectedFulfillmentMinutes: addTestEtaMinutes.trim() ? Number(addTestEtaMinutes) : undefined,
+        preferredProviderId: selectedLabProviderId || undefined,
       })
       setAddTestName('')
       setAddTestNotes('')
       setAddTestPreferredDateTime('')
       setAddTestEtaMinutes('')
+      setSelectedLabProviderId('')
       loadProfile()
     } catch {
       // eslint-disable-next-line no-alert
@@ -190,6 +329,220 @@ export const PatientProfile = () => {
     } finally {
       setAddingTest(false)
     }
+  }
+
+  const handleViewPharmacyReceipt = (d: PharmacyDispensationSummary) => {
+    try {
+      const w = window.open('', '_blank', 'noopener,noreferrer')
+      if (!w) return
+
+      const safeReceiptNumber = escapeHtml(d.receiptNumber ?? '—')
+      const safePaidAt = escapeHtml(d.paidAt ? formatDateTime(d.paidAt) : '—')
+      const safeCreatedAt = escapeHtml(formatDateTime(d.createdAt))
+      const safeMobile = escapeHtml(patient?.mobileNumber ?? '')
+      const safeDispensedBy = escapeHtml(d.dispensedBy)
+
+      const itemsHtml =
+        d.items?.length
+          ? d.items
+              .map((it) => {
+                const qty = Number(it.quantity ?? 0)
+                const mrp = Number(it.mrp ?? 0)
+                const discount = Number(it.discount ?? 0)
+                const amount = Number(it.amount ?? 0)
+                return `<tr>
+                  <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb; text-align:left;">
+                    ${escapeHtml(it.medicineName)}
+                  </td>
+                  <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb; text-align:right;">${qty}</td>
+                  <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb; text-align:right;">₹${mrp}</td>
+                  <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb; text-align:right;">₹${discount}</td>
+                  <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb; text-align:right;">₹${amount}</td>
+                </tr>`
+              })
+              .join('')
+          : `<tr><td colspan="5" style="padding:10px 6px;color:#64748b;">No items</td></tr>`
+
+      const body = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Pharmacy receipt</title>
+          <style>
+            @media print {
+              body, body * { visibility: visible !important; }
+            }
+          </style>
+        </head>
+        <body style="font-family:system-ui;padding:24px;">
+          <h2 style="margin:0 0 12px;">Pharmacy bill — Receipt</h2>
+          <div style="color:#334155;font-size:13px;line-height:1.5;">
+            <p style="margin:0 0 6px;"><strong>Receipt no.:</strong> ${safeReceiptNumber}</p>
+            <p style="margin:0 0 6px;"><strong>Dispensed by:</strong> ${safeDispensedBy}</p>
+            <p style="margin:0 0 6px;"><strong>Dispensed on:</strong> ${safeCreatedAt}</p>
+            <p style="margin:0 0 6px;"><strong>Patient mobile:</strong> ${safeMobile}</p>
+          </div>
+
+          <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:13px;">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:10px 6px;border-bottom:2px solid #e2e8f0;">Medicine</th>
+                <th style="text-align:right;padding:10px 6px;border-bottom:2px solid #e2e8f0;">Qty</th>
+                <th style="text-align:right;padding:10px 6px;border-bottom:2px solid #e2e8f0;">MRP</th>
+                <th style="text-align:right;padding:10px 6px;border-bottom:2px solid #e2e8f0;">Discount</th>
+                <th style="text-align:right;padding:10px 6px;border-bottom:2px solid #e2e8f0;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+
+          <div style="margin-top:14px;font-size:13px;color:#0f172a;">
+            <p style="margin:6px 0;"><strong>Subtotal:</strong> ₹${d.subtotal ?? 0}</p>
+            <p style="margin:6px 0;"><strong>Total discount:</strong> ₹${d.totalDiscount ?? 0}</p>
+            <p style="margin:6px 0;"><strong>Total:</strong> ₹${d.totalAmount ?? 0}</p>
+            <p style="margin:6px 0;"><strong>Paid:</strong> ₹${d.paidAmount ?? 0} · ${escapeHtml(d.paymentStatus)}</p>
+            <p style="margin:6px 0;color:#64748b;"><strong>Paid at:</strong> ${safePaidAt}</p>
+          </div>
+
+          <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
+              Print / Save as PDF
+            </button>
+          </div>
+        </body>
+      </html>`
+
+      w.document.open()
+      w.document.write(body)
+      w.document.close()
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to open pharmacy receipt:', e)
+      alert('Failed to open receipt. Please try again.')
+    }
+  }
+
+  const findReceiptForDiagnosticTest = (
+    testName: string,
+    visitDate: string,
+    diagnosticCreatedAt?: string
+  ) => {
+    const rawName = String(testName ?? '').trim()
+    const name = normalizeLabName(rawName)
+    if (!name) return null
+
+    // Prefer exact same-day matches (if dates exist), but fall back to name-only.
+    const visitDay = dateOnly(visitDate)
+    const createdDay = dateOnly(diagnosticCreatedAt)
+
+    const matchesByDay = labPaidRequests.filter((r) => {
+      const rName = normalizeLabName(String(r.testName ?? '').trim())
+      if (!rName || rName !== name) return false
+
+      const paidDay = dateOnly(r.paidAt)
+      const createdReqDay = dateOnly(r.createdAt)
+
+      if (visitDay) {
+        return (paidDay && paidDay === visitDay) || (createdReqDay && createdReqDay === visitDay)
+      }
+
+      if (createdDay) {
+        return (paidDay && paidDay === createdDay) || (createdReqDay && createdReqDay === createdDay)
+      }
+
+      return false
+    })
+
+    if (matchesByDay.length > 0) return matchesByDay[0]
+
+    // Name-only fallback (most reliable across mismatched timestamps).
+    return (
+      labPaidRequests.find((r) => normalizeLabName(String(r.testName ?? '').trim()) === name) ?? null
+    )
+  }
+
+  const findPaidForDiagnosticTest = (
+    testName: string,
+    visitDate: string,
+    diagnosticCreatedAt?: string
+  ) => {
+    const rawName = String(testName ?? '').trim()
+    const name = normalizeLabName(rawName)
+    if (!name) return null
+
+    const visitDay = dateOnly(visitDate)
+    const createdDay = dateOnly(diagnosticCreatedAt)
+
+    const matches = labPaidRequests.filter((r) => {
+      const rName = normalizeLabName(String(r.testName ?? '').trim())
+      if (!rName || rName !== name) return false
+
+      const paidDay = dateOnly(r.paidAt)
+      const createdReqDay = dateOnly(r.createdAt)
+
+      if (visitDay) {
+        return (paidDay && paidDay === visitDay) || (createdReqDay && createdReqDay === visitDay)
+      }
+      if (createdDay) {
+        return (paidDay && paidDay === createdDay) || (createdReqDay && createdReqDay === createdDay)
+      }
+      return false
+    })
+
+    // Strict gating: show report only if this paid request matches current visit day.
+    return matches[0] ?? null
+  }
+
+  const handleViewLabReceipt = (payload: {
+    testName: string
+    receiptNumber?: string
+    paidAt?: string
+    price?: number
+    serviceType?: 'LAB_VISIT' | 'HOME_SERVICE'
+  }) => {
+    const w = window.open('', '_blank', 'noopener,noreferrer')
+    if (!w) return
+
+    const safeReceiptNumber = escapeHtml(payload.receiptNumber ?? '—')
+    const safePaidAt = escapeHtml(payload.paidAt ? formatDateTime(payload.paidAt) : '—')
+    const safeTestName = escapeHtml(payload.testName)
+    const safeServiceType =
+      payload.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'
+    const safePrice = Number(payload.price ?? 0)
+
+    const body = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Lab receipt</title>
+          <style>
+            @media print {
+              body, body * { visibility: visible !important; }
+            }
+          </style>
+        </head>
+        <body style="font-family:system-ui;padding:24px;">
+          <h2 style="margin:0 0 12px;">Lab test — Payment Receipt</h2>
+          <div style="font-size:13px;color:#334155;line-height:1.6;">
+            <p style="margin:0 0 6px;"><strong>Test:</strong> ${safeTestName}</p>
+            <p style="margin:0 0 6px;"><strong>Receipt no.:</strong> ${safeReceiptNumber}</p>
+            <p style="margin:0 0 6px;"><strong>Paid at:</strong> ${safePaidAt}</p>
+            <p style="margin:0 0 6px;"><strong>Service:</strong> ${safeServiceType}</p>
+            <p style="margin:0 0 6px;"><strong>Rate:</strong> ₹${safePrice}</p>
+          </div>
+          <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
+              Print / Save as PDF
+            </button>
+          </div>
+        </body>
+      </html>`
+
+    w.document.open()
+    w.document.write(body)
+    w.document.close()
   }
 
   const allDiagnosticTests: Array<{
@@ -292,7 +645,40 @@ export const PatientProfile = () => {
         </section>
 
         <section className="patient-profile-section">
-          <h2>Lab Tests</h2>
+          <div className="patient-profile-heading-with-hint">
+            <div className="patient-profile-section-heading-row">
+              <h2>Lab Tests</h2>
+              <select
+                value={selectedLabProviderId}
+                onChange={(e) => setSelectedLabProviderId(e.target.value)}
+                className="patient-profile-input patient-profile-input-small patient-profile-heading-select"
+                aria-label="Choose lab"
+              >
+                <option value="">Choose lab (auto-assign if not selected)</option>
+                {labProviders.map((lab) => (
+                  <option key={lab.id} value={lab.id}>
+                    {formatProviderOptionLabel(lab, providerGeoStatus)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <ProviderDistanceHint geo={providerGeoStatus} providers={labProviders} />
+            {selectedLabProvider && (
+              <p className="patient-profile-distance-selected">
+                {typeof selectedLabProvider.distanceKm === 'number' ? (
+                  <>
+                    Selected: <strong>{selectedLabProvider.name}</strong> — {selectedLabProvider.distanceKm.toFixed(1)}{' '}
+                    km from you
+                  </>
+                ) : (
+                  <>
+                    Selected: <strong>{selectedLabProvider.name}</strong>
+                    {providerGeoStatus === 'ok' ? ' — distance not available (no map pin)' : ''}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
           <form onSubmit={handleAddTest} className="patient-profile-add-form">
             <input
               type="text"
@@ -379,6 +765,7 @@ export const PatientProfile = () => {
                       {t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}
                       {' · '}
                       {paymentLabel}
+                      {t.preferredProviderName ? ` · Lab: ${t.preferredProviderName}` : ''}
                       {t.preferredDateTime && ` · Preferred ${formatDateTime(t.preferredDateTime)}`}
                       {t.expectedFulfillmentMinutes ? ` · Need in ${t.expectedFulfillmentMinutes} min` : ''}
                     </span>
@@ -449,17 +836,65 @@ export const PatientProfile = () => {
                     <span> — {formatDate(visitDate)}</span>
                     {doctorName && <span> (Dr. {doctorName})</span>}
                   </div>
-                  {test.hasReport && (
-                    <button
-                      type="button"
-                      className="patient-profile-link-btn"
-                      onClick={() =>
-                        patientPortalService.openDiagnosticReport(visitId, test._id)
-                      }
-                    >
-                      View Report
-                    </button>
-                  )}
+                  {(() => {
+                    const receiptMatch = findReceiptForDiagnosticTest(
+                      test.testName,
+                      visitDate,
+                      test.createdAt
+                    )
+                    const paidMatch = findPaidForDiagnosticTest(
+                      test.testName,
+                      visitDate,
+                      test.createdAt
+                    )
+                    const hasPaid = !!paidMatch
+                    const buttons: React.ReactNode[] = []
+
+                    // Requirement: patient should not see report until lab marks payment as PAID.
+                    if (test.hasReport && hasPaid) {
+                      buttons.push(
+                        <button
+                          key="report"
+                          type="button"
+                          className="patient-profile-link-btn"
+                          onClick={() =>
+                            patientPortalService.openDiagnosticReport(visitId, test._id)
+                          }
+                        >
+                          View Report
+                        </button>
+                      )
+                    }
+
+                    if (hasPaid) {
+                      buttons.push(
+                        <button
+                          key="receipt"
+                          type="button"
+                          className="patient-profile-link-btn"
+                          onClick={() =>
+                            handleViewLabReceipt({
+                              testName: test.testName,
+                              receiptNumber: receiptMatch?.receiptNumber,
+                              paidAt: paidMatch?.paidAt,
+                              serviceType: (receiptMatch?.serviceType ?? paidMatch?.serviceType) as any,
+                              price: test.price,
+                            })
+                          }
+                        >
+                          View / print receipt
+                        </button>
+                      )
+                    }
+
+                    if (buttons.length === 0) return null
+
+                    return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                        {buttons}
+                      </div>
+                    )
+                  })()}
                 </li>
               ))}
             </ul>
@@ -467,7 +902,40 @@ export const PatientProfile = () => {
         </section>
 
         <section className="patient-profile-section">
-          <h2>Medicine Requests</h2>
+          <div className="patient-profile-heading-with-hint">
+            <div className="patient-profile-section-heading-row">
+              <h2>Medicine Requests</h2>
+              <select
+                value={selectedPharmacyProviderId}
+                onChange={(e) => setSelectedPharmacyProviderId(e.target.value)}
+                className="patient-profile-input patient-profile-input-small patient-profile-heading-select"
+                aria-label="Choose pharmacy"
+              >
+                <option value="">Choose pharmacy (auto-assign if not selected)</option>
+                {pharmacyProviders.map((ph) => (
+                  <option key={ph.id} value={ph.id}>
+                    {formatProviderOptionLabel(ph, providerGeoStatus)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <ProviderDistanceHint geo={providerGeoStatus} providers={pharmacyProviders} />
+            {selectedPharmacyProvider && (
+              <p className="patient-profile-distance-selected">
+                {typeof selectedPharmacyProvider.distanceKm === 'number' ? (
+                  <>
+                    Selected: <strong>{selectedPharmacyProvider.name}</strong> —{' '}
+                    {selectedPharmacyProvider.distanceKm.toFixed(1)} km from you
+                  </>
+                ) : (
+                  <>
+                    Selected: <strong>{selectedPharmacyProvider.name}</strong>
+                    {providerGeoStatus === 'ok' ? ' — distance not available (no map pin)' : ''}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
           <form onSubmit={handleAddMedicine} className="patient-profile-add-form">
             <input
               type="text"
@@ -556,6 +1024,7 @@ export const PatientProfile = () => {
                   <span className="patient-profile-muted" style={{ marginTop: 6 }}>
                     {m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} ·{' '}
                     {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
+                    {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
                     {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
                   </span>
                   <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -613,6 +1082,46 @@ export const PatientProfile = () => {
                   <p className="patient-profile-muted">
                     ₹{d.totalAmount} • {d.paymentStatus}
                   </p>
+                  {d.receiptNumber && (
+                    <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
+                      Receipt no. <strong>{d.receiptNumber}</strong>
+                    </p>
+                  )}
+                  {!!d.items?.length && (
+                    <div style={{ marginTop: 10 }}>
+                      <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+                        Medicines
+                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {d.items.map((it, i) => (
+                          <div
+                            key={`${d.id}-item-${i}`}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              gap: 12,
+                              fontSize: 13,
+                              color: '#0f172a',
+                            }}
+                          >
+                            <span style={{ fontWeight: 500 }}>
+                              {it.medicineName}
+                              {it.quantity ? ` x ${it.quantity}` : ''}
+                            </span>
+                            <span style={{ color: '#475569' }}>₹{it.amount}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="patient-profile-link-btn"
+                    style={{ marginTop: 12 }}
+                    onClick={() => handleViewPharmacyReceipt(d)}
+                  >
+                    View bill / Receipt
+                  </button>
                 </li>
               ))}
             </ul>
@@ -772,6 +1281,45 @@ const patientProfileStyles = `
     margin: 0 0 12px;
     color: #334155;
   }
+  .patient-profile-section-heading-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+    width: 100%;
+  }
+  .patient-profile-section-heading-row h2 {
+    margin: 0;
+    flex: 0 1 auto;
+  }
+  .patient-profile-heading-with-hint {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  .patient-profile-distance-hint {
+    margin: 0 0 6px;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: #64748b;
+    max-width: 42rem;
+  }
+  .patient-profile-distance-selected {
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    color: #334155;
+    max-width: 42rem;
+  }
+  .patient-profile-heading-select {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: 200px;
+    margin-left: auto;
+    font-size: 0.875rem;
+    padding: 6px 10px;
+  }
   .patient-profile-details {
     background: #fff;
     border: 1px solid #e2e8f0;
@@ -795,6 +1343,9 @@ const patientProfileStyles = `
     list-style: none;
     margin: 0;
     padding: 0;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 6px;
   }
   .patient-profile-list-scroll {
     max-height: 420px;
@@ -857,16 +1408,25 @@ const patientProfileStyles = `
     gap: 8px;
     margin-bottom: 16px;
     align-items: center;
+    max-width: 560px;
   }
   .patient-profile-input {
     padding: 8px 12px;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     font-size: 0.95rem;
-    min-width: 140px;
+    min-width: 110px;
+    max-width: 100%;
+  }
+  .patient-profile-add-form .patient-profile-input {
+    flex: 1 1 auto;
+    max-width: 260px;
+  }
+  .patient-profile-add-form .patient-profile-input-small {
+    max-width: 180px;
   }
   .patient-profile-input-small {
-    min-width: 100px;
+    min-width: 88px;
   }
   .patient-profile-add-btn {
     padding: 8px 16px;
