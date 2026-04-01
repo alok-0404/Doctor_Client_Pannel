@@ -4,6 +4,7 @@ import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   patientService,
   pharmacyService,
@@ -224,7 +225,7 @@ export const MedicineDashboard = () => {
               Patient requests from their profile are shown here with name, mobile, payment and delivery preference.
             </p>
             {requestsLoading ? (
-              <p className="dashboard-body">Loading requests…</p>
+              <DnaLoader label="Loading requests..." />
             ) : incomingRequests.length === 0 ? (
               <p className="dashboard-body">No medicine requests yet.</p>
             ) : (
@@ -293,6 +294,7 @@ export const MedicineDashboard = () => {
             {searchError && (
               <p style={{ color: 'var(--color-error)', marginTop: 8, fontSize: 14 }}>{searchError}</p>
             )}
+            {searchLoading && <DnaLoader label="Searching patient..." size={42} />}
           </Card>
 
           {patient && history && (

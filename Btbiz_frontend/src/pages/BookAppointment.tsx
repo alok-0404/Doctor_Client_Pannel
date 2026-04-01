@@ -9,6 +9,7 @@ import {
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 import { completedAgeYears } from '../utils/age'
+import { DnaLoader } from '../components/ui/DnaLoader'
 
 type Mode = 'none' | 'family'
 type Step = 'details' | 'payment' | 'confirm'
@@ -1010,6 +1011,7 @@ export const BookAppointment = () => {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
+              {loadingConsultants && <DnaLoader label="Loading consultants..." size={38} />}
             </div>
             <div className="appt-field">
               <label>Patient OPD No (optional)</label>
@@ -1120,7 +1122,7 @@ export const BookAppointment = () => {
                 </div>
               </div>
               {dateAvailabilityLoading && (
-                <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#64748b' }}>Checking month availability…</p>
+                <DnaLoader label="Checking month availability..." size={38} />
               )}
               {appointmentDate && (
                 <p style={{ margin: '8px 0 0', fontSize: '0.82rem', color: '#334155' }}>
@@ -1140,7 +1142,7 @@ export const BookAppointment = () => {
           </div>
 
           {familyConsultantId && appointmentDate && (
-            <p
+            <div
               className="public-section-text"
               style={{
                 margin: '12px 0 0',
@@ -1154,7 +1156,7 @@ export const BookAppointment = () => {
               }}
             >
               {appointmentQuotaLoading ? (
-                <>Checking slot availability…</>
+                <DnaLoader label="Checking slot availability..." size={38} />
               ) : appointmentQuota ? (
                 <>
                   <strong>Slots (IST, this date)</strong>
@@ -1182,7 +1184,7 @@ export const BookAppointment = () => {
               ) : (
                 <>Could not load slot counts. You can still try to continue.</>
               )}
-            </p>
+            </div>
           )}
 
           {appointmentQuota && isOnlineFull(appointmentQuota) && (

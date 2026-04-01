@@ -4,6 +4,7 @@ import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { PatientCard, type PatientDetailsData } from '../components/PatientCard'
 import { Card } from '../components/ui/Card'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import { patientService } from '../services/api'
 
 function formatVisitDate(d: string | Date): string {
@@ -154,7 +155,7 @@ export const PatientDetails = () => {
       <div className="app-shell">
         <Header doctorName={doctorName} />
         <main className="details-main" style={{ padding: 24 }}>
-          <p className="dashboard-body">Loading patient…</p>
+          <DnaLoader label="Loading patient profile..." size={52} />
         </main>
       </div>
     )

@@ -5,6 +5,7 @@ import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import { patientService } from '../services/api'
 
 export const PatientSearch = () => {
@@ -119,6 +120,7 @@ export const PatientSearch = () => {
                 {loading ? 'Searching…' : 'Search'}
               </Button>
             </div>
+            {loading && <DnaLoader label="Searching patient..." size={42} />}
           </form>
         </Card>
       </main>

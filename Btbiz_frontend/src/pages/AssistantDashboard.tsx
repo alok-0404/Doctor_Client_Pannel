@@ -5,6 +5,7 @@ import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   API_BASE_URL,
   authService,
@@ -832,7 +833,7 @@ export const AssistantDashboard = () => {
                   Call or message only patients who are within <strong>500 meters</strong> of the clinic to inform that the doctor is not available.
                 </p>
                 {todayPatientsLoading ? (
-                  <p className="dashboard-body" style={{ fontSize: 13 }}>Loading today&apos;s appointments…</p>
+                  <DnaLoader label="Loading today's appointments..." />
                 ) : todayPatientsToContact.length === 0 ? (
                   <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>
                     No patients are within <strong>500 meters</strong> of the clinic right now.
@@ -911,7 +912,7 @@ export const AssistantDashboard = () => {
           <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Today&apos;s appointments (assistant view)</p>
             {todayPatientsLoading ? (
-              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+              <DnaLoader label="Loading appointments..." />
             ) : todayAppointments.length === 0 ? (
               <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No appointments scheduled for today.</p>
             ) : (
@@ -982,7 +983,7 @@ export const AssistantDashboard = () => {
           <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Today checked-in patients (audit)</p>
             {checkedInLoading ? (
-              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+              <DnaLoader label="Loading checked-in list..." />
             ) : checkedInToday.length === 0 ? (
               <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No checked-in patients yet today.</p>
             ) : (
@@ -1036,7 +1037,7 @@ export const AssistantDashboard = () => {
           <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Upcoming appointments (assistant view)</p>
             {upcomingPatientsLoading ? (
-              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+              <DnaLoader label="Loading upcoming appointments..." />
             ) : upcomingAppointments.length === 0 ? (
               <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No upcoming appointments.</p>
             ) : (

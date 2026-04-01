@@ -4,6 +4,7 @@ import { Header } from '../components/Header'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   authService,
   notificationService,
@@ -380,9 +381,7 @@ export const Dashboard = () => {
             <Card className="dashboard-overview-card">
               <p className="dashboard-kicker">Today's appointments</p>
               {appointmentsLoading ? (
-                <p className="dashboard-body" style={{ marginTop: 8 }}>
-                  Loading appointments…
-                </p>
+                <DnaLoader label="Loading appointments..." />
               ) : (
                 <>
                   {todayAppointments.length === 0 && (
@@ -462,9 +461,7 @@ export const Dashboard = () => {
                 Appointments booked for future dates (after today).
               </p>
               {upcomingAppointmentsLoading ? (
-                <p className="dashboard-body" style={{ marginTop: 8 }}>
-                  Loading…
-                </p>
+                <DnaLoader label="Loading upcoming appointments..." />
               ) : (
                 <>
                   {upcomingAppointments.length === 0 && (
@@ -559,7 +556,7 @@ export const Dashboard = () => {
                 Mark yourself unavailable or busy so your assistant can inform patients in real time.
               </p>
               {availabilityLoading ? (
-                <p className="dashboard-body" style={{ marginTop: 8 }}>Loading…</p>
+                <DnaLoader label="Loading availability..." />
               ) : (
                 <>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>

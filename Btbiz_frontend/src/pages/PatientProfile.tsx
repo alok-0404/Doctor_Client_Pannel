@@ -8,6 +8,7 @@ import {
   type ServiceProviderOption,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
+import { DnaLoader } from '../components/ui/DnaLoader'
 
 function formatDate(d: string | Date | undefined): string {
   if (!d) return '—'
@@ -224,7 +225,9 @@ export const PatientProfile = () => {
   if (loading) {
     return (
       <div className="patient-profile">
-        <div className="patient-profile-loading">Loading your profile…</div>
+        <div className="patient-profile-loading">
+          <DnaLoader label="Loading your profile..." size={56} />
+        </div>
         <style>{patientProfileStyles}</style>
       </div>
     )
