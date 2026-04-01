@@ -61,6 +61,31 @@ function distanceKm(
   return R * c
 }
 
+function formatDateKey(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function addDays(base: Date, days: number): Date {
+  const next = new Date(base)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+function startOfDay(date: Date): Date {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function isOnlineFull(snap: DoctorAppointmentQuotaSnapshot | null): boolean {
+  if (!snap) return false
+  if (snap.online.limit == null) return false
+  return snap.online.remaining === 0
+}
+
 export const BookAppointment = () => {
   const navigate = useNavigate()
   const [policyAccepted, setPolicyAccepted] = useState(false)
@@ -108,6 +133,14 @@ export const BookAppointment = () => {
   const [deleteMemberTarget, setDeleteMemberTarget] = useState<FamilyMemberSummary | null>(null)
   const [appointmentQuota, setAppointmentQuota] = useState<DoctorAppointmentQuotaSnapshot | null>(null)
   const [appointmentQuotaLoading, setAppointmentQuotaLoading] = useState(false)
+  const [dateAvailabilityMap, setDateAvailabilityMap] = useState<Record<string, 'available' | 'full' | 'unknown'>>({})
+  const [dateAvailabilityLoading, setDateAvailabilityLoading] = useState(false)
+  const [bookingDayNotice, setBookingDayNotice] = useState<string | null>(null)
+  const [nextSuggestedDate, setNextSuggestedDate] = useState<string | null>(null)
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date()
+    return new Date(today.getFullYear(), today.getMonth(), 1)
+  })
   const liveShareWatchIdRef = useRef<number | null>(null)
   const lastSentMsRef = useRef<number>(0)
   const familyConsultantRef = useRef<HTMLSelectElement | null>(null)
@@ -232,6 +265,28 @@ export const BookAppointment = () => {
 
   const selectedConsultantId = mode === 'family' ? familyConsultantId : ''
   const selectedConsultant = consultants.find((c) => c.id === selectedConsultantId)
+  const todayStart = useMemo(() => startOfDay(new Date()), [])
+  const canGoPrevMonth =
+    calendarMonth.getFullYear() > todayStart.getFullYear() ||
+    (calendarMonth.getFullYear() === todayStart.getFullYear() && calendarMonth.getMonth() > todayStart.getMonth())
+  const calendarMonthLabel = calendarMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  const calendarCells = useMemo(() => {
+    const year = calendarMonth.getFullYear()
+    const month = calendarMonth.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const firstWeekday = firstDay.getDay()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const cells: Array<{ key: string; date: Date | null; dateKey: string | null }> = []
+    for (let i = 0; i < firstWeekday; i += 1) {
+      cells.push({ key: `empty-${i}`, date: null, dateKey: null })
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const d = new Date(year, month, day)
+      const dateKey = formatDateKey(d)
+      cells.push({ key: dateKey, date: d, dateKey })
+    }
+    return cells
+  }, [calendarMonth])
   const hasClinicLocation = selectedConsultant && selectedConsultant.clinicLatitude != null && selectedConsultant.clinicLongitude != null
   const distanceKmValue = userLocation && hasClinicLocation && selectedConsultant
     ? distanceKm(userLocation.lat, userLocation.lng, selectedConsultant.clinicLatitude!, selectedConsultant.clinicLongitude!)
@@ -450,6 +505,68 @@ export const BookAppointment = () => {
     }
   }, [mode, familyConsultantId, appointmentDate])
 
+  useEffect(() => {
+    if (mode !== 'family' || !familyConsultantId) {
+      setDateAvailabilityMap({})
+      setDateAvailabilityLoading(false)
+      setBookingDayNotice(null)
+      setNextSuggestedDate(null)
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      setDateAvailabilityLoading(true)
+      const year = calendarMonth.getFullYear()
+      const month = calendarMonth.getMonth()
+      const daysInMonth = new Date(year, month + 1, 0).getDate()
+      const entries = await Promise.all(
+        Array.from({ length: daysInMonth }).map(async (_, i) => {
+          const d = new Date(year, month, i + 1)
+          const key = formatDateKey(d)
+          if (startOfDay(d) < todayStart) {
+            return [key, 'full'] as const
+          }
+          try {
+            const snap = await publicAppointmentService.getAppointmentQuota(familyConsultantId, key)
+            return [key, isOnlineFull(snap) ? 'full' : 'available'] as const
+          } catch {
+            return [key, 'unknown'] as const
+          }
+        })
+      )
+      if (!cancelled) {
+        setDateAvailabilityMap((prev) => ({ ...prev, ...Object.fromEntries(entries) }))
+        setDateAvailabilityLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [mode, familyConsultantId, calendarMonth, todayStart])
+
+  const handleSuggestNextAvailableDate = async () => {
+    if (!familyConsultantId) return
+    const startFrom = appointmentDate ? new Date(appointmentDate) : new Date()
+    for (let i = 0; i < 45; i += 1) {
+      const date = addDays(startFrom, i + 1)
+      const key = formatDateKey(date)
+      try {
+        const snap = await publicAppointmentService.getAppointmentQuota(familyConsultantId, key)
+        if (!isOnlineFull(snap)) {
+          setAppointmentDate(key)
+          setAppointmentQuota(snap)
+          setNextSuggestedDate(key)
+          setBookingDayNotice(`Today is fully booked. Next available date selected: ${key}.`)
+          return
+        }
+      } catch {
+        // ignore and continue
+      }
+    }
+    setBookingDayNotice('Booking is currently full for upcoming days. Please try again later or contact clinic.')
+  }
+
   const goToPayment = () => {
     setError(null)
     if (!appointmentDate) {
@@ -481,9 +598,7 @@ export const BookAppointment = () => {
       appointmentQuota.online.limit != null &&
       appointmentQuota.online.remaining === 0
     ) {
-      setError(
-        'Online booking slots for this doctor on the selected date are full. Please choose another date or contact the clinic.'
-      )
+      setBookingDayNotice('Today booking is closed. Choose next available date.')
       return
     }
     setStep('payment')
@@ -941,12 +1056,77 @@ export const BookAppointment = () => {
           <div className="appt-two-cols">
             <div className="appt-field">
               <label>Appointment Date *</label>
-              <input
-                type="date"
-                value={appointmentDate}
-                onChange={(e) => setAppointmentDate(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
-              />
+              <div className="appt-calendar">
+                <div className="appt-calendar-head">
+                  <button
+                    type="button"
+                    className="appt-calendar-nav"
+                    disabled={!canGoPrevMonth}
+                    onClick={() => {
+                      if (!canGoPrevMonth) return
+                      setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+                    }}
+                  >
+                    Prev
+                  </button>
+                  <strong>{calendarMonthLabel}</strong>
+                  <button
+                    type="button"
+                    className="appt-calendar-nav"
+                    onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+                <div className="appt-calendar-weekdays">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => (
+                    <span key={w}>{w}</span>
+                  ))}
+                </div>
+                <div className="appt-calendar-grid">
+                  {calendarCells.map((cell) => {
+                    if (!cell.date || !cell.dateKey) {
+                      return <span key={cell.key} className="appt-calendar-empty" />
+                    }
+                    const dayStart = startOfDay(cell.date)
+                    const isPast = dayStart < todayStart
+                    const status = dateAvailabilityMap[cell.dateKey] ?? 'unknown'
+                    const isSelected = appointmentDate === cell.dateKey
+                    return (
+                      <button
+                        key={cell.key}
+                        type="button"
+                        disabled={isPast}
+                        className={`appt-calendar-day ${isSelected ? 'selected' : ''}`}
+                        onClick={() => {
+                          setAppointmentDate(cell.dateKey!)
+                          if (status === 'full') {
+                            setBookingDayNotice('Selected day is full. Please choose another date.')
+                          } else {
+                            setBookingDayNotice(null)
+                          }
+                        }}
+                      >
+                        <span>{cell.date.getDate()}</span>
+                        <i className={`dot ${status}`} />
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="appt-calendar-legend">
+                  <span><i className="dot available" /> Available</span>
+                  <span><i className="dot full" /> Full</span>
+                  <span><i className="dot unknown" /> Checking</span>
+                </div>
+              </div>
+              {dateAvailabilityLoading && (
+                <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#64748b' }}>Checking month availability…</p>
+              )}
+              {appointmentDate && (
+                <p style={{ margin: '8px 0 0', fontSize: '0.82rem', color: '#334155' }}>
+                  Selected date: <strong>{appointmentDate}</strong>
+                </p>
+              )}
             </div>
             <div className="appt-field">
               <label>Preferred time (approx)</label>
@@ -1002,6 +1182,29 @@ export const BookAppointment = () => {
               ) : (
                 <>Could not load slot counts. You can still try to continue.</>
               )}
+            </p>
+          )}
+
+          {appointmentQuota && isOnlineFull(appointmentQuota) && (
+            <div style={{ marginTop: 10 }}>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#92400e' }}>
+                Today booking is closed. You can choose next day appointment.
+              </p>
+              <button
+                type="button"
+                className="public-cta"
+                style={{ marginTop: 8, padding: '7px 12px', fontSize: '0.82rem', background: '#0369a1' }}
+                onClick={() => void handleSuggestNextAvailableDate()}
+              >
+                Find next available date
+              </button>
+            </div>
+          )}
+
+          {bookingDayNotice && (
+            <p style={{ margin: '10px 0 0', fontSize: '0.84rem', color: '#0f766e' }}>
+              {bookingDayNotice}
+              {nextSuggestedDate ? ` (Selected: ${nextSuggestedDate})` : ''}
             </p>
           )}
 
@@ -1165,6 +1368,22 @@ export const BookAppointment = () => {
         .appt-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
         .appt-field label { font-size: 0.9rem; color: #475569; }
         .appt-field input, .appt-field select { padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.95rem; }
+        .appt-calendar { border: 1px solid #dbeafe; border-radius: 12px; padding: 10px; background: #f8fbff; }
+        .appt-calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .appt-calendar-nav { border: 1px solid #bfdbfe; background: #ffffff; color: #1d4ed8; border-radius: 8px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer; }
+        .appt-calendar-nav:disabled { opacity: 0.45; cursor: not-allowed; }
+        .appt-calendar-weekdays, .appt-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+        .appt-calendar-weekdays span { text-align: center; font-size: 0.72rem; color: #64748b; }
+        .appt-calendar-empty { min-height: 34px; }
+        .appt-calendar-day { min-height: 34px; border: 1px solid #dbeafe; background: #ffffff; border-radius: 8px; cursor: pointer; color: #0f172a; font-size: 0.78rem; display: flex; align-items: center; justify-content: center; gap: 4px; }
+        .appt-calendar-day:hover { border-color: #60a5fa; }
+        .appt-calendar-day.selected { border-color: #1d4ed8; background: #eff6ff; font-weight: 700; }
+        .appt-calendar-day:disabled { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; cursor: not-allowed; }
+        .appt-calendar-legend { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.74rem; color: #475569; }
+        .dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; vertical-align: middle; }
+        .dot.available { background: #16a34a; }
+        .dot.full { background: #dc2626; }
+        .dot.unknown { background: #94a3b8; }
         .appt-two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         @media (max-width: 640px) { .appt-two-cols { grid-template-columns: 1fr; } }
         .appt-readonly-value { padding: 8px 10px; border-radius: 8px; background: #f1f5f9; font-size: 0.95rem; color: #111827; }

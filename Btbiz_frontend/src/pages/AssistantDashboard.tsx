@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
@@ -77,6 +77,7 @@ export const AssistantDashboard = () => {
   const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsLoading, setTodayPatientsLoading] = useState(false)
   const [upcomingPatientsLoading, setUpcomingPatientsLoading] = useState(false)
+  const checkedInPatientIdsRef = useRef<Set<string>>(new Set())
 
   // File upload for reports / prescriptions
   const [docFile, setDocFile] = useState<File | null>(null)
@@ -195,8 +196,9 @@ export const AssistantDashboard = () => {
     setTodayPatientsLoading(true)
     try {
       const { appointments } = await appointmentService.getAssistantDoctorTodayAppointments()
-      setTodayAppointments(appointments ?? [])
-      setTodayPatientsToContact((appointments ?? []).filter((a) => typeof a.distanceKm === 'number' && a.distanceKm <= 0.5))
+      const filtered = (appointments ?? []).filter((a) => !checkedInPatientIdsRef.current.has(a.patientId))
+      setTodayAppointments(filtered)
+      setTodayPatientsToContact(filtered.filter((a) => typeof a.distanceKm === 'number' && a.distanceKm <= 0.5))
     } catch {
       setTodayPatientsToContact([])
       setTodayAppointments([])
@@ -209,12 +211,21 @@ export const AssistantDashboard = () => {
     setUpcomingPatientsLoading(true)
     try {
       const { appointments } = await appointmentService.getAssistantDoctorUpcomingAppointments()
-      setUpcomingAppointments(appointments ?? [])
+      setUpcomingAppointments((appointments ?? []).filter((a) => !checkedInPatientIdsRef.current.has(a.patientId)))
     } catch {
       setUpcomingAppointments([])
     } finally {
       setUpcomingPatientsLoading(false)
     }
+  }
+
+  const hideCheckedInPatientFromLists = (id?: string | null) => {
+    const patientIdToHide = id?.trim()
+    if (!patientIdToHide) return
+    checkedInPatientIdsRef.current.add(patientIdToHide)
+    setTodayAppointments((prev) => prev.filter((a) => a.patientId !== patientIdToHide))
+    setTodayPatientsToContact((prev) => prev.filter((a) => a.patientId !== patientIdToHide))
+    setUpcomingAppointments((prev) => prev.filter((a) => a.patientId !== patientIdToHide))
   }
 
   const loadCheckinFromPrefill = async (prefill: AssistantPatientPrefill, backendMobile: string) => {
@@ -235,6 +246,7 @@ export const AssistantDashboard = () => {
     setEmergencyName(found.emergencyContactName ?? '')
     setEmergencyPhone(found.emergencyContactPhone ?? '')
     setStep('checkin')
+    hideCheckedInPatientFromLists(found.id)
 
     const latestVisit = prefill.latestVisit ?? null
     if (latestVisit) {
@@ -337,6 +349,7 @@ export const AssistantDashboard = () => {
     }
     setSearchError(null)
     setSearchLoading(true)
+    hideCheckedInPatientFromLists(a.patientId)
     const digits = String(a.patientMobile).replace(/\D/g, '')
     const backendMobile = normalizeMobileForBackend(digits.slice(-10))
     try {
