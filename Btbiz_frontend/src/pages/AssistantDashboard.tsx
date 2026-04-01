@@ -12,6 +12,7 @@ import {
   appointmentService,
   type PatientSummary,
   type DoctorAppointmentItem,
+  type AssistantCheckedInItem,
   type AssistantFamilyOption,
   type AssistantPatientPrefill,
 } from '../services/api'
@@ -39,6 +40,7 @@ export const AssistantDashboard = () => {
   const [patientId, setPatientId] = useState<string | null>(null)
   const [hasTodayVisit, setHasTodayVisit] = useState(false)
   const [todayVisitId, setTodayVisitId] = useState<string | null>(null)
+  const [prefilledFromVisitAt, setPrefilledFromVisitAt] = useState<string | null>(null)
 
   // Form state for new patient / edit
   const [firstName, setFirstName] = useState('')
@@ -74,9 +76,11 @@ export const AssistantDashboard = () => {
   const [unavailableUntilCustom, setUnavailableUntilCustom] = useState('')
   const [todayAppointments, setTodayAppointments] = useState<DoctorAppointmentItem[]>([])
   const [upcomingAppointments, setUpcomingAppointments] = useState<DoctorAppointmentItem[]>([])
+  const [checkedInToday, setCheckedInToday] = useState<AssistantCheckedInItem[]>([])
   const [todayPatientsToContact, setTodayPatientsToContact] = useState<DoctorAppointmentItem[]>([])
   const [todayPatientsLoading, setTodayPatientsLoading] = useState(false)
   const [upcomingPatientsLoading, setUpcomingPatientsLoading] = useState(false)
+  const [checkedInLoading, setCheckedInLoading] = useState(false)
   const checkedInPatientIdsRef = useRef<Set<string>>(new Set())
 
   // File upload for reports / prescriptions
@@ -219,6 +223,21 @@ export const AssistantDashboard = () => {
     }
   }
 
+  const loadCheckedInAudit = async () => {
+    setCheckedInLoading(true)
+    try {
+      const { checkedIn } = await appointmentService.getAssistantCheckedInToday()
+      setCheckedInToday(checkedIn ?? [])
+      for (const item of checkedIn ?? []) {
+        if (item.patientId) checkedInPatientIdsRef.current.add(item.patientId)
+      }
+    } catch {
+      setCheckedInToday([])
+    } finally {
+      setCheckedInLoading(false)
+    }
+  }
+
   const hideCheckedInPatientFromLists = (id?: string | null) => {
     const patientIdToHide = id?.trim()
     if (!patientIdToHide) return
@@ -256,39 +275,36 @@ export const AssistantDashboard = () => {
         d.getFullYear() === today.getFullYear() &&
         d.getMonth() === today.getMonth() &&
         d.getDate() === today.getDate()
-      if (isToday) {
-        setHasTodayVisit(true)
-        setTodayVisitId(latestVisit.id)
 
-        try {
-          const history = await patientService.getFullHistory(found.id)
-          const todaysVisit = (history.visits as any[] | undefined)?.find((v) => v._id === latestVisit.id)
-          if (todaysVisit) {
-            setDiseaseReason(todaysVisit.reason ?? '')
-            setNotesForDoctor(todaysVisit.notes ?? '')
-            setBpSystolic(
-              typeof todaysVisit.bloodPressureSystolic === 'number' ? String(todaysVisit.bloodPressureSystolic) : ''
-            )
-            setBpDiastolic(
-              typeof todaysVisit.bloodPressureDiastolic === 'number' ? String(todaysVisit.bloodPressureDiastolic) : ''
-            )
-            setBloodSugar(
-              typeof todaysVisit.bloodSugarFasting === 'number' ? String(todaysVisit.bloodSugarFasting) : ''
-            )
-            setWeightKg(typeof todaysVisit.weightKg === 'number' ? String(todaysVisit.weightKg) : '')
-            setTemperature(typeof todaysVisit.temperature === 'number' ? String(todaysVisit.temperature) : '')
-            setOtherVitalsNotes(todaysVisit.otherVitalsNotes ?? '')
-          } else {
-            setDiseaseReason('')
-            setNotesForDoctor('')
-            setBpSystolic('')
-            setBpDiastolic('')
-            setBloodSugar('')
-            setWeightKg('')
-            setTemperature('')
-            setOtherVitalsNotes('')
-          }
-        } catch {
+      setHasTodayVisit(isToday)
+      setTodayVisitId(isToday ? latestVisit.id : null)
+
+      // Always prefill from latest known visit values (even if not today's visit).
+      try {
+        const history = await patientService.getFullHistory(found.id)
+        const latestKnownVisit =
+          (history.visits as any[] | undefined)?.find((v) => v._id === latestVisit.id) ??
+          (history.visits as any[] | undefined)?.[0]
+        if (latestKnownVisit) {
+          setPrefilledFromVisitAt(
+            latestKnownVisit.visitDate ? new Date(latestKnownVisit.visitDate).toISOString() : null
+          )
+          setDiseaseReason(latestKnownVisit.reason ?? '')
+          setNotesForDoctor(latestKnownVisit.notes ?? '')
+          setBpSystolic(
+            typeof latestKnownVisit.bloodPressureSystolic === 'number' ? String(latestKnownVisit.bloodPressureSystolic) : ''
+          )
+          setBpDiastolic(
+            typeof latestKnownVisit.bloodPressureDiastolic === 'number' ? String(latestKnownVisit.bloodPressureDiastolic) : ''
+          )
+          setBloodSugar(
+            typeof latestKnownVisit.bloodSugarFasting === 'number' ? String(latestKnownVisit.bloodSugarFasting) : ''
+          )
+          setWeightKg(typeof latestKnownVisit.weightKg === 'number' ? String(latestKnownVisit.weightKg) : '')
+          setTemperature(typeof latestKnownVisit.temperature === 'number' ? String(latestKnownVisit.temperature) : '')
+          setOtherVitalsNotes(latestKnownVisit.otherVitalsNotes ?? '')
+        } else {
+          setPrefilledFromVisitAt(null)
           setDiseaseReason('')
           setNotesForDoctor('')
           setBpSystolic('')
@@ -298,9 +314,8 @@ export const AssistantDashboard = () => {
           setTemperature('')
           setOtherVitalsNotes('')
         }
-      } else {
-        setHasTodayVisit(false)
-        setTodayVisitId(null)
+      } catch {
+        setPrefilledFromVisitAt(null)
         setDiseaseReason('')
         setNotesForDoctor('')
         setBpSystolic('')
@@ -313,6 +328,7 @@ export const AssistantDashboard = () => {
     } else {
       setHasTodayVisit(false)
       setTodayVisitId(null)
+      setPrefilledFromVisitAt(null)
       setDiseaseReason('')
       setNotesForDoctor('')
       setBpSystolic('')
@@ -353,13 +369,14 @@ export const AssistantDashboard = () => {
     const digits = String(a.patientMobile).replace(/\D/g, '')
     const backendMobile = normalizeMobileForBackend(digits.slice(-10))
     try {
-      const prefill = await appointmentService.getAssistantPatientPrefill(backendMobile, a.patientId)
+      const prefill = await appointmentService.getAssistantPatientPrefill(backendMobile, a.patientId, a.id)
       if (!prefill.patient) {
         setSearchError('Could not load this patient.')
         return
       }
       await loadCheckinFromPrefill(prefill, backendMobile)
       setMobileSearch(digits.slice(-10))
+      void loadCheckedInAudit()
     } catch {
       setSearchError('Could not open check-in for this appointment.')
     } finally {
@@ -405,6 +422,7 @@ export const AssistantDashboard = () => {
 
       if (prefill?.patient) {
         await loadCheckinFromPrefill(prefill, backendMobile)
+        void loadCheckedInAudit()
       } else {
         setMobileNumber(backendMobile)
         setFirstName('')
@@ -424,6 +442,7 @@ export const AssistantDashboard = () => {
         setNotesForDoctor('')
         setPatient(null)
         setPatientId(null)
+        setPrefilledFromVisitAt(null)
         setStep('new_patient')
       }
     } catch {
@@ -461,6 +480,7 @@ export const AssistantDashboard = () => {
       })
       setPatient(created)
       setPatientId(created.id)
+      setPrefilledFromVisitAt(null)
       setFormSuccess('Patient registered. Now fill mandatory vitals and refer to doctor.')
       setStep('checkin')
     } catch (err: any) {
@@ -532,6 +552,7 @@ export const AssistantDashboard = () => {
       setPatient(null)
       setPatientId(null)
       setTodayVisitId(null)
+      setPrefilledFromVisitAt(null)
       setMobileSearch('')
     } catch (err: unknown) {
       const parsed = parseAssistantReferralError(err)
@@ -576,6 +597,7 @@ export const AssistantDashboard = () => {
     setPatientId(null)
     setHasTodayVisit(false)
     setTodayVisitId(null)
+    setPrefilledFromVisitAt(null)
     setMobileSearch('')
     setFamilyOptions(null)
     setFamilyPickMobile(null)
@@ -592,9 +614,11 @@ export const AssistantDashboard = () => {
 
   // Load today's + upcoming appointments for assistant view.
   useEffect(() => {
+    void loadCheckedInAudit()
     void loadTodayPatientsForDoctor()
     void loadUpcomingPatientsForDoctor()
     const timer = window.setInterval(() => {
+      void loadCheckedInAudit()
       void loadTodayPatientsForDoctor()
       void loadUpcomingPatientsForDoctor()
     }, 30_000)
@@ -956,6 +980,60 @@ export const AssistantDashboard = () => {
 
         <div style={{ marginBottom: 0 }}>
           <Card className="dashboard-overview-card assistant-availability-card">
+            <p className="dashboard-kicker">Today checked-in patients (audit)</p>
+            {checkedInLoading ? (
+              <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
+            ) : checkedInToday.length === 0 ? (
+              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No checked-in patients yet today.</p>
+            ) : (
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  maxHeight: checkedInToday.length > 5 ? 320 : undefined,
+                  overflowY: checkedInToday.length > 5 ? 'auto' : undefined,
+                }}
+              >
+                {checkedInToday.map((a) => (
+                  <li
+                    key={`checked-${a.id}`}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      backgroundColor: '#f5f9fc',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      fontSize: 13
+                    }}
+                  >
+                    <div>
+                      <strong>{a.patientName}</strong>
+                      <div style={{ color: '#607d8b', fontSize: 12 }}>
+                        Checked-in at {new Date(a.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
+                    </div>
+                    {a.patientMobile && (
+                      <a href={`tel:${a.patientMobile}`} style={{ color: '#0d47a1', fontWeight: 500, textDecoration: 'none' }}>
+                        {a.patientMobile}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        <div style={{ marginBottom: 0 }}>
+          <Card className="dashboard-overview-card assistant-availability-card">
             <p className="dashboard-kicker">Upcoming appointments (assistant view)</p>
             {upcomingPatientsLoading ? (
               <p className="dashboard-body" style={{ fontSize: 13 }}>Loading…</p>
@@ -1140,6 +1218,20 @@ export const AssistantDashboard = () => {
               {referredToDoctorName && (
                 <p className="search-subtitle">
                   Patient will be referred to <strong>{referredToDoctorName}</strong>.
+                </p>
+              )}
+              {prefilledFromVisitAt && (
+                <p
+                  className="search-subtitle"
+                  style={{ marginTop: 6, color: '#0d47a1', fontSize: 12 }}
+                >
+                  Prefilled from last visit:{' '}
+                  <strong>
+                    {new Date(prefilledFromVisitAt).toLocaleString('en-IN', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}
+                  </strong>
                 </p>
               )}
             </header>

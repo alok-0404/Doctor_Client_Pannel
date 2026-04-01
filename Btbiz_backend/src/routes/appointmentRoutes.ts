@@ -89,7 +89,8 @@ router.get("/doctor/today", async (req, res) => {
 
     const visits = await Visit.find({
       doctor: new mongoose.Types.ObjectId(doctorId),
-      visitDate: { $gte: startOfDay, $lte: endOfDay }
+      visitDate: { $gte: startOfDay, $lte: endOfDay },
+      assistantCheckedInAt: { $exists: false }
     })
       .sort({ visitDate: 1 })
       .populate("patient", "firstName lastName mobileNumber")
@@ -128,7 +129,8 @@ router.get("/doctor/upcoming", async (req, res) => {
 
     const visits = await Visit.find({
       doctor: new mongoose.Types.ObjectId(doctorId),
-      visitDate: { $gte: startOfTomorrow }
+      visitDate: { $gte: startOfTomorrow },
+      assistantCheckedInAt: { $exists: false }
     })
       .sort({ visitDate: 1 })
       .limit(100)
@@ -235,6 +237,57 @@ router.get("/assistant/doctor-upcoming", async (req, res) => {
   }
 });
 
+// GET /appointments/assistant/checked-in-today - assistant audit list for today's check-ins
+router.get("/assistant/checked-in-today", async (req, res) => {
+  try {
+    if (req.doctor?.role !== "ASSISTANT") {
+      res.status(403).json({ message: "Only assistants can use this endpoint" });
+      return;
+    }
+
+    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+    const doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
+    if (!doctorId) {
+      res.status(400).json({ message: "Assistant is not linked to a doctor" });
+      return;
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const visits = await Visit.find({
+      doctor: new mongoose.Types.ObjectId(doctorId),
+      visitDate: { $gte: startOfDay, $lte: endOfDay },
+      assistantCheckedInAt: { $exists: true }
+    })
+      .sort({ assistantCheckedInAt: -1 })
+      .limit(100)
+      .populate("patient", "firstName lastName mobileNumber")
+      .lean();
+
+    res.status(200).json({
+      doctorId,
+      checkedIn: visits.map((v: any) => ({
+        id: (v._id as mongoose.Types.ObjectId).toString(),
+        patientId: v.patient?._id ? v.patient._id.toString() : (v.patient as mongoose.Types.ObjectId).toString(),
+        patientName: v.patient?.firstName
+          ? [v.patient.firstName, v.patient.lastName || ""].join(" ").trim()
+          : "Patient",
+        patientMobile: v.patient?.mobileNumber ?? undefined,
+        visitDate: v.visitDate,
+        checkedInAt: v.assistantCheckedInAt,
+        reason: v.reason,
+        notes: v.notes
+      }))
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("appointments/assistant/checked-in-today error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // GET /appointments/assistant/patient-prefill?mobile=...&patientId=... (optional)
 // For assistant check-in desk: fetch patient basic info + latest visit for that doctor's clinic.
 // When several family members share one mobile, omit patientId to receive familyOptions; repeat with patientId to load that profile.
@@ -261,6 +314,7 @@ router.get("/assistant/patient-prefill", async (req, res) => {
 
     const mobile = (req.query.mobile as string | undefined)?.trim();
     const selectedPatientId = (req.query.patientId as string | undefined)?.trim();
+    const visitId = (req.query.visitId as string | undefined)?.trim();
     if (!mobile) {
       res.status(400).json({ message: "Query parameter 'mobile' is required" });
       return;
@@ -307,13 +361,41 @@ router.get("/assistant/patient-prefill", async (req, res) => {
       return;
     }
 
-    // Latest visit for this patient with this doctor (any date)
-    const latestVisit = await Visit.findOne({
-      patient: patient._id,
-      doctor: new mongoose.Types.ObjectId(doctorId)
-    })
-      .sort({ visitDate: -1 })
-      .lean();
+    // Latest visit for this patient with this doctor (any date),
+    // or a specific visit when selected from appointment card.
+    let latestVisit: any = null;
+    if (visitId) {
+      if (!mongoose.isValidObjectId(visitId)) {
+        res.status(400).json({ message: "Invalid visitId" });
+        return;
+      }
+      latestVisit = await Visit.findOne({
+        _id: new mongoose.Types.ObjectId(visitId),
+        patient: patient._id,
+        doctor: new mongoose.Types.ObjectId(doctorId)
+      }).lean();
+    } else {
+      latestVisit = await Visit.findOne({
+        patient: patient._id,
+        doctor: new mongoose.Types.ObjectId(doctorId)
+      })
+        .sort({ visitDate: -1 })
+        .lean();
+    }
+
+    if (req.doctor.role === "ASSISTANT" && latestVisit) {
+      const visitDate = new Date(latestVisit.visitDate);
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      if (visitDate >= startOfToday && !latestVisit.assistantCheckedInAt) {
+        const checkedInAt = new Date();
+        await Visit.updateOne(
+          { _id: latestVisit._id },
+          { $set: { assistantCheckedInAt: checkedInAt } }
+        );
+        latestVisit.assistantCheckedInAt = checkedInAt;
+      }
+    }
 
     res.status(200).json({
       patient: {

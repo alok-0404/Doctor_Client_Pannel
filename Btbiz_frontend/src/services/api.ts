@@ -287,6 +287,10 @@ export interface DoctorAppointmentItem {
   distanceKm?: number
 }
 
+export interface AssistantCheckedInItem extends DoctorAppointmentItem {
+  checkedInAt: string
+}
+
 export interface PharmacyOrderRequest {
   id: string
   patientId: string
@@ -388,10 +392,20 @@ export const appointmentService = {
     return data
   },
 
+  /** For assistant audit: today's already checked-in patients. */
+  async getAssistantCheckedInToday(): Promise<{ doctorId: string; checkedIn: AssistantCheckedInItem[] }> {
+    const res = await api.get('/appointments/assistant/checked-in-today')
+    const data = res.data as { doctorId: string; checkedIn: AssistantCheckedInItem[] }
+    return data
+  },
+
   /** For assistant check-in desk: prefill patient + latest visit (works for bot-created appointments too). Pass patientId when multiple family members share the mobile. */
-  async getAssistantPatientPrefill(mobile: string, patientId?: string): Promise<AssistantPatientPrefill> {
+  async getAssistantPatientPrefill(mobile: string, patientId?: string, visitId?: string): Promise<AssistantPatientPrefill> {
+    const params: Record<string, string> = { mobile }
+    if (patientId) params.patientId = patientId
+    if (visitId) params.visitId = visitId
     const res = await api.get('/appointments/assistant/patient-prefill', {
-      params: patientId ? { mobile, patientId } : { mobile },
+      params,
     })
     return res.data as AssistantPatientPrefill
   },

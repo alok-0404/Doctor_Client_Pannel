@@ -8,6 +8,8 @@ export interface IVisit extends Document {
   patient: PatientId;
   doctor: Types.ObjectId;
   recordedBy?: Types.ObjectId; // assistant who did check-in
+  /** Set as soon as assistant opens/starts check-in for this appointment. */
+  assistantCheckedInAt?: Date;
   visitDate: Date;
   reason?: string;
   notes?: string;
@@ -45,6 +47,10 @@ const VisitSchema = new Schema<IVisit>(
     recordedBy: {
       type: Schema.Types.ObjectId,
       ref: "Doctor",
+      index: true
+    },
+    assistantCheckedInAt: {
+      type: Date,
       index: true
     },
     visitDate: {
