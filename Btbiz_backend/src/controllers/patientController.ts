@@ -320,23 +320,25 @@ export const createVisit = async (
       ? [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient"
       : "Patient";
 
-    const notification = await DoctorNotification.create({
-      doctor: visit.doctor,
-      patient: visit.patient,
-      patientName,
-      visit: visit._id,
-      status: "unread",
-      source: "ASSISTANT_REFERRAL"
-    });
-
-    const io = getIo();
-    if (io) {
-      io.to(`doctor:${doctorId}`).emit("patientReferred", {
-        notificationId: notification._id.toString(),
-        patientId: visit.patient.toString(),
+    if (req.doctor?.role === "ASSISTANT") {
+      const notification = await DoctorNotification.create({
+        doctor: visit.doctor,
+        patient: visit.patient,
         patientName,
-        visitId: visit._id.toString()
+        visit: visit._id,
+        status: "unread",
+        source: "ASSISTANT_REFERRAL"
       });
+
+      const io = getIo();
+      if (io) {
+        io.to(`doctor:${doctorId}`).emit("patientReferred", {
+          notificationId: notification._id.toString(),
+          patientId: visit.patient.toString(),
+          patientName,
+          visitId: visit._id.toString()
+        });
+      }
     }
 
     res.status(201).json({

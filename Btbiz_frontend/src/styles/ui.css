@@ -28,6 +28,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   padding: 14px 32px;
   background-color: #ffffff;
   border-bottom: 1px solid var(--med-border);
@@ -152,11 +153,14 @@ body {
 .dashboard-main {
   flex: 1 1 auto;
   display: flex;
+  flex-direction: column;
   gap: 24px;
+  width: 100%;
   max-width: 1120px;
   margin: 0 auto;
   padding: 24px 24px 32px;
   align-items: flex-start;
+  box-sizing: border-box;
 }
 
 .dashboard-left {
@@ -195,7 +199,7 @@ body {
 
 .dashboard-stat-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 14px;
 }
 
@@ -220,7 +224,10 @@ body {
 
 /* Right column: patient search (gradient) + daily caps card stacked */
 .dashboard-sidebar {
-  display: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
 }
 
 .dashboard-daily-caps-card {
@@ -289,7 +296,16 @@ body {
 }
 
 .dashboard-search-panel {
-  display: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  padding: 20px 18px 16px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #e3f2fd, #f6fbff 60%, #ffffff);
+  box-shadow: 0 18px 45px rgba(15, 35, 52, 0.08);
+  border: 1px solid rgba(215, 226, 237, 0.9);
+  box-sizing: border-box;
 }
 
 .dashboard-search-panel .dashboard-kicker {
@@ -315,25 +331,21 @@ body {
 }
 
 @media (min-width: 992px) {
+  .dashboard-main {
+    flex-direction: row;
+  }
+
+  .dashboard-stat-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .dashboard-sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
     width: 280px;
     flex: 0 0 auto;
   }
 
   .dashboard-search-panel {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
     width: 100%;
-    flex: 0 0 auto;
-    padding: 20px 18px 16px;
-    border-radius: 24px;
-    background: linear-gradient(180deg, #e3f2fd, #f6fbff 60%, #ffffff);
-    box-shadow: 0 18px 45px rgba(15, 35, 52, 0.08);
-    border: 1px solid rgba(215, 226, 237, 0.9);
   }
 }
 
@@ -771,10 +783,15 @@ body {
   .patient-layout {
     flex-direction: row;
   }
+
+  .patient-summary-card {
+    flex: 0 0 280px;
+    width: auto;
+  }
 }
 
 .patient-summary-card {
-  flex: 0 0 280px;
+  width: 100%;
   align-self: flex-start;
   background-color: #ffffff;
   border-radius: 24px;
@@ -989,6 +1006,43 @@ body {
   background-color: #ffebee;
   color: #b71c1c;
   border: 1px solid #ffcdd2;
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .app-header-left {
+    padding-left: 0;
+  }
+
+  .app-header-right {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .dashboard-main {
+    padding: 16px 12px 24px;
+    gap: 16px;
+  }
+
+  .dashboard-overview-card,
+  .dashboard-stat-card,
+  .dashboard-daily-caps-card,
+  .assistant-workspace-card,
+  .search-card,
+  .patient-section-card,
+  .patient-summary-card {
+    border-radius: 16px;
+  }
+
+  .dashboard-heading {
+    font-size: 20px;
+  }
 }
 
 @media print {

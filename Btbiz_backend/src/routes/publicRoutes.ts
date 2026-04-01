@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 
 import { Doctor } from "../models/Doctor";
-import { DoctorNotification } from "../models/DoctorNotification";
 import { Patient } from "../models/Patient";
 import { Visit } from "../models/Visit";
 import {
@@ -14,7 +13,6 @@ import {
 } from "../services/patientService";
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
-import { getIo } from "../socket";
 import { env } from "../config/env";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
@@ -956,27 +954,7 @@ router.post("/appointments/family", async (req, res) => {
       appointmentChannel: "ONLINE_BOOKING"
     });
 
-    // Notify doctor similarly to online appointment flow (optional, matches existing pattern if you already do it elsewhere).
-    try {
-      const notification = await DoctorNotification.create({
-        doctor: new mongoose.Types.ObjectId(body.consultantId),
-        patient: (patient as any)._id,
-        patientName: `${patient.firstName} ${patient.lastName ?? ""}`.trim(),
-        visit: (visit as any)._id,
-        source: "ONLINE_APPOINTMENT"
-      });
-      const io = getIo();
-      if (io) {
-        io.to(`doctor:${body.consultantId}`).emit("patientReferred", {
-          notificationId: (notification as any)._id.toString(),
-          patientId: (patient as any)._id.toString(),
-          patientName: `${patient.firstName} ${patient.lastName ?? ""}`.trim(),
-          visitId: (visit as any)._id.toString()
-        });
-      }
-    } catch {
-      // ignore notification errors
-    }
+    // Doctor is notified only when assistant refers (vitals/refer flow), not on online booking.
 
     res.status(201).json({
       appointmentId: (visit as any)._id.toString(),

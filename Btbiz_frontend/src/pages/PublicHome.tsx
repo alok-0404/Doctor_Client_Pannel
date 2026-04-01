@@ -270,6 +270,49 @@ export const PublicHome = () => {
           margin: 0;
           color: #64748b;
         }
+        @media (max-width: 640px) {
+          .public-header-inner {
+            padding: 12px 14px;
+            justify-content: center;
+          }
+          .public-logo {
+            width: 100%;
+            text-align: center;
+          }
+          .public-header-right {
+            justify-content: center;
+          }
+          .public-nav {
+            justify-content: center;
+          }
+          .public-main {
+            padding: 24px 12px 40px;
+          }
+          .public-hero {
+            padding: 34px 14px 38px;
+            margin-bottom: 28px;
+            text-align: center;
+          }
+          .public-hero-title {
+            font-size: clamp(1.7rem, 7vw, 2rem);
+            line-height: 1.2;
+            margin-bottom: 10px;
+            text-wrap: balance;
+          }
+          .public-hero-lead {
+            font-size: 1rem;
+            line-height: 1.55;
+          }
+          .public-section {
+            margin-bottom: 26px;
+            padding: 18px 0;
+            text-align: center;
+          }
+          .public-list {
+            padding-left: 0;
+            list-style-position: inside;
+          }
+        }
       `}</style>
     </div>
   )
