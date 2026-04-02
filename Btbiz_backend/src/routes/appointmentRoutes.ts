@@ -37,7 +37,9 @@ function mapVisitToAppointment(
   clinicLng?: number | null
 ): Record<string, unknown> {
   const patient = v.patient;
-  const patientId = patient?._id ? patient._id.toString() : (v.patient as mongoose.Types.ObjectId).toString();
+  // populate("patient") can return null if the patient ref is broken; avoid crashing the whole endpoint
+  const patientId =
+    patient?._id ? patient._id.toString() : patient ? (patient as any).toString?.() : "unknown";
   const patientName =
     patient?.firstName != null
       ? [patient.firstName, patient.lastName || ""].join(" ").trim()
@@ -270,7 +272,8 @@ router.get("/assistant/checked-in-today", async (req, res) => {
       doctorId,
       checkedIn: visits.map((v: any) => ({
         id: (v._id as mongoose.Types.ObjectId).toString(),
-        patientId: v.patient?._id ? v.patient._id.toString() : (v.patient as mongoose.Types.ObjectId).toString(),
+        // populate("patient") can return null; avoid crashing with toString on null/undefined
+        patientId: v.patient?._id ? v.patient._id.toString() : v.patient ? (v.patient as any).toString?.() : "unknown",
         patientName: v.patient?.firstName
           ? [v.patient.firstName, v.patient.lastName || ""].join(" ").trim()
           : "Patient",

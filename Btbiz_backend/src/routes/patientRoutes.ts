@@ -1,4 +1,6 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const multer = require("multer") as any;
 
@@ -21,7 +23,11 @@ import {
 
 const router = Router();
 
-const upload = multer({ dest: "uploads/" });
+const uploadDir = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir });
 
 // All patient routes are JWT protected (doctor or assistant)
 router.use(authenticateDoctor);

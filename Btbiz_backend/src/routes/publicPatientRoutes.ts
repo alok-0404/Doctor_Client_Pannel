@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import path from "path";
+import fs from "fs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -20,7 +21,11 @@ import {
 } from "../services/patientAuthService";
 
 const router = Router();
-const upload = multer({ dest: "uploads/" });
+const uploadDir = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir });
 
 function haversineKm(
   lat1: number,
@@ -230,11 +235,16 @@ router.post(
       });
 
       try {
-        const ocrResult = await ocrService.extractTextFromImage(file.path);
-        if (ocrResult.success && ocrResult.text) {
-          doc.ocrText = ocrResult.text;
-          doc.ocrConfidence = ocrResult.confidence;
-          await doc.save();
+        const fileMimetype: string | undefined = typeof file.mimetype === "string" ? file.mimetype : undefined;
+        const shouldRunOcr = !!fileMimetype && fileMimetype.startsWith("image/");
+
+        if (shouldRunOcr) {
+          const ocrResult = await ocrService.extractTextFromImage(file.path);
+          if (ocrResult.success && ocrResult.text) {
+            doc.ocrText = ocrResult.text;
+            doc.ocrConfidence = ocrResult.confidence;
+            await doc.save();
+          }
         }
       } catch {
         // ignore OCR errors

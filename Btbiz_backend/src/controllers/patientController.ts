@@ -520,6 +520,18 @@ export const uploadPatientDocument = async (
       return;
     }
 
+    const fileMimetype: string | undefined = typeof file.mimetype === "string" ? file.mimetype : undefined;
+    // OCR is only useful for images; PDFs/other docs can cause heavy processing/timeouts.
+    const shouldRunOcr = !!fileMimetype && fileMimetype.startsWith("image/");
+    // eslint-disable-next-line no-console
+    console.log("uploadPatientDocument:", {
+      patientId,
+      originalName: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      shouldRunOcr,
+    });
+
     const patient = await Patient.findById(patientId).select("_id");
     if (!patient) {
       res.status(404).json({ message: "Patient not found" });
@@ -543,21 +555,28 @@ export const uploadPatientDocument = async (
       | undefined;
 
     try {
-      const ocrResult = await ocrService.extractTextFromImage(file.path);
-      if (ocrResult.success && ocrResult.text) {
-        doc.ocrText = ocrResult.text;
-        doc.ocrConfidence = ocrResult.confidence;
-        await doc.save();
-        ocrPayload = {
-          success: true,
-          text: ocrResult.text,
-          confidence: ocrResult.confidence
-        };
-      } else {
+      if (!shouldRunOcr) {
         ocrPayload = {
           success: false,
-          error: ocrResult.error
+          error: "OCR skipped for non-image file",
         };
+      } else {
+        const ocrResult = await ocrService.extractTextFromImage(file.path);
+        if (ocrResult.success && ocrResult.text) {
+          doc.ocrText = ocrResult.text;
+          doc.ocrConfidence = ocrResult.confidence;
+          await doc.save();
+          ocrPayload = {
+            success: true,
+            text: ocrResult.text,
+            confidence: ocrResult.confidence,
+          };
+        } else {
+          ocrPayload = {
+            success: false,
+            error: ocrResult.error,
+          };
+        }
       }
     } catch (ocrError: any) {
       // eslint-disable-next-line no-console
@@ -738,11 +757,37 @@ export const getPrescriptionSecurePreview = async (
     const isPharmacy = role === "PHARMACY";
     const isLab = role === "LAB_ASSISTANT" || role === "LAB_MANAGER";
 
+    // Role-based filtering for the "Raw OCR" section too:
+    // - Lab roles: hide medicine-like lines
+    // - Pharmacy role: hide test-like lines
+    const roleFilteredPreviewText = previewText
+      .split(/\r?\n/)
+      .filter((line: string) => {
+        const lineType = detectLineType(line);
+        if (isLab && lineType === "MEDICINE") return false;
+        if (isPharmacy && lineType === "TEST") return false;
+        return true;
+      })
+      .join("\n")
+      .trim();
+
     const roleFilteredParsed = {
       medicines: isPharmacy ? parsed.medicines : [],
       tests: isLab ? parsed.tests : [],
       unknown: parsed.unknown
     };
+
+    // Role-based filtering for low-confidence lines too.
+    // - Lab roles: hide medicine-like lines; keep tests + patient/doctor details (usually UNKNOWN)
+    // - Pharmacy role: hide test-like lines; keep medicines + patient/doctor details (usually UNKNOWN)
+    const roleFilteredLowConfidenceLines = parsed.lowConfidenceLines
+      .filter((line) => {
+        const lineType = detectLineType(line);
+        if (isLab && lineType === "MEDICINE") return false;
+        if (isPharmacy && lineType === "TEST") return false;
+        return true;
+      })
+      .slice(0, 20);
 
     res.status(200).json({
       document: {
@@ -750,10 +795,11 @@ export const getPrescriptionSecurePreview = async (
         originalName: (doc as any).originalName,
         mimeType: (doc as any).mimeType,
         uploadedAt: (doc as any).createdAt,
-        previewText,
+        // UI uses previewText for both parsed preview and "Raw OCR" display.
+        previewText: roleFilteredPreviewText,
         rawOcrText: previewText,
         parsed: roleFilteredParsed,
-        lowConfidenceLines: parsed.lowConfidenceLines.slice(0, 20),
+        lowConfidenceLines: roleFilteredLowConfidenceLines,
         ocrConfidence: (doc as any).ocrConfidence,
         limitedView: true,
         scope: decoded.scope ?? "OCR_ONLY",
