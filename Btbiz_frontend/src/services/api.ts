@@ -4,6 +4,14 @@ import { patientStorage } from '../utils/patientStorage'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
+if (import.meta.env.PROD && !API_BASE_URL) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[e-Btbiz] VITE_API_BASE_URL is empty. API calls use the same origin as this site. '
+      + 'If your backend is on another host (e.g. Replit), set VITE_API_BASE_URL in build secrets and rebuild the frontend.'
+  )
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
 })

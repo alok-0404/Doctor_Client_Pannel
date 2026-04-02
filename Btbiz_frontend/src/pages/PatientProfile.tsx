@@ -10,6 +10,14 @@ import {
 import { patientStorage } from '../utils/patientStorage'
 import { DnaLoader } from '../components/ui/DnaLoader'
 
+function apiErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { data?: { message?: string } }; message?: string }
+  const msg = e?.response?.data?.message
+  if (typeof msg === 'string' && msg.trim()) return msg.trim()
+  if (typeof e?.message === 'string' && e.message.trim()) return e.message.trim()
+  return fallback
+}
+
 function formatDate(d: string | Date | undefined): string {
   if (!d) return '—'
   const dt = typeof d === 'string' ? new Date(d) : d
@@ -326,9 +334,9 @@ export const PatientProfile = () => {
       setAddTestEtaMinutes('')
       setSelectedLabProviderId('')
       loadProfile()
-    } catch {
+    } catch (err: unknown) {
       // eslint-disable-next-line no-alert
-      alert('Failed to add test.')
+      alert(apiErrorMessage(err, 'Failed to add test.'))
     } finally {
       setAddingTest(false)
     }
