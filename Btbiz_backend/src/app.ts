@@ -63,11 +63,8 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (isOriginAllowed(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      // Do not pass Error to callback — that triggers Express error handler and returns 500.
+      callback(null, isOriginAllowed(origin));
     },
   })
 );

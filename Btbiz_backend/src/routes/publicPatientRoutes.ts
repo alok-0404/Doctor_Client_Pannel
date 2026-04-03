@@ -19,6 +19,7 @@ import {
   verifyPatientOtp,
   selectPatientProfile,
 } from "../services/patientAuthService";
+import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 
 const router = Router();
 const uploadDir = path.resolve(process.cwd(), "uploads");
@@ -26,6 +27,18 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 const upload = multer({ dest: uploadDir });
+
+/** e.g. patient request "CBC" vs visit test "Complete Blood Count (CBC)" */
+function patientTestNamesMatchForPaymentGate(requestName: string, diagnosticName: string): boolean {
+  const a = requestName.toLowerCase().replace(/\s+/g, " ").trim();
+  const b = diagnosticName.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+  const paren = /\(([^)]+)\)/.exec(diagnosticName)?.[1]?.trim().toLowerCase();
+  if (paren && (a === paren || a.includes(paren) || paren.includes(a))) return true;
+  return false;
+}
 
 function haversineKm(
   lat1: number,
@@ -279,7 +292,7 @@ router.post(
         notes,
         serviceType,
         paymentMode,
-        expectedFulfillmentMinutes,
+        expectedFulfillmentMinutes: rawEta,
         preferredProviderId,
       } = req.body as {
         medicineName?: string;
@@ -288,9 +301,16 @@ router.post(
         notes?: string;
         serviceType?: "PICKUP" | "HOME_DELIVERY";
         paymentMode?: "ONLINE" | "OFFLINE";
-        expectedFulfillmentMinutes?: number;
+        expectedFulfillmentMinutes?: number | string;
         preferredProviderId?: string;
       };
+      let expectedFulfillmentMinutes: number | undefined;
+      if (typeof rawEta === "number" && !Number.isNaN(rawEta)) {
+        expectedFulfillmentMinutes = rawEta;
+      } else if (typeof rawEta === "string" && rawEta.trim()) {
+        const n = parseInt(rawEta.trim(), 10);
+        if (!Number.isNaN(n)) expectedFulfillmentMinutes = n;
+      }
       if (!medicineName || typeof medicineName !== "string" || !medicineName.trim()) {
         res.status(400).json({ message: "medicineName is required" });
         return;
@@ -315,9 +335,8 @@ router.post(
         preferredProvider = new mongoose.Types.ObjectId(preferredProviderId);
       }
 
-      const entry = await PatientMedicineRequest.create({
+      const createPayload: Record<string, unknown> = {
         patient: patientId,
-        preferredProvider,
         medicineName: medicineName.trim(),
         dosage: dosage?.trim?.() || undefined,
         quantity: typeof quantity === "number" ? quantity : undefined,
@@ -330,7 +349,11 @@ router.post(
           typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
             ? Math.round(expectedFulfillmentMinutes)
             : undefined,
-      });
+      };
+      if (preferredProvider) {
+        createPayload.preferredProvider = preferredProvider;
+      }
+      const entry = await PatientMedicineRequest.create(createPayload);
 
       res.status(201).json({
         medicine: {
@@ -348,9 +371,18 @@ router.post(
           createdAt: entry.createdAt,
         },
       });
-    } catch (error) {
+    } catch (error: unknown) {
       // eslint-disable-next-line no-console
       console.error("patient add medicine error:", error);
+      const err = error as { name?: string; errors?: Record<string, { message?: string }> };
+      if (err?.name === "ValidationError" && err.errors) {
+        const msg = Object.values(err.errors)
+          .map((e) => e.message)
+          .filter(Boolean)
+          .join(" ");
+        res.status(400).json({ message: msg || "Invalid medicine request" });
+        return;
+      }
       res.status(500).json({ message: "Internal server error" });
     }
   }
@@ -461,7 +493,11 @@ router.get(
         return;
       }
 
-      const fullPath = path.resolve(process.cwd(), (doc as any).path);
+      const fullPath = resolveUploadFilePath((doc as any).path);
+      if (!uploadFileExists(fullPath)) {
+        res.status(404).json({ message: "File not found on server" });
+        return;
+      }
       res.setHeader("Content-Type", (doc as any).mimeType);
       res.setHeader(
         "Content-Disposition",
@@ -530,12 +566,12 @@ router.get(
       }
       const paidRequests = await PatientTestRequest.find({
         patient: patientId,
-        testName,
         paymentStatus: "PAID",
       })
         .lean();
 
       const canAccess = paidRequests.some((r: any) => {
+        if (!patientTestNamesMatchForPaymentGate(String(r.testName ?? ""), testName)) return false;
         const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
         const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
         return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
@@ -545,7 +581,11 @@ router.get(
         return;
       }
 
-      const fullPath = path.resolve(process.cwd(), (test as any).reportPath);
+      const fullPath = resolveUploadFilePath((test as any).reportPath);
+      if (!uploadFileExists(fullPath)) {
+        res.status(404).json({ message: "Report file not found on the server" });
+        return;
+      }
       res.setHeader("Content-Type", (test as any).reportMimeType || "application/pdf");
       res.setHeader(
         "Content-Disposition",
@@ -600,12 +640,12 @@ router.get(
 
       const paidRequests = await PatientTestRequest.find({
         patient: patientId,
-        testName,
         paymentStatus: "PAID",
       })
         .lean();
 
       const canAccess = paidRequests.some((r: any) => {
+        if (!patientTestNamesMatchForPaymentGate(String(r.testName ?? ""), testName)) return false;
         const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
         const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
         return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
@@ -616,7 +656,11 @@ router.get(
         return;
       }
 
-      const fullPath = path.resolve(process.cwd(), (test as any).reportPath);
+      const fullPath = resolveUploadFilePath((test as any).reportPath);
+      if (!uploadFileExists(fullPath)) {
+        res.status(404).json({ message: "Report file not found on the server" });
+        return;
+      }
       res.setHeader("Content-Type", (test as any).reportMimeType || "application/pdf");
       res.setHeader(
         "Content-Disposition",

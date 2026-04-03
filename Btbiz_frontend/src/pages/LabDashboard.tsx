@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
@@ -13,7 +13,28 @@ import {
   type DiagnosticTestItem,
   type LabOrderRequest,
 } from '../services/api'
+
+function patientSummaryFromHistory(p: FullPatientHistory['patient']): PatientSummary {
+  const raw = p as PatientSummary & { _id?: string }
+  return {
+    id: raw.id ?? raw._id?.toString() ?? '',
+    firstName: raw.firstName,
+    lastName: raw.lastName,
+    mobileNumber: raw.mobileNumber,
+    gender: raw.gender,
+    dateOfBirth: raw.dateOfBirth,
+    address: raw.address,
+    bloodGroup: raw.bloodGroup,
+    previousHealthHistory: raw.previousHealthHistory,
+    emergencyContactName: raw.emergencyContactName,
+    emergencyContactPhone: raw.emergencyContactPhone,
+  }
+}
 // import { Button } from '../components/ui/Button'
+
+function normalizeLabTestName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ')
+}
 
 const COMMON_LAB_TESTS = [
   'CBC',
@@ -53,6 +74,7 @@ export const LabDashboard = () => {
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingTestRequests, setIncomingTestRequests] = useState<LabOrderRequest[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const labWorkspaceRef = useRef<HTMLDivElement>(null)
   const [receiptData, setReceiptData] = useState<{
     patient: { name: string; mobile: string }
     visit: { visitDate: string; reason?: string }
@@ -78,6 +100,7 @@ export const LabDashboard = () => {
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setSearchError(null)
+    setPatient(null)
     setHistory(null)
     setMatchedPatients([])
     setSelectedPatientId('')
@@ -131,6 +154,11 @@ export const LabDashboard = () => {
     const price = addTestPrice.trim() ? parseFloat(addTestPrice) : undefined
     if (price !== undefined && (Number.isNaN(price) || price < 0)) {
       setAddTestError('Enter a valid rate (₹).')
+      return
+    }
+    const n = normalizeLabTestName(testName)
+    if (diagnosticTests.some((t) => normalizeLabTestName(t.testName) === n)) {
+      setAddTestError('This test is already added for this visit.')
       return
     }
     setAddTestError(null)
@@ -215,12 +243,116 @@ export const LabDashboard = () => {
     void loadIncomingTestRequests()
   }, [])
 
+  useEffect(() => {
+    if (patient?.id) void loadIncomingTestRequests()
+  }, [patient?.id])
+
+  const prefillAddTestFromOrderRequest = (r: LabOrderRequest) => {
+    const name = r.testName.trim()
+    const exact = COMMON_LAB_TESTS.find((t) => t.toLowerCase() === name.toLowerCase())
+    if (exact) {
+      setAddTestSelect(exact)
+      setAddTestCustom('')
+    } else {
+      setAddTestSelect('Other')
+      setAddTestCustom(name)
+    }
+    setAddTestPrice('')
+    setAddTestError(null)
+  }
+
+  const scrollLabWorkspaceIntoView = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        labWorkspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 80)
+    })
+  }
+
+  /** After Accept: load patient + visit + prefill “Add test” from request (like pharmacy). */
+  const openPatientAndPrefillFromTestRequest = async (r: LabOrderRequest) => {
+    setSearchError(null)
+    setShowReceipt(false)
+    setReceiptData(null)
+
+    const digits = r.patientMobile.replace(/\D/g, '').slice(0, 10)
+    setMobileSearch(digits)
+    setSearchLoading(true)
+
+    try {
+      if (r.patientId) {
+        try {
+          const h = await patientService.getFullHistory(r.patientId)
+          const summary = patientSummaryFromHistory(h.patient)
+          setPatient(summary)
+          setSelectedPatientId(summary.id)
+          setHistory(h)
+          setMatchedPatients([summary])
+          if (h.visits?.length) {
+            setSelectedVisitId(h.visits[0]._id)
+          } else {
+            setSelectedVisitId(null)
+          }
+          prefillAddTestFromOrderRequest(r)
+          scrollLabWorkspaceIntoView()
+          return
+        } catch {
+          /* fall through */
+        }
+      }
+
+      if (digits.length < 10) {
+        setSearchError('Patient mobile is missing or invalid on this request.')
+        setPatient(null)
+        setHistory(null)
+        return
+      }
+
+      const options = await patientService.searchByMobileOptions(digits)
+      if (options.length === 0) {
+        setPatient(null)
+        setHistory(null)
+        setSearchError('No patient found for this mobile. Try searching manually.')
+        return
+      }
+
+      setMatchedPatients(options)
+      const match =
+        r.patientId ? options.find((p) => p.id === r.patientId) ?? options[0] : options[0]
+      await loadPatientProfile(match)
+      prefillAddTestFromOrderRequest(r)
+      scrollLabWorkspaceIntoView()
+    } catch {
+      setSearchError('Could not load patient. Try Search by mobile.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const handleAcceptIncomingTestRequest = async (r: LabOrderRequest) => {
+    try {
+      await orderService.updateTestRequest(r.id, { status: 'ACCEPTED' })
+      await openPatientAndPrefillFromTestRequest(r)
+      await loadIncomingTestRequests()
+    } catch {
+      alert('Could not accept request. Please try again.')
+    }
+  }
+
   const handleQuickUpdateTestRequest = async (
-    requestId: string,
+    r: LabOrderRequest,
     patch: Partial<{ status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'; paymentStatus: 'PENDING' | 'PAID' }>
   ) => {
-    await orderService.updateTestRequest(requestId, patch)
+    await orderService.updateTestRequest(r.id, patch)
     await loadIncomingTestRequests()
+    if (patient?.id === r.patientId) {
+      try {
+        const h = await patientService.getFullHistory(patient.id)
+        setHistory(h)
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   const handleViewReport = async (testId: string) => {
@@ -255,7 +387,9 @@ export const LabDashboard = () => {
             {requestsLoading ? (
               <DnaLoader label="Loading requests..." />
             ) : incomingTestRequests.length === 0 ? (
-              <p className="dashboard-body">No test requests yet.</p>
+              <p className="dashboard-body" style={{ marginBottom: 0 }}>
+                No pending patient test requests (or all are already paid).
+              </p>
             ) : (
               <div
                 style={{
@@ -277,13 +411,13 @@ export const LabDashboard = () => {
                       {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
                     </p>
                     <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { status: 'ACCEPTED' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingTestRequest(r)}>
                         Accept
                       </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { status: 'COMPLETED' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })}>
                         Ready
                       </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r.id, { paymentStatus: 'PAID' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })}>
                         Mark paid
                       </Button>
                     </div>
@@ -307,7 +441,7 @@ export const LabDashboard = () => {
                 id="lab-mobile-search"
                 label="Mobile number"
                 value={mobileSearch}
-                onChange={(e) => setMobileSearch(e.target.value)}
+                onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 10))}
                 placeholder="10-digit number"
                 type="tel"
                 maxLength={10}
@@ -327,7 +461,7 @@ export const LabDashboard = () => {
           </Card>
 
           {patient && history && (
-            <>
+            <div ref={labWorkspaceRef}>
               {matchedPatients.length > 1 && (
                 <div style={{ marginTop: 16 }}>
                   <Card className="dashboard-overview-card">
@@ -637,7 +771,7 @@ export const LabDashboard = () => {
                   )}
                 </Card>
               </div>
-            </>
+            </div>
           )}
             </div>
           </div>

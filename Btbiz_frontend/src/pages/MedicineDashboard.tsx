@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
@@ -21,6 +21,23 @@ interface MedicineRow {
   mrp: string
   discount: string
   quantity: string
+}
+
+function patientSummaryFromHistory(p: FullPatientHistory['patient']): PatientSummary {
+  const raw = p as PatientSummary & { _id?: string }
+  return {
+    id: raw.id ?? raw._id?.toString() ?? '',
+    firstName: raw.firstName,
+    lastName: raw.lastName,
+    mobileNumber: raw.mobileNumber,
+    gender: raw.gender,
+    dateOfBirth: raw.dateOfBirth,
+    address: raw.address,
+    bloodGroup: raw.bloodGroup,
+    previousHealthHistory: raw.previousHealthHistory,
+    emergencyContactName: raw.emergencyContactName,
+    emergencyContactPhone: raw.emergencyContactPhone,
+  }
 }
 
 export const MedicineDashboard = () => {
@@ -48,6 +65,7 @@ export const MedicineDashboard = () => {
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingRequests, setIncomingRequests] = useState<PharmacyOrderRequest[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const loadPatientProfile = async (p: PatientSummary) => {
     setPatient(p)
@@ -125,6 +143,8 @@ export const MedicineDashboard = () => {
   const totalDiscount = items.reduce((s, it) => s + (it.discount ?? 0), 0)
   const totalAmount = Math.max(0, subtotal - totalDiscount)
 
+  const currentBillFromHistory = history?.pharmacyDispensations?.find((d) => d.id === currentDispensationId)
+
   const handleCreateDispensation = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!patient?.id || items.length === 0) return
@@ -134,7 +154,11 @@ export const MedicineDashboard = () => {
       const res = await pharmacyService.createDispensation(patient.id, items)
       setCurrentDispensationId(res.id)
       setPaymentAmount(String(res.totalAmount))
+      setReceiptData(null)
+      setShowReceipt(false)
       setRows([{ id: String(Date.now()), medicineName: '', mrp: '', discount: '0', quantity: '1' }])
+      const h = await patientService.getFullHistory(patient.id)
+      setHistory(h)
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string } } }
       setCreateError(ax?.response?.data?.message ?? 'Failed to save. Please try again.')
@@ -145,7 +169,10 @@ export const MedicineDashboard = () => {
 
   const handleMarkPayment = async () => {
     if (!currentDispensationId) return
-    const amount = paymentAmount.trim() ? parseFloat(paymentAmount) : 0
+    let amount = paymentAmount.trim() ? parseFloat(paymentAmount) : NaN
+    if (Number.isNaN(amount) || amount <= 0) {
+      amount = totalAmount
+    }
     if (Number.isNaN(amount) || amount < 0) return
     setPaymentLoading(true)
     try {
@@ -155,6 +182,10 @@ export const MedicineDashboard = () => {
       const receipt = await pharmacyService.getReceipt(currentDispensationId)
       setReceiptData(receipt)
       setShowReceipt(true)
+      if (patient?.id) {
+        const h = await patientService.getFullHistory(patient.id)
+        setHistory(h)
+      }
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string } } }
       alert(ax?.response?.data?.message ?? 'Failed to record payment.')
@@ -196,12 +227,111 @@ export const MedicineDashboard = () => {
     void loadIncomingRequests()
   }, [])
 
+  const prefillRowsFromOrderRequest = (r: PharmacyOrderRequest) => {
+    const baseName = r.medicineName.trim()
+    const withDosage = r.dosage?.trim() ? `${baseName} (${r.dosage.trim()})` : baseName
+    const qty = r.quantity != null && r.quantity > 0 ? String(Math.floor(r.quantity)) : '1'
+    setRows([
+      {
+        id: String(Date.now()),
+        medicineName: withDosage,
+        mrp: '',
+        discount: '0',
+        quantity: qty,
+      },
+    ])
+    setCreateError(null)
+  }
+
+  const scrollPharmacyWorkspaceIntoView = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        pharmacyWorkspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 80)
+    })
+  }
+
+  /** After Accept: same as manual search + autofill requested medicine in the bill table. */
+  const openPatientAndPrefillFromRequest = async (r: PharmacyOrderRequest) => {
+    setSearchError(null)
+    setCurrentDispensationId(null)
+    setPaymentAmount('')
+    setReceiptData(null)
+    setShowReceipt(false)
+
+    const digits = r.patientMobile.replace(/\D/g, '').slice(0, 10)
+    setMobileSearch(digits)
+    setSearchLoading(true)
+
+    try {
+      if (r.patientId) {
+        try {
+          const h = await patientService.getFullHistory(r.patientId)
+          const summary = patientSummaryFromHistory(h.patient)
+          setPatient(summary)
+          setSelectedPatientId(summary.id)
+          setHistory(h)
+          setMatchedPatients([summary])
+          prefillRowsFromOrderRequest(r)
+          scrollPharmacyWorkspaceIntoView()
+          return
+        } catch {
+          /* fall through to mobile search */
+        }
+      }
+
+      if (digits.length < 10) {
+        setSearchError('Patient mobile is missing or invalid on this request.')
+        setPatient(null)
+        setHistory(null)
+        return
+      }
+
+      const options = await patientService.searchByMobileOptions(digits)
+      if (options.length === 0) {
+        setPatient(null)
+        setHistory(null)
+        setSearchError('No patient found for this mobile. Try searching manually.')
+        return
+      }
+
+      setMatchedPatients(options)
+      const match =
+        r.patientId ? options.find((p) => p.id === r.patientId) ?? options[0] : options[0]
+      await loadPatientProfile(match)
+      prefillRowsFromOrderRequest(r)
+      scrollPharmacyWorkspaceIntoView()
+    } catch {
+      setSearchError('Could not load patient. Try Search by mobile.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const handleAcceptIncomingRequest = async (r: PharmacyOrderRequest) => {
+    try {
+      await orderService.updateMedicineRequest(r.id, { status: 'ACCEPTED' })
+      await openPatientAndPrefillFromRequest(r)
+      await loadIncomingRequests()
+    } catch {
+      alert('Could not accept request. Please try again.')
+    }
+  }
+
   const handleQuickUpdateRequest = async (
-    requestId: string,
+    r: PharmacyOrderRequest,
     patch: Partial<{ status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'; paymentStatus: 'PENDING' | 'PAID' }>
   ) => {
-    await orderService.updateMedicineRequest(requestId, patch)
+    await orderService.updateMedicineRequest(r.id, patch)
     await loadIncomingRequests()
+    if (patient?.id === r.patientId) {
+      try {
+        const h = await patientService.getFullHistory(patient.id)
+        setHistory(h)
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   return (
@@ -252,13 +382,13 @@ export const MedicineDashboard = () => {
                       {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
                     </p>
                     <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r.id, { status: 'ACCEPTED' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingRequest(r)}>
                         Accept
                       </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r.id, { status: 'COMPLETED' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r, { status: 'COMPLETED' })}>
                         Ready
                       </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r.id, { paymentStatus: 'PAID' })}>
+                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r, { paymentStatus: 'PAID' })}>
                         Mark paid
                       </Button>
                     </div>
@@ -298,7 +428,7 @@ export const MedicineDashboard = () => {
           </Card>
 
           {patient && history && (
-            <>
+            <div ref={pharmacyWorkspaceRef}>
               {matchedPatients.length > 1 && (
                 <div style={{ marginTop: 16 }}>
                   <Card className="dashboard-overview-card">
@@ -515,6 +645,32 @@ export const MedicineDashboard = () => {
                 <div style={{ marginTop: 16 }}>
                   <Card className="dashboard-overview-card" style={{ padding: 20, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                     <p className="dashboard-kicker">Payment & receipt</p>
+                    {currentDispensationId && (
+                      <p style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>
+                        Status:{' '}
+                        <span
+                          style={{
+                            color:
+                              currentBillFromHistory?.paymentStatus === 'PAID'
+                                ? '#047857'
+                                : currentBillFromHistory?.paymentStatus === 'PARTIAL'
+                                  ? '#b45309'
+                                  : '#64748b',
+                          }}
+                        >
+                          {currentBillFromHistory?.paymentStatus ?? '—'}
+                        </span>
+                        {currentBillFromHistory != null && (
+                          <span style={{ fontWeight: 400, color: '#475569' }}>
+                            {' '}
+                            · Total ₹{Number(currentBillFromHistory.totalAmount ?? 0).toFixed(2)}
+                            {currentBillFromHistory.receiptNumber
+                              ? ` · ${currentBillFromHistory.receiptNumber}`
+                              : ''}
+                          </span>
+                        )}
+                      </p>
+                    )}
                     <p className="dashboard-body" style={{ marginBottom: 12 }}>
                       Record payment and generate receipt for the last saved bill.
                     </p>
@@ -542,7 +698,7 @@ export const MedicineDashboard = () => {
                   </Card>
                 </div>
               )}
-            </>
+            </div>
           )}
             </div>
           </div>

@@ -95,7 +95,12 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       }
     }
 
-    await PatientMedicineRequest.findByIdAndUpdate(requestId, update);
+    if (Object.keys(update).length === 0) {
+      res.status(400).json({ message: "No valid fields to update" });
+      return;
+    }
+
+    await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
     res.status(200).json({ message: "Medicine request updated" });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -196,7 +201,12 @@ router.patch("/test-requests/:requestId", async (req, res) => {
       }
     }
 
-    await PatientTestRequest.findByIdAndUpdate(requestId, update);
+    if (Object.keys(update).length === 0) {
+      res.status(400).json({ message: "No valid fields to update" });
+      return;
+    }
+
+    await PatientTestRequest.findByIdAndUpdate(requestId, { $set: update });
     res.status(200).json({ message: "Test request updated" });
   } catch (error) {
     // eslint-disable-next-line no-console

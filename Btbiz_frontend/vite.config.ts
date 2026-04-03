@@ -9,5 +9,16 @@ export default defineConfig({
     port: 5173,
     allowedHosts: true,
     strictPort: false,
-  }
+    // When VITE_API_BASE_URL is empty in dev, axios hits same origin and these paths forward to the API.
+    proxy: {
+      '/auth': { target: 'http://localhost:4000', changeOrigin: true },
+      '/public': { target: 'http://localhost:4000', changeOrigin: true },
+      '/patients': { target: 'http://localhost:4000', changeOrigin: true },
+      '/appointments': { target: 'http://localhost:4000', changeOrigin: true },
+      '/orders': { target: 'http://localhost:4000', changeOrigin: true },
+      '/pharmacy': { target: 'http://localhost:4000', changeOrigin: true },
+      '/notifications': { target: 'http://localhost:4000', changeOrigin: true },
+      '/super-admin': { target: 'http://localhost:4000', changeOrigin: true },
+    },
+  },
 })

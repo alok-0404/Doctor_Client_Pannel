@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   patientPortalService,
@@ -67,6 +67,19 @@ function escapeHtml(s: unknown): string {
     .replaceAll("'", '&#039;')
 }
 
+/** `window.open('', …, 'noopener')` returns null but can still open a blank tab — `document.write` never runs. Blob URL avoids that. */
+function openHtmlInNewTab(html: string): void {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const w = window.open(url, '_blank')
+  if (!w) {
+    URL.revokeObjectURL(url)
+    alert('Popup blocked. Allow popups for this site to view the receipt.')
+    return
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 function dateOnly(input: string | Date | undefined): string | null {
   if (!input) return null
   const d = typeof input === 'string' ? new Date(input) : input
@@ -79,6 +92,13 @@ function normalizeLabName(s: string): string {
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '') // remove spaces and punctuation
+}
+
+/** Patient request "CBC" vs visit row "Complete Blood Count (CBC)" after normalizeLabName */
+function labNormalizedNamesMatch(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  return a.includes(b) || b.includes(a)
 }
 
 /** Label for provider dropdown: always show km when we can compute it. */
@@ -157,18 +177,56 @@ export const PatientProfile = () => {
   const [labProviders, setLabProviders] = useState<ServiceProviderOption[]>([])
   const [selectedLabProviderId, setSelectedLabProviderId] = useState('')
   const [providerGeoStatus, setProviderGeoStatus] = useState<'loading' | 'ok' | 'none'>('loading')
+  const lastVisibilityRefreshRef = useRef(0)
 
   const loadProfile = useCallback(() => {
+    setError(null)
     setLoading(true)
     patientPortalService
       .getProfile()
       .then(setData)
-      .catch(() => setError('Unable to load profile.'))
+      .catch((err: unknown) => {
+        const e = err as {
+          response?: { status?: number; data?: { message?: string } }
+          code?: string
+          message?: string
+        }
+        if (e?.response?.status === 401) {
+          patientStorage.clear()
+          window.location.replace('/patient-login')
+          return
+        }
+        if (!e?.response && (e?.code === 'ERR_NETWORK' || e?.message === 'Network Error')) {
+          setError(
+            'Server not reachable. Open a terminal in Btbiz_backend and run: npm run start (port 4000), then refresh this page.'
+          )
+          return
+        }
+        const msg = e?.response?.data?.message
+        if (typeof msg === 'string' && msg.trim()) {
+          setError(msg.trim())
+          return
+        }
+        setError('Unable to load profile.')
+      })
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
     loadProfile()
+  }, [loadProfile])
+
+  /** When patient returns to this tab (e.g. after pharmacy marks paid), refresh so PAID + receipt show without manual reload. */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - lastVisibilityRefreshRef.current < 4000) return
+      lastVisibilityRefreshRef.current = now
+      loadProfile()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
   }, [loadProfile])
 
   useEffect(() => {
@@ -246,7 +304,10 @@ export const PatientProfile = () => {
       <div className="patient-profile">
         <div className="patient-profile-error">
           <p>{error ?? 'Profile not found.'}</p>
-          <Link to="/">Back to Home</Link>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12, justifyContent: 'center' }}>
+            <Link to="/patient-login">Sign in again</Link>
+            <Link to="/">Back to Home</Link>
+          </div>
         </div>
         <style>{patientProfileStyles}</style>
       </div>
@@ -306,9 +367,9 @@ export const PatientProfile = () => {
       setAddMedicineEtaMinutes('')
       setSelectedPharmacyProviderId('')
       loadProfile()
-    } catch {
+    } catch (err: unknown) {
       // eslint-disable-next-line no-alert
-      alert('Failed to add medicine.')
+      alert(apiErrorMessage(err, 'Failed to add medicine.'))
     } finally {
       setAddingMedicine(false)
     }
@@ -344,9 +405,6 @@ export const PatientProfile = () => {
 
   const handleViewPharmacyReceipt = (d: PharmacyDispensationSummary) => {
     try {
-      const w = window.open('', '_blank', 'noopener,noreferrer')
-      if (!w) return
-
       const safeReceiptNumber = escapeHtml(d.receiptNumber ?? '—')
       const safePaidAt = escapeHtml(d.paidAt ? formatDateTime(d.paidAt) : '—')
       const safeCreatedAt = escapeHtml(formatDateTime(d.createdAt))
@@ -425,9 +483,7 @@ export const PatientProfile = () => {
         </body>
       </html>`
 
-      w.document.open()
-      w.document.write(body)
-      w.document.close()
+      openHtmlInNewTab(body)
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Failed to open pharmacy receipt:', e)
@@ -450,7 +506,7 @@ export const PatientProfile = () => {
 
     const matchesByDay = labPaidRequests.filter((r) => {
       const rName = normalizeLabName(String(r.testName ?? '').trim())
-      if (!rName || rName !== name) return false
+      if (!rName || !labNormalizedNamesMatch(rName, name)) return false
 
       const paidDay = dateOnly(r.paidAt)
       const createdReqDay = dateOnly(r.createdAt)
@@ -470,7 +526,12 @@ export const PatientProfile = () => {
 
     // Name-only fallback (most reliable across mismatched timestamps).
     return (
-      labPaidRequests.find((r) => normalizeLabName(String(r.testName ?? '').trim()) === name) ?? null
+      labPaidRequests.find((r) =>
+        labNormalizedNamesMatch(
+          normalizeLabName(String(r.testName ?? '').trim()),
+          name
+        )
+      ) ?? null
     )
   }
 
@@ -488,7 +549,7 @@ export const PatientProfile = () => {
 
     const matches = labPaidRequests.filter((r) => {
       const rName = normalizeLabName(String(r.testName ?? '').trim())
-      if (!rName || rName !== name) return false
+      if (!rName || !labNormalizedNamesMatch(rName, name)) return false
 
       const paidDay = dateOnly(r.paidAt)
       const createdReqDay = dateOnly(r.createdAt)
@@ -513,9 +574,6 @@ export const PatientProfile = () => {
     price?: number
     serviceType?: 'LAB_VISIT' | 'HOME_SERVICE'
   }) => {
-    const w = window.open('', '_blank', 'noopener,noreferrer')
-    if (!w) return
-
     const safeReceiptNumber = escapeHtml(payload.receiptNumber ?? '—')
     const safePaidAt = escapeHtml(payload.paidAt ? formatDateTime(payload.paidAt) : '—')
     const safeTestName = escapeHtml(payload.testName)
@@ -551,9 +609,65 @@ export const PatientProfile = () => {
         </body>
       </html>`
 
-    w.document.open()
-    w.document.write(body)
-    w.document.close()
+    openHtmlInNewTab(body)
+  }
+
+  const handleViewMedicineOrderReceipt = (m: {
+    medicineName: string
+    dosage?: string
+    quantity?: number
+    notes?: string
+    receiptNumber?: string
+    paidAt?: string
+    serviceType?: 'PICKUP' | 'HOME_DELIVERY'
+    paymentMode?: 'ONLINE' | 'OFFLINE'
+    preferredProviderName?: string
+  }) => {
+    const safeReceipt = escapeHtml(m.receiptNumber ?? '—')
+    const safePaidAt = escapeHtml(m.paidAt ? formatDateTime(m.paidAt) : '—')
+    const safeName = escapeHtml(m.medicineName)
+    const safeDosage = escapeHtml(m.dosage ?? '')
+    const safeNotes = escapeHtml(m.notes ?? '')
+    const safePatient = escapeHtml(
+      [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Patient'
+    )
+    const safeMobile = escapeHtml(patient.mobileNumber ?? '')
+    const safePharmacy = escapeHtml(m.preferredProviderName ?? 'Pharmacy')
+    const serviceLabel =
+      m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup from medical'
+    const payLabel = formatMedicinePaymentLabel(m.paymentMode, m.serviceType)
+
+    const body = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Medicine order receipt</title>
+          <style>@media print { body, body * { visibility: visible !important; } }</style>
+        </head>
+        <body style="font-family:system-ui;padding:24px;max-width:560px;">
+          <h2 style="margin:0 0 12px;">Medicine order — Receipt</h2>
+          <div style="font-size:13px;color:#334155;line-height:1.65;">
+            <p style="margin:0 0 6px;"><strong>Receipt no.:</strong> ${safeReceipt}</p>
+            <p style="margin:0 0 6px;"><strong>Paid at:</strong> ${safePaidAt}</p>
+            <p style="margin:0 0 6px;"><strong>Patient:</strong> ${safePatient}</p>
+            <p style="margin:0 0 6px;"><strong>Mobile:</strong> ${safeMobile}</p>
+            <p style="margin:0 0 6px;"><strong>Pharmacy:</strong> ${safePharmacy}</p>
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;" />
+            <p style="margin:0 0 6px;"><strong>Medicine:</strong> ${safeName}</p>
+            ${m.dosage ? `<p style="margin:0 0 6px;"><strong>Dosage:</strong> ${safeDosage}</p>` : ''}
+            ${m.quantity != null ? `<p style="margin:0 0 6px;"><strong>Qty:</strong> ${Number(m.quantity)}</p>` : ''}
+            ${m.notes ? `<p style="margin:0 0 6px;"><strong>Notes:</strong> ${safeNotes}</p>` : ''}
+            <p style="margin:8px 0 0;"><strong>Service:</strong> ${escapeHtml(serviceLabel)} · <strong>Payment:</strong> ${escapeHtml(payLabel)}</p>
+          </div>
+          <div style="margin-top:18px;">
+            <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
+              Print / Save as PDF
+            </button>
+          </div>
+        </body>
+      </html>`
+
+    openHtmlInNewTab(body)
   }
 
   const allDiagnosticTests: Array<{
@@ -758,6 +872,10 @@ export const PatientProfile = () => {
           {testRequests.length > 0 && (
             <div className="patient-profile-subsection">
               <h3 className="patient-profile-subtitle">My test requests</h3>
+              <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
+                Orders you send from this app. Below, &quot;Tests on your visits&quot; are tests added on a
+                consultation — they are separate rows (same name can look like a duplicate).
+              </p>
               <ul className="patient-profile-list">
                 {testRequests.map((t) => {
                   const paymentLabel = formatTestPaymentLabel(t.paymentMode, t.serviceType)
@@ -810,21 +928,15 @@ export const PatientProfile = () => {
                           type="button"
                           className="patient-profile-link-btn"
                           style={{ marginTop: 8 }}
-                          onClick={() => {
-                            const w = window.open('', '_blank', 'noopener,noreferrer')
-                            if (!w) return
-                            const body = `
-                              <html><head><title>Lab receipt</title></head><body style="font-family:system-ui;padding:24px;">
-                              <h2 style="margin:0 0 12px;">Lab test — payment receipt</h2>
-                              <p><strong>Test:</strong> ${t.testName}</p>
-                              <p><strong>Receipt no.:</strong> ${t.receiptNumber ?? '—'}</p>
-                              <p><strong>Paid at:</strong> ${t.paidAt ? formatDateTime(t.paidAt) : '—'}</p>
-                              <p><strong>Service:</strong> ${t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}</p>
-                              <script>window.onload=function(){window.print()}</script>
-                              </body></html>`
-                            w.document.write(body)
-                            w.document.close()
-                          }}
+                          onClick={() =>
+                            handleViewLabReceipt({
+                              testName: t.testName,
+                              receiptNumber: t.receiptNumber,
+                              paidAt: t.paidAt,
+                              serviceType: t.serviceType,
+                              price: undefined,
+                            })
+                          }
                         >
                           View / print receipt
                         </button>
@@ -839,7 +951,14 @@ export const PatientProfile = () => {
           {allDiagnosticTests.length === 0 && testRequests.length === 0 ? (
             <p className="patient-profile-empty">No lab tests yet.</p>
           ) : allDiagnosticTests.length > 0 ? (
-            <ul className="patient-profile-list">
+            <>
+              <h3 className="patient-profile-subtitle" style={{ marginTop: testRequests.length > 0 ? 20 : 0 }}>
+                Tests on your visits (from clinic)
+              </h3>
+              <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
+                Linked to your appointment visit — not the same list as &quot;My test requests&quot; above.
+              </p>
+              <ul className="patient-profile-list">
               {allDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => (
                 <li key={test._id} className="patient-profile-card">
                   <div>
@@ -909,6 +1028,7 @@ export const PatientProfile = () => {
                 </li>
               ))}
             </ul>
+            </>
           ) : null}
         </section>
 
@@ -1068,6 +1188,14 @@ export const PatientProfile = () => {
                           )}
                         </p>
                       )}
+                      <button
+                        type="button"
+                        className="patient-profile-link-btn"
+                        style={{ marginTop: 10, display: 'inline-block' }}
+                        onClick={() => handleViewMedicineOrderReceipt(m)}
+                      >
+                        View bill / Receipt
+                      </button>
                     </div>
                   )}
                 </li>

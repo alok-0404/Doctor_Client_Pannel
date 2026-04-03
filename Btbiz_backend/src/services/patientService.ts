@@ -319,11 +319,15 @@ export interface AddDiagnosticTestItem {
   price?: number;
 }
 
+function normalizeDiagnosticTestName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export const addDiagnosticTestsToVisit = async (
   patientId: string,
   visitId: string,
   tests: AddDiagnosticTestItem[]
-): Promise<void> => {
+): Promise<number> => {
   if (!mongoose.Types.ObjectId.isValid(patientId)) {
     throw new Error("INVALID_PATIENT_ID");
   }
@@ -352,12 +356,24 @@ export const addDiagnosticTestsToVisit = async (
     throw new Error("TEST_NAMES_REQUIRED");
   }
 
+  const existing = await DiagnosticTest.find({ visit: visitId }).select("testName").lean();
+  const existingNormalized = new Set(
+    existing.map((e: { testName?: string }) => normalizeDiagnosticTestName(String(e.testName ?? "")))
+  );
+
+  const toInsert = validTests.filter((t) => !existingNormalized.has(normalizeDiagnosticTestName(t.testName)));
+  if (toInsert.length === 0) {
+    throw new Error("ALL_TESTS_ALREADY_ON_VISIT");
+  }
+
   await DiagnosticTest.insertMany(
-    validTests.map(({ testName, price }) => ({
+    toInsert.map(({ testName, price }) => ({
       visit: new mongoose.Types.ObjectId(visitId),
       testName,
       ...(price !== undefined && { price })
     }))
   );
+
+  return toInsert.length;
 };
 

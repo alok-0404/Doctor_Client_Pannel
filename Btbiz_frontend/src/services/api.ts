@@ -694,18 +694,50 @@ export const patientPortalService = {
       })
       .catch(() => {})
   },
-  openDiagnosticReport(visitId: string, testId: string): void {
-    patientApi
-      .get(`/public/patient/visits/${visitId}/diagnostic-tests/${testId}/report/file`, {
-        responseType: 'blob',
-      })
-      .then((res) => {
-        const blob = res.data as Blob
-        const objectUrl = URL.createObjectURL(blob)
-        window.open(objectUrl, '_blank', 'noopener,noreferrer')
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
-      })
-      .catch(() => {})
+  async openDiagnosticReport(visitId: string, testId: string): Promise<void> {
+    try {
+      const res = await patientApi.get(
+        `/public/patient/visits/${visitId}/diagnostic-tests/${testId}/report/file`,
+        { responseType: 'blob' }
+      )
+      const blob = res.data as Blob
+      const ct = (res.headers['content-type'] || '').toString().toLowerCase()
+      if (ct.includes('application/json') || (blob.type && blob.type.includes('json'))) {
+        const text = await blob.text()
+        try {
+          const j = JSON.parse(text) as { message?: string }
+          // eslint-disable-next-line no-alert
+          alert(j.message ?? 'Could not open report.')
+        } catch {
+          // eslint-disable-next-line no-alert
+          alert('Could not open report.')
+        }
+        return
+      }
+      const objectUrl = URL.createObjectURL(blob)
+      window.open(objectUrl, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
+      let msg = 'Could not open report. If payment is pending, complete payment first.'
+      if (e?.response?.status === 404) {
+        msg = 'Report file not found. The lab may need to upload the report again.'
+      } else if (e?.response?.status === 403) {
+        msg = 'Payment must be completed before viewing this report.'
+      } else if (e?.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text()
+          const j = JSON.parse(text) as { message?: string }
+          if (j.message) msg = j.message
+        } catch {
+          /* ignore */
+        }
+      } else if (e?.response?.data && typeof (e.response.data as { message?: string }).message === 'string') {
+        msg = (e.response.data as { message: string }).message
+      }
+      // eslint-disable-next-line no-alert
+      alert(msg)
+    }
   },
 }
 

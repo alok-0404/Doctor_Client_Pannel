@@ -13,6 +13,7 @@ import { getIo } from "../socket";
 // import path from "path";
 import { Visit } from "../models/Visit";
 import { env } from "../config/env";
+import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 import { sendEmailWithAttachment } from "../services/emailService";
 import { sendWhatsAppMessage } from "../services/whatsappService";
 import {
@@ -630,7 +631,11 @@ export const getDocumentFile = async (
       return;
     }
 
-    const fullPath = path.resolve(process.cwd(), doc.path);
+    const fullPath = resolveUploadFilePath(doc.path);
+    if (!uploadFileExists(fullPath)) {
+      res.status(404).json({ message: "File not found on server" });
+      return;
+    }
 
     res.setHeader("Content-Type", doc.mimeType);
     res.setHeader(
@@ -865,11 +870,11 @@ export const addDiagnosticTests = async (
       return;
     }
 
-    await addDiagnosticTestsToVisit(patientId, visitId, tests);
+    const added = await addDiagnosticTestsToVisit(patientId, visitId, tests);
 
     res.status(201).json({
       message: "Diagnostic tests added",
-      added: tests.length
+      added
     });
   } catch (error) {
     if (error instanceof Error) {
@@ -887,6 +892,12 @@ export const addDiagnosticTests = async (
       }
       if (error.message === "TEST_NAMES_REQUIRED") {
         res.status(400).json({ message: "At least one valid test name is required" });
+        return;
+      }
+      if (error.message === "ALL_TESTS_ALREADY_ON_VISIT") {
+        res.status(400).json({
+          message: "This test is already added for this visit. Remove the duplicate or use a different name."
+        });
         return;
       }
     }
@@ -973,7 +984,7 @@ export const uploadDiagnosticTestReport = async (
             }\n\nRegards,\nBTBiz Doctor`,
             attachment: {
               filename: file.originalname,
-              path: path.resolve(process.cwd(), file.path),
+              path: resolveUploadFilePath(file.path),
               contentType: file.mimetype,
             },
           })
@@ -1016,7 +1027,11 @@ export const getDiagnosticTestReportFile = async (
       return;
     }
 
-    const fullPath = path.resolve(process.cwd(), test.reportPath);
+    const fullPath = resolveUploadFilePath(test.reportPath);
+    if (!uploadFileExists(fullPath)) {
+      res.status(404).json({ message: "Report file not found on the server" });
+      return;
+    }
 
     res.setHeader("Content-Type", test.reportMimeType || "application/pdf");
     res.setHeader(

@@ -112,11 +112,33 @@ export const recordPayment = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const paidAmount =
-      typeof body.paidAmount === "number" && body.paidAmount >= 0 ? body.paidAmount : (doc as any).totalAmount;
-    const totalAmount = (doc as any).totalAmount;
-    const paymentStatus =
-      paidAmount <= 0 ? "UNPAID" : paidAmount >= totalAmount ? "PAID" : "PARTIAL";
+    const totalAmount = (doc as any).totalAmount as number;
+    const raw = body.paidAmount;
+    const parsed =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+        ? parseFloat(raw)
+        : NaN;
+    // If UI sends 0, omits amount, or invalid — treat as full bill (typical "Mark as paid").
+    let paidAmount: number;
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      paidAmount = parsed;
+    } else {
+      paidAmount = totalAmount;
+    }
+
+    let paymentStatus: "UNPAID" | "PARTIAL" | "PAID";
+    if (totalAmount <= 0) {
+      paymentStatus = "PAID";
+      paidAmount = 0;
+    } else if (paidAmount >= totalAmount) {
+      paymentStatus = "PAID";
+    } else if (paidAmount <= 0) {
+      paymentStatus = "UNPAID";
+    } else {
+      paymentStatus = "PARTIAL";
+    }
 
     await PharmacyDispensation.findByIdAndUpdate(id, {
       paidAmount,
