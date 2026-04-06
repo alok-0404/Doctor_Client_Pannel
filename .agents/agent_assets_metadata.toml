@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "bs6e3vQ1eMUnjF7sLpwsA"
+uri = "file://conversational_flow.md"
+type = "text"
+title = "MEDIGRAPH - Complete Conversational Flow"
