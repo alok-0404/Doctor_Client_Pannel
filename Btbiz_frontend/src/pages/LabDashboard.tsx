@@ -244,6 +244,13 @@ export const LabDashboard = () => {
   }, [])
 
   useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadIncomingTestRequests()
+    }, 10000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
     if (patient?.id) void loadIncomingTestRequests()
   }, [patient?.id])
 

@@ -13,6 +13,7 @@ import {
 } from "../services/patientService";
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
+import { PatientTestRequest } from "../models/PatientTestRequest";
 import { env } from "../config/env";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
@@ -931,6 +932,98 @@ router.post("/appointments/new", async (req, res) => {
         return;
       }
     }
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /public/patient/tests (bot-compatible)
+// Supports both shapes:
+// - { patientId, tests: [{ testName }], serviceType, scheduledDate, scheduledTime, preferredDateTime }
+// - { patientId, testName, serviceType, preferredDateTime }
+router.post("/patient/tests", async (req, res) => {
+  try {
+    const body = req.body as {
+      patientId?: string;
+      testName?: string;
+      tests?: Array<{ testName?: string; notes?: string }>;
+      notes?: string;
+      serviceType?: "LAB_VISIT" | "HOME_SERVICE" | "HOME_COLLECTION";
+      paymentMode?: "ONLINE" | "OFFLINE";
+      preferredDateTime?: string;
+      scheduledDate?: string;
+      scheduledTime?: string;
+      expectedFulfillmentMinutes?: number;
+      preferredProviderId?: string;
+    };
+
+    if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
+      res.status(400).json({ message: "Valid patientId is required" });
+      return;
+    }
+
+    const patient = await Patient.findById(body.patientId).select("_id").lean();
+    if (!patient) {
+      res.status(404).json({ message: "Patient not found" });
+      return;
+    }
+
+    const namesFromArray = (body.tests ?? [])
+      .map((t) => (t?.testName ?? "").trim())
+      .filter(Boolean);
+    const fallbackSingle = (body.testName ?? "").trim();
+    const testNames = namesFromArray.length ? namesFromArray : (fallbackSingle ? [fallbackSingle] : []);
+
+    if (!testNames.length) {
+      res.status(400).json({ message: "At least one testName is required" });
+      return;
+    }
+
+    let preferredDateTime: Date | undefined;
+    if (body.preferredDateTime) {
+      const parsed = new Date(body.preferredDateTime);
+      if (!Number.isNaN(parsed.getTime())) preferredDateTime = parsed;
+    }
+    if (!preferredDateTime && body.scheduledDate && body.scheduledTime) {
+      const parsed = new Date(`${body.scheduledDate}T${body.scheduledTime}`);
+      if (!Number.isNaN(parsed.getTime())) preferredDateTime = parsed;
+    }
+
+    const serviceType =
+      body.serviceType === "HOME_SERVICE" || body.serviceType === "HOME_COLLECTION"
+        ? "HOME_SERVICE"
+        : "LAB_VISIT";
+    const paymentMode = body.paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE";
+
+    const created = await Promise.all(
+      testNames.map((testName) =>
+        PatientTestRequest.create({
+          patient: patient._id,
+          testName,
+          notes: body.notes?.trim?.() || undefined,
+          source: "patient",
+          serviceType,
+          paymentMode,
+          preferredDateTime,
+          expectedFulfillmentMinutes:
+            typeof body.expectedFulfillmentMinutes === "number" && body.expectedFulfillmentMinutes > 0
+              ? Math.round(body.expectedFulfillmentMinutes)
+              : undefined,
+          preferredProvider:
+            body.preferredProviderId && mongoose.isValidObjectId(body.preferredProviderId)
+              ? new mongoose.Types.ObjectId(body.preferredProviderId)
+              : undefined,
+        })
+      )
+    );
+
+    res.status(201).json({
+      requestId: created[0]?._id?.toString?.() ?? "",
+      requestIds: created.map((r) => r._id.toString()),
+      createdCount: created.length,
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /patient/tests error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
