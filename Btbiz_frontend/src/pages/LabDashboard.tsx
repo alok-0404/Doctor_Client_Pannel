@@ -229,13 +229,18 @@ export const LabDashboard = () => {
     }
   }
 
-  const loadIncomingTestRequests = async () => {
-    setRequestsLoading(true)
+  const loadIncomingTestRequests = async (silent = false) => {
+    if (!silent) setRequestsLoading(true)
     try {
       const list = await orderService.getTestRequests()
-      setIncomingTestRequests(list.filter((r) => r.paymentStatus !== 'PAID'))
+      const next = list.filter((r) => r.paymentStatus !== 'PAID')
+      setIncomingTestRequests((prev) => {
+        const prevKey = JSON.stringify(prev)
+        const nextKey = JSON.stringify(next)
+        return prevKey === nextKey ? prev : next
+      })
     } finally {
-      setRequestsLoading(false)
+      if (!silent) setRequestsLoading(false)
     }
   }
 
@@ -245,7 +250,7 @@ export const LabDashboard = () => {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      void loadIncomingTestRequests()
+      void loadIncomingTestRequests(true)
     }, 10000)
     return () => window.clearInterval(id)
   }, [])
@@ -255,7 +260,8 @@ export const LabDashboard = () => {
   }, [patient?.id])
 
   const prefillAddTestFromOrderRequest = (r: LabOrderRequest) => {
-    const name = r.testName.trim()
+    const name = (r.testNames?.[0] || r.testName || '').trim()
+    if (!name) return
     const exact = COMMON_LAB_TESTS.find((t) => t.toLowerCase() === name.toLowerCase())
     if (exact) {
       setAddTestSelect(exact)

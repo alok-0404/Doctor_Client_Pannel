@@ -321,10 +321,12 @@ export interface PharmacyOrderRequest {
 
 export interface LabOrderRequest {
   id: string
+  requestGroupId?: string
   patientId: string
   patientName: string
   patientMobile: string
   testName: string
+  testNames?: string[]
   notes?: string
   serviceType: 'LAB_VISIT' | 'HOME_SERVICE'
   paymentMode: 'ONLINE' | 'OFFLINE'

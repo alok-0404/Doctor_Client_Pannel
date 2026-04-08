@@ -14,6 +14,7 @@ import {
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
 import { PatientTestRequest } from "../models/PatientTestRequest";
+import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { env } from "../config/env";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
@@ -764,6 +765,43 @@ router.get("/patient-by-mobile", async (req, res) => {
   }
 });
 
+// GET /public/patient/diagnostic-tests/link?patientId=...&visitId=...&testId=...
+// Returns a short-lived public link for diagnostic report file.
+router.get("/patient/diagnostic-tests/link", async (req, res) => {
+  try {
+    const patientId = (req.query.patientId as string | undefined)?.trim();
+    const visitId = (req.query.visitId as string | undefined)?.trim();
+    const testId = (req.query.testId as string | undefined)?.trim();
+
+    if (!patientId || !mongoose.isValidObjectId(patientId)) {
+      res.status(400).json({ message: "Valid patientId is required" });
+      return;
+    }
+    if (!visitId || !mongoose.isValidObjectId(visitId)) {
+      res.status(400).json({ message: "Valid visitId is required" });
+      return;
+    }
+    if (!testId || !mongoose.isValidObjectId(testId)) {
+      res.status(400).json({ message: "Valid testId is required" });
+      return;
+    }
+
+    const token = jwt.sign(
+      { patientId, visitId, testId, type: "diagnostic_report" },
+      env.jwt.secret,
+      { expiresIn: "24h" as any }
+    );
+
+    const host = `${req.protocol}://${req.get("host")}`;
+    const reportUrl = `${host}/public/patient/diagnostic-tests/${token}/report/file`;
+    res.status(200).json({ reportUrl, token });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /patient/diagnostic-tests/link error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // POST /public/appointments/old
 router.post("/appointments/old", async (req, res) => {
   try {
@@ -1001,11 +1039,14 @@ router.post("/patient/tests", async (req, res) => {
         ? "HOME_SERVICE"
         : "LAB_VISIT";
     const paymentMode = body.paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE";
+    const requestGroupId =
+      testNames.length > 1 ? `grp_${new mongoose.Types.ObjectId().toString()}` : undefined;
 
     const created = await Promise.all(
       testNames.map((testName) =>
         PatientTestRequest.create({
           patient: patient._id,
+          requestGroupId,
           testName,
           notes: body.notes?.trim?.() || undefined,
           source: "patient",
@@ -1027,11 +1068,118 @@ router.post("/patient/tests", async (req, res) => {
     res.status(201).json({
       requestId: created[0]?._id?.toString?.() ?? "",
       requestIds: created.map((r) => r._id.toString()),
+      requestGroupId,
       createdCount: created.length,
     });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /patient/tests error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /public/patient/medicines (bot-compatible)
+// Supports both shapes:
+// - { patientId, medicines: [{ medicineName, quantity?, dosage? }], serviceType }
+// - { patientId, medicineName, quantity?, dosage?, serviceType }
+router.post("/patient/medicines", async (req, res) => {
+  try {
+    const body = req.body as {
+      patientId?: string;
+      medicineName?: string;
+      quantity?: number | string;
+      dosage?: string;
+      notes?: string;
+      medicines?: Array<{ medicineName?: string; quantity?: number | string; dosage?: string; notes?: string }>;
+      serviceType?: "PICKUP" | "HOME_DELIVERY";
+      paymentMode?: "ONLINE" | "OFFLINE";
+      expectedFulfillmentMinutes?: number;
+      preferredProviderId?: string;
+    };
+
+    if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
+      res.status(400).json({ message: "Valid patientId is required" });
+      return;
+    }
+
+    let patient = await Patient.findById(body.patientId).select("_id").lean();
+    if (!patient) {
+      const member = await FamilyMember.findById(body.patientId).select("patient").lean();
+      const linkedPatientId = (member as any)?.patient?.toString?.();
+      if (linkedPatientId && mongoose.isValidObjectId(linkedPatientId)) {
+        patient = await Patient.findById(linkedPatientId).select("_id").lean();
+      }
+    }
+    if (!patient) {
+      res.status(404).json({ message: "Patient not found for provided patientId/familyMemberId" });
+      return;
+    }
+
+    const listFromArray = (body.medicines ?? [])
+      .map((m) => ({
+        medicineName: (m?.medicineName ?? "").trim(),
+        quantity: m?.quantity,
+        dosage: m?.dosage,
+        notes: m?.notes,
+      }))
+      .filter((m) => m.medicineName);
+
+    const singleName = (body.medicineName ?? "").trim();
+    const normalizedItems = listFromArray.length
+      ? listFromArray
+      : (singleName ? [{ medicineName: singleName, quantity: body.quantity, dosage: body.dosage, notes: body.notes }] : []);
+
+    if (!normalizedItems.length) {
+      res.status(400).json({ message: "At least one medicineName is required" });
+      return;
+    }
+
+    const parseQty = (v: unknown): number | undefined => {
+      if (typeof v === "number" && !Number.isNaN(v) && v > 0) return Math.round(v);
+      if (typeof v === "string" && v.trim()) {
+        const n = parseInt(v.trim().match(/\d+/)?.[0] || "", 10);
+        if (!Number.isNaN(n) && n > 0) return n;
+      }
+      return undefined;
+    };
+
+    const serviceType = body.serviceType === "HOME_DELIVERY" ? "HOME_DELIVERY" : "PICKUP";
+    const paymentMode =
+      serviceType === "HOME_DELIVERY"
+        ? "ONLINE"
+        : (body.paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE");
+
+    const created = await Promise.all(
+      normalizedItems.map((m) =>
+        PatientMedicineRequest.create({
+          patient: patient!._id,
+          medicineName: m.medicineName,
+          quantity: parseQty(m.quantity),
+          dosage: m.dosage?.trim?.() || undefined,
+          notes: m.notes?.trim?.() || body.notes?.trim?.() || undefined,
+          source: "patient",
+          serviceType,
+          paymentMode,
+          expectedFulfillmentMinutes:
+            typeof body.expectedFulfillmentMinutes === "number" && body.expectedFulfillmentMinutes > 0
+              ? Math.round(body.expectedFulfillmentMinutes)
+              : undefined,
+          preferredProvider:
+            body.preferredProviderId && mongoose.isValidObjectId(body.preferredProviderId)
+              ? new mongoose.Types.ObjectId(body.preferredProviderId)
+              : undefined,
+        })
+      )
+    );
+
+    res.status(201).json({
+      requestId: created[0]?._id?.toString?.() ?? "",
+      requestIds: created.map((r) => r._id.toString()),
+      createdCount: created.length,
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /patient/medicines error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

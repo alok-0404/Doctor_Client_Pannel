@@ -4,6 +4,8 @@ export interface IPatientTestRequest {
   patient: Types.ObjectId;
   /** Preferred lab chosen by patient (optional). */
   preferredProvider?: Types.ObjectId;
+  /** Optional batch id to group multiple tests from one request action */
+  requestGroupId?: string;
   testName: string;
   notes?: string;
   source: "patient" | "assistant";
@@ -33,6 +35,7 @@ const PatientTestRequestSchema = new Schema<IPatientTestRequest>(
       ref: "Doctor",
       index: true,
     },
+    requestGroupId: { type: String, index: true },
     testName: { type: String, required: true },
     notes: { type: String },
     source: {
