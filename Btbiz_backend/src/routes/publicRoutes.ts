@@ -961,9 +961,17 @@ router.post("/patient/tests", async (req, res) => {
       return;
     }
 
-    const patient = await Patient.findById(body.patientId).select("_id").lean();
+    let patient = await Patient.findById(body.patientId).select("_id").lean();
     if (!patient) {
-      res.status(404).json({ message: "Patient not found" });
+      // Bot flow may occasionally send FamilyMember id; resolve it to linked patient.
+      const member = await FamilyMember.findById(body.patientId).select("patient").lean();
+      const linkedPatientId = (member as any)?.patient?.toString?.();
+      if (linkedPatientId && mongoose.isValidObjectId(linkedPatientId)) {
+        patient = await Patient.findById(linkedPatientId).select("_id").lean();
+      }
+    }
+    if (!patient) {
+      res.status(404).json({ message: "Patient not found for provided patientId/familyMemberId" });
       return;
     }
 
