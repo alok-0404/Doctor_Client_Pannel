@@ -312,6 +312,24 @@ router.get("/family/members", async (req, res) => {
   }
 });
 
+/** Map public API relation string to stored enum (same set as FamilyMember schema). */
+function normalizePublicFamilyRelation(relation: string): string {
+  const v = relation.trim().toUpperCase();
+  if (v === "WIFE" || v === "HUSBAND") return "SPOUSE";
+  const allowed = new Set([
+    "SELF",
+    "SPOUSE",
+    "SON",
+    "DAUGHTER",
+    "FATHER",
+    "MOTHER",
+    "BROTHER",
+    "SISTER",
+    "OTHER"
+  ]);
+  return allowed.has(v) ? v : "OTHER";
+}
+
 // POST /public/family/members
 // Body: { accountId, fullName, relation, gender?, dateOfBirth?, address? }
 router.post("/family/members", async (req, res) => {
@@ -340,13 +358,15 @@ router.post("/family/members", async (req, res) => {
       return;
     }
 
+    const relationNorm = normalizePublicFamilyRelation(body.relation);
+
     if (body.dateOfBirth) {
       const dob = new Date(body.dateOfBirth);
       if (Number.isNaN(dob.getTime())) {
         res.status(400).json({ message: "Invalid date of birth" });
         return;
       }
-      if (body.relation === "SELF" && completedAgeYears(dob) < 18) {
+      if (relationNorm === "SELF" && completedAgeYears(dob) < 18) {
         res.status(400).json({ message: SELF_MIN_AGE_MSG });
         return;
       }
@@ -356,6 +376,31 @@ router.post("/family/members", async (req, res) => {
     if (!account) {
       res.status(404).json({ message: "Family account not found" });
       return;
+    }
+
+    // One primary (SELF) profile per family account — do not create duplicate Patient rows.
+    if (relationNorm === "SELF") {
+      const existingSelf = await FamilyMember.findOne({
+        account: (account as any)._id,
+        relation: "SELF",
+        isDeleted: { $ne: true }
+      }).lean();
+
+      if (existingSelf) {
+        res.status(200).json({
+          member: {
+            id: (existingSelf as any)._id.toString(),
+            fullName: (existingSelf as any).fullName,
+            relation: (existingSelf as any).relation,
+            gender: (existingSelf as any).gender,
+            dateOfBirth: (existingSelf as any).dateOfBirth,
+            patientId: (existingSelf as any).patient.toString()
+          },
+          alreadyExists: true,
+          message: "Primary (SELF) profile already exists for this family account."
+        });
+        return;
+      }
     }
 
     const nameParts = body.fullName.trim().split(" ");
@@ -393,7 +438,7 @@ router.post("/family/members", async (req, res) => {
       account: (account as any)._id,
       patient: (patient as any)._id,
       fullName: body.fullName.trim(),
-      relation: body.relation,
+      relation: relationNorm as any,
       gender: body.gender,
       dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined
     });
@@ -406,7 +451,8 @@ router.post("/family/members", async (req, res) => {
         gender: member.gender,
         dateOfBirth: member.dateOfBirth,
         patientId: (patient as any)._id.toString()
-      }
+      },
+      alreadyExists: false
     });
   } catch (error) {
     // eslint-disable-next-line no-console
