@@ -685,18 +685,65 @@ export const patientPortalService = {
     })
     return ((res.data as any)?.providers ?? []) as ServiceProviderOption[]
   },
-  openDocument(documentId: string): void {
-    patientApi
-      .get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
-      .then((res) => {
-        const blob = res.data as Blob
-        const objectUrl = URL.createObjectURL(blob)
+  async openDocument(documentId: string): Promise<void> {
+    // Open tab in user-click context first, otherwise popup blockers may block blob preview.
+    const previewWin = window.open('', '_blank')
+    if (previewWin) {
+      previewWin.document.write(`
+        <html><head><title>Loading…</title><meta charset="utf-8" /></head>
+        <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+          <h2 style="margin:0 0 8px;">Loading document…</h2>
+          <p style="margin:0;font-size:13px;color:#475569;">Preparing preview.</p>
+        </body></html>
+      `)
+      previewWin.document.close()
+    }
+    try {
+      const res = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
+      const blob = res.data as Blob
+      const objectUrl = URL.createObjectURL(blob)
+      if (previewWin) {
+        previewWin.location.href = objectUrl
+      } else {
         window.open(objectUrl, '_blank', 'noopener,noreferrer')
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
-      })
-      .catch(() => {})
+      }
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
+      let msg = 'Could not open document. Please try again.'
+      if (e?.response?.status === 404) {
+        msg = 'Document file not found.'
+      } else if (e?.response?.status === 403) {
+        msg = 'You are not allowed to view this document.'
+      } else if (e?.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text()
+          const j = JSON.parse(text) as { message?: string }
+          if (j.message) msg = j.message
+        } catch {
+          /* ignore parse errors */
+        }
+      } else if (e?.response?.data && typeof (e.response.data as { message?: string }).message === 'string') {
+        msg = (e.response.data as { message: string }).message
+      }
+      if (previewWin && !previewWin.closed) previewWin.close()
+      // eslint-disable-next-line no-alert
+      alert(msg)
+    }
   },
   async openDiagnosticReport(visitId: string, testId: string): Promise<void> {
+    // Open tab in user-click context first, then stream report blob into it.
+    const previewWin = window.open('', '_blank')
+    if (previewWin) {
+      previewWin.document.write(`
+        <html><head><title>Loading…</title><meta charset="utf-8" /></head>
+        <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+          <h2 style="margin:0 0 8px;">Loading report…</h2>
+          <p style="margin:0;font-size:13px;color:#475569;">Preparing report preview.</p>
+        </body></html>
+      `)
+      previewWin.document.close()
+    }
     try {
       const res = await patientApi.get(
         `/public/patient/visits/${visitId}/diagnostic-tests/${testId}/report/file`,
@@ -708,16 +755,22 @@ export const patientPortalService = {
         const text = await blob.text()
         try {
           const j = JSON.parse(text) as { message?: string }
+          if (previewWin && !previewWin.closed) previewWin.close()
           // eslint-disable-next-line no-alert
           alert(j.message ?? 'Could not open report.')
         } catch {
+          if (previewWin && !previewWin.closed) previewWin.close()
           // eslint-disable-next-line no-alert
           alert('Could not open report.')
         }
         return
       }
       const objectUrl = URL.createObjectURL(blob)
-      window.open(objectUrl, '_blank', 'noopener,noreferrer')
+      if (previewWin) {
+        previewWin.location.href = objectUrl
+      } else {
+        window.open(objectUrl, '_blank', 'noopener,noreferrer')
+      }
       setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
@@ -737,6 +790,7 @@ export const patientPortalService = {
       } else if (e?.response?.data && typeof (e.response.data as { message?: string }).message === 'string') {
         msg = (e.response.data as { message: string }).message
       }
+      if (previewWin && !previewWin.closed) previewWin.close()
       // eslint-disable-next-line no-alert
       alert(msg)
     }

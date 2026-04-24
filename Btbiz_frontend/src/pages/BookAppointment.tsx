@@ -131,6 +131,7 @@ export const BookAppointment = () => {
   const [error, setError] = useState<string | null>(null)
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null)
+  const [profileSessionReady, setProfileSessionReady] = useState<boolean>(() => !!patientStorage.getToken())
   const [deleteMemberTarget, setDeleteMemberTarget] = useState<FamilyMemberSummary | null>(null)
   const [appointmentQuota, setAppointmentQuota] = useState<DoctorAppointmentQuotaSnapshot | null>(null)
   const [appointmentQuotaLoading, setAppointmentQuotaLoading] = useState(false)
@@ -476,6 +477,27 @@ export const BookAppointment = () => {
     }
   }
 
+  const syncPatientPortalSessionForMember = useCallback(
+    async (memberId: string): Promise<boolean> => {
+      if (!familyAccountId) return false
+      try {
+        const result = await publicAppointmentService.getFamilyMemberProfileToken(
+          familyAccountId,
+          memberId
+        )
+        const name = [result.patient.firstName, result.patient.lastName].filter(Boolean).join(' ')
+        patientStorage.set(result.token, result.patient.id, name || 'Patient')
+        setProfileSessionReady(true)
+        return true
+      } catch (err) {
+        console.warn('[BookAppointment] Failed to sync patient portal session after booking:', err)
+        setProfileSessionReady(!!patientStorage.getToken())
+        return false
+      }
+    },
+    [familyAccountId]
+  )
+
   // When member is selected, prefill editable patient details for appointment.
   useEffect(() => {
     if (mode !== 'family') return
@@ -626,6 +648,9 @@ export const BookAppointment = () => {
       } else {
         setError('Please select New Patient.')
         return
+      }
+      if (selectedFamilyMemberId) {
+        await syncPatientPortalSessionForMember(selectedFamilyMemberId)
       }
       setAppointmentId(res.appointmentId)
       setSelectedPaymentMode(paymentMode)
@@ -1281,9 +1306,14 @@ export const BookAppointment = () => {
         You will be contacted by the clinic if any changes are required.
       </p>
 
-      <Link to="/" className="public-cta">
-        Back to Home
-      </Link>
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <Link to={profileSessionReady ? '/patient-profile' : '/patient-login'} className="public-cta">
+          {profileSessionReady ? 'View My Profile' : 'Login to View Profile'}
+        </Link>
+        <Link to="/" className="public-cta" style={{ background: '#334155' }}>
+          Back to Home
+        </Link>
+      </div>
     </div>
   )
 
