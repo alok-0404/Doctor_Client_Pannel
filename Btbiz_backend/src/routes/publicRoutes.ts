@@ -1,9 +1,11 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import path from "path";
 
 import { Doctor } from "../models/Doctor";
 import { Patient } from "../models/Patient";
+import { PatientDocument } from "../models/PatientDocument";
 import { Visit } from "../models/Visit";
 import {
   createPatient as createPatientService,
@@ -18,6 +20,7 @@ import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { env } from "../config/env";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
+import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 
 const router = Router();
 
@@ -814,6 +817,102 @@ router.get("/patient/diagnostic-tests/link", async (req, res) => {
     // eslint-disable-next-line no-console
     console.error("public /patient/diagnostic-tests/link error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+function resolvePublicDocumentPath(storedPath: unknown): string | null {
+  const raw = String(storedPath ?? "").trim();
+  if (!raw) return null;
+  const baseName = path.basename(raw);
+  const candidates = [
+    resolveUploadFilePath(raw),
+    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+  ].filter(Boolean);
+  return candidates.find((p) => uploadFileExists(p)) ?? null;
+}
+
+// GET /public/patient/documents/link?patientId=...&documentId=...
+// Returns a short-lived public link for prescription/document file.
+router.get("/patient/documents/link", async (req, res) => {
+  try {
+    const patientId = (req.query.patientId as string | undefined)?.trim();
+    const documentId = (req.query.documentId as string | undefined)?.trim();
+    if (!patientId || !mongoose.isValidObjectId(patientId)) {
+      res.status(400).json({ message: "Valid patientId is required" });
+      return;
+    }
+    if (!documentId || !mongoose.isValidObjectId(documentId)) {
+      res.status(400).json({ message: "Valid documentId is required" });
+      return;
+    }
+    const token = jwt.sign(
+      { patientId, documentId, type: "patient_document" },
+      env.jwt.secret,
+      { expiresIn: "24h" as any }
+    );
+    const host = `${req.protocol}://${req.get("host")}`;
+    const url = `${host}/public/patient/documents/${token}/file`;
+    res.status(200).json({ url, token });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /patient/documents/link error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /public/patient/documents/:token/file
+// Public tokenized file endpoint for patient-facing channels (WhatsApp/SMS links).
+router.get("/patient/documents/:token/file", async (req, res) => {
+  try {
+    const { token } = req.params;
+    if (!token) {
+      res.status(400).json({ message: "token is required" });
+      return;
+    }
+    const decoded = jwt.verify(token, env.jwt.secret) as {
+      type?: string;
+      patientId?: string;
+      documentId?: string;
+    };
+    if (decoded?.type !== "patient_document") {
+      res.status(400).json({ message: "Invalid token type" });
+      return;
+    }
+    const { patientId, documentId } = decoded;
+    if (!patientId || !documentId) {
+      res.status(400).json({ message: "Invalid token payload" });
+      return;
+    }
+    const doc = await PatientDocument.findOne({
+      _id: documentId,
+      patient: patientId,
+    }).lean();
+    if (!doc) {
+      res.status(404).json({ message: "Document not found" });
+      return;
+    }
+    const fullPath = resolvePublicDocumentPath((doc as any).path);
+    if (!fullPath) {
+      const raw = String((doc as any).path ?? "");
+      if (/^https?:\/\//i.test(raw)) {
+        res.redirect(raw);
+        return;
+      }
+      res.status(404).json({ message: "File not found on server" });
+      return;
+    }
+    res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+    );
+    res.sendFile(fullPath);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /patient/documents/:token/file error:", error);
+    res.status(401).json({ message: "Invalid or expired token" });
   }
 });
 
