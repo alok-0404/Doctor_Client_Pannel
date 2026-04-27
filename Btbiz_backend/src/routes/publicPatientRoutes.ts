@@ -10,6 +10,7 @@ import { env } from "../config/env";
 import { PatientDocument } from "../models/PatientDocument";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
+import { Patient } from "../models/Patient";
 import { Doctor } from "../models/Doctor";
 import { authenticatePatient } from "../middleware/authMiddleware";
 import ocrService from "../ocrService";
@@ -321,6 +322,83 @@ router.post(
 );
 
 // POST /public/patient/medicines - patient adds medicine request
+// Bot compatibility: when no patient JWT is sent, accept patientId payload.
+router.post(
+  "/medicines",
+  async (req: Request, res: Response, next): Promise<void> => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      next("route");
+      return;
+    }
+    try {
+      const body = req.body as {
+        patientId?: string;
+        familyMemberId?: string;
+        medicineName?: string;
+        quantity?: number | string;
+        dosage?: string;
+        notes?: string;
+        medicines?: Array<{ medicineName?: string; quantity?: number | string; dosage?: string; notes?: string }>;
+        serviceType?: "PICKUP" | "HOME_DELIVERY";
+      };
+      const patientId = body.patientId ?? body.familyMemberId;
+      if (!patientId || !mongoose.isValidObjectId(patientId)) {
+        res.status(400).json({ message: "Valid patientId is required" });
+        return;
+      }
+      const patient = await Patient.findById(patientId).select("_id").lean();
+      if (!patient) {
+        res.status(404).json({ message: "Patient not found for provided patientId/familyMemberId" });
+        return;
+      }
+      const fromArray = Array.isArray(body.medicines) ? body.medicines : [];
+      const single = body.medicineName
+        ? [{ medicineName: body.medicineName, quantity: body.quantity, dosage: body.dosage, notes: body.notes }]
+        : [];
+      const rows = [...fromArray, ...single]
+        .map((m) => ({
+          medicineName: String(m.medicineName ?? "").trim(),
+          quantity:
+            typeof m.quantity === "number"
+              ? m.quantity
+              : typeof m.quantity === "string" && m.quantity.trim()
+                ? Number(m.quantity)
+                : undefined,
+          dosage: m.dosage?.trim?.() || undefined,
+          notes: m.notes?.trim?.() || undefined,
+        }))
+        .filter((m) => m.medicineName.length > 0);
+      if (!rows.length) {
+        res.status(400).json({ message: "At least one medicineName is required" });
+        return;
+      }
+      const requestGroupId = new mongoose.Types.ObjectId().toString();
+      const docs = rows.map((m) => ({
+        patient: patient._id,
+        requestGroupId,
+        medicineName: m.medicineName,
+        quantity: typeof m.quantity === "number" && Number.isFinite(m.quantity) ? m.quantity : undefined,
+        dosage: m.dosage,
+        notes: m.notes,
+        source: "patient" as const,
+        serviceType: body.serviceType === "HOME_DELIVERY" ? "HOME_DELIVERY" : "PICKUP",
+        paymentMode: body.serviceType === "HOME_DELIVERY" ? "ONLINE" : "OFFLINE",
+      }));
+      const created = await PatientMedicineRequest.insertMany(docs);
+      res.status(201).json({
+        requestId: created[0]?._id?.toString(),
+        requestIds: created.map((d) => d._id.toString()),
+        medicine: { id: created[0]?._id?.toString(), medicineName: created[0]?.medicineName },
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("patient add medicine (bot-compatible) error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+);
+
 router.post(
   "/medicines",
   authenticatePatient,
@@ -430,6 +508,74 @@ router.post(
 );
 
 // POST /public/patient/tests - patient adds test request
+// Bot compatibility: when no patient JWT is sent, accept patientId payload.
+router.post(
+  "/tests",
+  async (req: Request, res: Response, next): Promise<void> => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      next("route");
+      return;
+    }
+    try {
+      const body = req.body as {
+        patientId?: string;
+        familyMemberId?: string;
+        testName?: string;
+        notes?: string;
+        tests?: Array<{ testName?: string; notes?: string }>;
+        serviceType?: "LAB_VISIT" | "HOME_SERVICE" | "HOME_COLLECTION";
+        preferredDateTime?: string;
+        scheduledDate?: string;
+        scheduledTime?: string;
+      };
+      const patientId = body.patientId ?? body.familyMemberId;
+      if (!patientId || !mongoose.isValidObjectId(patientId)) {
+        res.status(400).json({ message: "Valid patientId is required" });
+        return;
+      }
+      const patient = await Patient.findById(patientId).select("_id").lean();
+      if (!patient) {
+        res.status(404).json({ message: "Patient not found for provided patientId/familyMemberId" });
+        return;
+      }
+      const fromArray = Array.isArray(body.tests) ? body.tests : [];
+      const single = body.testName ? [{ testName: body.testName, notes: body.notes }] : [];
+      const rows = [...fromArray, ...single]
+        .map((t) => ({ testName: String(t.testName ?? "").trim(), notes: t.notes?.trim?.() || undefined }))
+        .filter((t) => t.testName.length > 0);
+      if (!rows.length) {
+        res.status(400).json({ message: "At least one testName is required" });
+        return;
+      }
+      const preferredDateTime =
+        body.preferredDateTime ||
+        (body.scheduledDate && body.scheduledTime ? `${body.scheduledDate}T${body.scheduledTime}` : undefined);
+      const requestGroupId = new mongoose.Types.ObjectId().toString();
+      const docs = rows.map((t) => ({
+        patient: patient._id,
+        requestGroupId,
+        testName: t.testName,
+        notes: t.notes,
+        source: "patient" as const,
+        serviceType: body.serviceType === "HOME_SERVICE" || body.serviceType === "HOME_COLLECTION" ? "HOME_SERVICE" : "LAB_VISIT",
+        paymentMode: "OFFLINE" as const,
+        preferredDateTime: preferredDateTime ? new Date(preferredDateTime) : undefined,
+      }));
+      const created = await PatientTestRequest.insertMany(docs);
+      res.status(201).json({
+        requestId: created[0]?._id?.toString(),
+        requestIds: created.map((d) => d._id.toString()),
+        test: { id: created[0]?._id?.toString(), testName: created[0]?.testName },
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("patient add test (bot-compatible) error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+);
+
 router.post(
   "/tests",
   authenticatePatient,
