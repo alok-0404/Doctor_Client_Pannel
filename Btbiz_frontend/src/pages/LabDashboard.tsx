@@ -233,7 +233,8 @@ export const LabDashboard = () => {
     if (!silent) setRequestsLoading(true)
     try {
       const list = await orderService.getTestRequests()
-      const next = list.filter((r) => r.paymentStatus !== 'PAID')
+      // Show all requests (including already-paid) so lab can audit what bot just created.
+      const next = list
       setIncomingTestRequests((prev) => {
         const prevKey = JSON.stringify(prev)
         const nextKey = JSON.stringify(next)
@@ -401,7 +402,7 @@ export const LabDashboard = () => {
               <DnaLoader label="Loading requests..." />
             ) : incomingTestRequests.length === 0 ? (
               <p className="dashboard-body" style={{ marginBottom: 0 }}>
-                No pending patient test requests (or all are already paid).
+                No patient test requests found right now.
               </p>
             ) : (
               <div

@@ -82,6 +82,19 @@ function resolveDiagnosticReportPath(storedPath: unknown): string | null {
   return candidates.find((p) => uploadFileExists(p)) ?? null;
 }
 
+function resolveDocumentFilePath(storedPath: unknown): string | null {
+  const raw = String(storedPath ?? "").trim();
+  if (!raw) return null;
+  const baseName = path.basename(raw);
+  const candidates = [
+    resolveUploadFilePath(raw),
+    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+  ].filter(Boolean);
+  return candidates.find((p) => uploadFileExists(p)) ?? null;
+}
+
 function haversineKm(
   lat1: number,
   lon1: number,
@@ -662,6 +675,66 @@ router.post(
 );
 
 // GET /public/patient/documents/:documentId/file - serve document (patient auth)
+// NOTE: Keep this public tokenized route BEFORE the auth route below.
+router.get(
+  "/documents/:token/file",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { token } = req.params;
+      if (!token) {
+        res.status(400).json({ message: "token is required" });
+        return;
+      }
+      const decoded = jwt.verify(token, env.jwt.secret) as {
+        type?: string;
+        patientId?: string;
+        documentId?: string;
+      };
+      if (decoded?.type !== "patient_document") {
+        res.status(400).json({ message: "Invalid token type" });
+        return;
+      }
+      const { patientId, documentId } = decoded;
+      if (!patientId || !documentId) {
+        res.status(400).json({ message: "Invalid token payload" });
+        return;
+      }
+      const doc = await PatientDocument.findOne({
+        _id: documentId,
+        patient: patientId,
+      }).lean();
+      if (!doc) {
+        res.status(404).json({ message: "Document not found" });
+        return;
+      }
+      const storedPath = String((doc as any).path ?? "").trim();
+      const fullPath = resolveDocumentFilePath(storedPath);
+      if (!fullPath) {
+        if (/^https?:\/\//i.test(storedPath)) {
+          res.redirect(storedPath);
+          return;
+        }
+        res.status(404).json({ message: "File not found on server" });
+        return;
+      }
+      const forceDownload = ["1", "true", "yes"].includes(
+        String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
+      );
+      res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+      );
+      res.sendFile(fullPath);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("public token getDocumentFile error:", error);
+      res.status(401).json({ message: "Invalid or expired token" });
+    }
+  }
+);
+
+// GET /public/patient/documents/:documentId/file - serve document (patient auth)
 router.get(
   "/documents/:documentId/file",
   authenticatePatient,
@@ -681,14 +754,7 @@ router.get(
       }
 
       const storedPath = String((doc as any).path ?? "").trim();
-      const baseName = storedPath ? path.basename(storedPath) : "";
-      const candidates = [
-        resolveUploadFilePath(storedPath),
-        baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
-        baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
-        baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
-      ].filter(Boolean);
-      const fullPath = candidates.find((p) => uploadFileExists(p));
+      const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {
         if (/^https?:\/\//i.test(storedPath)) {
           res.redirect(storedPath);
@@ -697,10 +763,13 @@ router.get(
         res.status(404).json({ message: "File not found on server" });
         return;
       }
-      res.setHeader("Content-Type", (doc as any).mimeType);
+      const forceDownload = ["1", "true", "yes"].includes(
+        String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
+      );
+      res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
       res.setHeader(
         "Content-Disposition",
-        `inline; filename="${(doc as any).originalName.replace(/"/g, '\\"')}"`
+        `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
       );
       res.sendFile(fullPath);
     } catch (error) {
