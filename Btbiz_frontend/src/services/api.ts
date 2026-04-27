@@ -583,6 +583,7 @@ export interface FullPatientHistory {
     mimeType: string
     uploadedAt: string
     source?: 'patient' | 'staff'
+    isFileAvailable?: boolean
   }>
   medicineRequests?: Array<{
     id: string

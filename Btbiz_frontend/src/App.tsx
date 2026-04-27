@@ -1,4 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { Slide, ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
+import './styles/medigraph-toastify.css'
 import { PublicHome } from './pages/PublicHome'
 import { BookAppointment } from './pages/BookAppointment'
 import { PatientLogin } from './pages/PatientLogin'
@@ -145,6 +148,22 @@ export const App = () => {
         element={<Navigate to="/" replace />}
       />
     </Routes>
+      <ToastContainer
+        position="top-center"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+        transition={Slide}
+        limit={4}
+        className="medigraph-toastify-container"
+        toastClassName="medigraph-toastify-toast"
+      />
     </>
   )
 }

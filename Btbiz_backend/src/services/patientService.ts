@@ -8,9 +8,11 @@ import { Visit } from "../models/Visit";
 import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
+import { FamilyMember } from "../models/FamilyMember";
 import type { AppointmentChannel } from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
+import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 
 const getMobileCandidates = (mobile: string): string[] => {
   const digits = mobile.replace(/\D/g, "");
@@ -184,6 +186,14 @@ export const getFullPatientHistory = async (patientId: string) => {
   if (!patient) {
     throw new Error("PATIENT_NOT_FOUND");
   }
+  if (!(patient as any).dateOfBirth) {
+    const member = await FamilyMember.findOne({ patient: patient._id, isDeleted: { $ne: true } })
+      .select("dateOfBirth")
+      .lean();
+    if ((member as any)?.dateOfBirth) {
+      (patient as any).dateOfBirth = (member as any).dateOfBirth;
+    }
+  }
 
   const visits = await Visit.find({ patient: patient._id })
     .sort({ visitDate: -1 })
@@ -270,7 +280,8 @@ export const getFullPatientHistory = async (patientId: string) => {
       uploadedAt: d.createdAt,
       ocrText: (d as any).ocrText,
       ocrConfidence: (d as any).ocrConfidence,
-      source: (d as any).uploadedBy ? "staff" : "patient"
+      source: (d as any).uploadedBy ? "staff" : "patient",
+      isFileAvailable: uploadFileExists(resolveUploadFilePath((d as any).path)),
     })),
     medicineRequests: medicineRequests.map((m) => ({
       id: (m as any)._id.toString(),

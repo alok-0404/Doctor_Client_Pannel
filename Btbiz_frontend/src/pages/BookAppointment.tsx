@@ -884,7 +884,7 @@ export const BookAppointment = () => {
                           focusFamilyBookingFields()
                         }}
                       >
-                        Use for booking
+                        BOOK Appointment
                       </button>
                       <button
                         type="button"

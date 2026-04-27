@@ -15,10 +15,12 @@ function formatVisitDate(d: string | Date): string {
 function ageFromDob(dob: string | Date | undefined): number | undefined {
   if (!dob) return undefined
   const d = typeof dob === 'string' ? new Date(dob) : dob
+  if (Number.isNaN(d.getTime())) return undefined
   const today = new Date()
   let age = today.getFullYear() - d.getFullYear()
   const m = today.getMonth() - d.getMonth()
   if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--
+  if (age < 0 || age > 130) return undefined
   return age
 }
 
@@ -74,7 +76,7 @@ export const PatientDetails = () => {
           doctor?: { name: string }
           diagnosticTests?: Array<{ _id: string; testName: string; result?: string; notes?: string }>
         }>
-        const age = ageFromDob(p.dateOfBirth)
+        const age = ageFromDob(p.dateOfBirth) ?? (typeof p.age === 'number' ? p.age : undefined)
         const lastVisit = visits.length > 0 ? formatVisitDate(visits[0].visitDate) : undefined
         const allTests = visits.flatMap((v) =>
           (v.diagnosticTests || []).map((t: any) => ({
@@ -107,7 +109,7 @@ export const PatientDetails = () => {
         setData({
           id: p._id ?? id,
           name: [p.firstName, p.lastName].filter(Boolean).join(' ') || '—',
-          age: age ?? 0,
+          age,
           gender: p.gender === 'MALE' ? 'Male' : p.gender === 'FEMALE' ? 'Female' : p.gender ?? '—',
           mobile: p.mobileNumber ?? '',
           lastVisit,

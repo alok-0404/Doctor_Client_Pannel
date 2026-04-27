@@ -1,0 +1,65 @@
+/* MEDIGRAPH: compact header-side toasts near logout */
+.medigraph-toastify-container.Toastify__toast-container {
+  top: 64px;
+  right: 18px;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  width: min(320px, calc(100vw - 24px));
+  padding: 0;
+}
+
+@media (max-width: 480px) {
+  .medigraph-toastify-container.Toastify__toast-container {
+    top: 58px;
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+}
+
+.medigraph-toastify-toast {
+  border-radius: 10px !important;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14) !important;
+  border: 1px solid #e2e8f0 !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  min-height: auto !important;
+  margin-bottom: 8px !important;
+  padding: 10px 12px 10px 12px !important;
+  font-size: 0.83rem !important;
+  line-height: 1.35 !important;
+  max-width: 100%;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.medigraph-toastify-toast .Toastify__toast-body {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.35 !important;
+  padding-right: 16px !important;
+}
+
+.medigraph-toastify-toast.Toastify__toast--success {
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.medigraph-toastify-toast.Toastify__toast--success .Toastify__toast-icon svg {
+  fill: #0d9488;
+}
+
+.medigraph-toastify-toast .Toastify__progress-bar--success {
+  background: linear-gradient(90deg, #1e40af, #0d9488);
+}
+
+.medigraph-toastify-toast .Toastify__close-button {
+  color: #64748b;
+  opacity: 1;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
+.medigraph-toastify-toast .Toastify__close-button:hover {
+  color: #0f172a;
+}

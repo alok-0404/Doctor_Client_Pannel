@@ -156,7 +156,7 @@ export interface TestRequestItem {
 export interface PatientDetailsData {
   id: string
   name: string
-  age: number
+  age?: number
   gender: string
   mobile: string
   lastVisit?: string
@@ -233,7 +233,7 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
               {data.name}
             </p>
             <p className="patient-meta">
-              {data.age} yrs • {data.gender}
+              {typeof data.age === 'number' && data.age > 0 ? `${data.age} yrs` : 'Age N/A'} • {data.gender}
             </p>
             <dl className="patient-summary-list">
               <div className="patient-summary-row">

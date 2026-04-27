@@ -164,6 +164,14 @@ function buildVisitDate(appointmentDate: string, preferredSlot?: string): Date {
   return visitDate;
 }
 
+function deriveDobFromAge(age?: number): Date | undefined {
+  if (typeof age !== "number" || Number.isNaN(age) || age <= 0 || age > 130) return undefined;
+  const now = new Date();
+  const dob = new Date(now);
+  dob.setFullYear(now.getFullYear() - Math.floor(age));
+  return dob;
+}
+
 // GET /public/doctors - list consultants for appointment dropdown (with clinic location for distance)
 router.get("/doctors", async (_req, res) => {
   try {
@@ -418,7 +426,8 @@ router.post("/family/members", async (req, res) => {
         lastName,
         mobileNumber: (account as any).phone,
         gender: body.gender,
-        address: body.address
+        address: body.address,
+        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined
       });
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -429,7 +438,8 @@ router.post("/family/members", async (req, res) => {
           lastName,
           mobileNumber: (account as any).phone,
           gender: body.gender,
-          address: body.address
+          address: body.address,
+          dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined
         });
       } else {
         throw error;
@@ -538,13 +548,18 @@ router.patch("/family/members/:id", async (req, res) => {
         { new: false }
       );
     }
-    if (body.dateOfBirth) {
-      member.dateOfBirth = new Date(body.dateOfBirth);
-    }
+    if (body.dateOfBirth) member.dateOfBirth = new Date(body.dateOfBirth);
     if (body.address !== undefined) {
       await Patient.findByIdAndUpdate(
         member.patient,
         { $set: { address: body.address } },
+        { new: false }
+      );
+    }
+    if (body.dateOfBirth !== undefined) {
+      await Patient.findByIdAndUpdate(
+        member.patient,
+        { $set: { dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : undefined } },
         { new: false }
       );
     }
@@ -894,6 +909,7 @@ router.post("/appointments/new", async (req, res) => {
       consultantId?: string;
       patientName?: string;
       age?: number;
+      dateOfBirth?: string;
       gender?: string;
       mobileNumber?: string;
       city?: string;
@@ -909,13 +925,17 @@ router.post("/appointments/new", async (req, res) => {
       return;
     }
 
+    const derivedDob = body.dateOfBirth ? new Date(body.dateOfBirth) : deriveDobFromAge(body.age);
+    const safeDob = derivedDob && !Number.isNaN(derivedDob.getTime()) ? derivedDob : undefined;
+
     let patient: any;
     try {
       patient = await createPatientService({
         firstName: body.patientName,
         mobileNumber: body.mobileNumber,
         address: body.address,
-        gender: body.gender as "MALE" | "FEMALE" | "OTHER" | undefined
+        gender: body.gender as "MALE" | "FEMALE" | "OTHER" | undefined,
+        dateOfBirth: safeDob
       });
     } catch (createErr) {
       if (createErr instanceof Error && createErr.message === "MOBILE_ALREADY_EXISTS") {
@@ -1196,6 +1216,8 @@ router.post("/appointments/family", async (req, res) => {
       consultationType?: string;
       opdNumber?: string;
       patientName?: string;
+      age?: number;
+      dateOfBirth?: string;
       gender?: string;
       address?: string;
       patientLatitude?: number;
@@ -1218,6 +1240,8 @@ router.post("/appointments/family", async (req, res) => {
     }
 
     const updatePayload: any = {};
+    const derivedDob = body.dateOfBirth ? new Date(body.dateOfBirth) : deriveDobFromAge(body.age);
+    const safeDob = derivedDob && !Number.isNaN(derivedDob.getTime()) ? derivedDob : undefined;
     if (body.patientName) {
       const trimmed = body.patientName.trim();
       if (trimmed) {
@@ -1228,6 +1252,7 @@ router.post("/appointments/family", async (req, res) => {
     }
     if (body.gender) updatePayload.gender = body.gender;
     if (body.address) updatePayload.address = body.address;
+    if (safeDob) updatePayload.dateOfBirth = safeDob;
 
     if (Object.keys(updatePayload).length > 0) {
       await updatePatientService((patient as any)._id.toString(), updatePayload);

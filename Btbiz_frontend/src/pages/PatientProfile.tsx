@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import {
   patientPortalService,
   type FullPatientHistory,
@@ -118,6 +119,34 @@ function formatProviderOptionLabel(
   return `${p.name} · — (allow location for km)`
 }
 
+function PatientProfileAccordionSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="patient-profile-section patient-profile-accordion-section">
+      <button
+        type="button"
+        className="patient-profile-accordion-trigger"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="patient-profile-accordion-title">{title}</span>
+        <span className="patient-profile-accordion-icon" aria-hidden>
+          {open ? '▼' : '▶'}
+        </span>
+      </button>
+      {open ? <div className="patient-profile-accordion-panel">{children}</div> : null}
+    </section>
+  )
+}
+
 function ProviderDistanceHint({
   geo,
   providers,
@@ -178,6 +207,54 @@ export const PatientProfile = () => {
   const [selectedLabProviderId, setSelectedLabProviderId] = useState('')
   const [providerGeoStatus, setProviderGeoStatus] = useState<'loading' | 'ok' | 'none'>('loading')
   const lastVisibilityRefreshRef = useRef(0)
+  const paymentToastShownRef = useRef<Set<string>>(new Set())
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
+
+  const toggleCard = (key: string) => {
+    setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const paidLabToastSignature = useMemo(() => {
+    const list = data?.testRequests ?? []
+    return list
+      .filter((t) => t.paymentStatus === 'PAID')
+      .map((t) => t.id)
+      .sort()
+      .join(',')
+  }, [data?.testRequests])
+
+  const readyMedicineToastSignature = useMemo(() => {
+    const list = data?.medicineRequests ?? []
+    return list
+      .filter((m) => m.status === 'COMPLETED' && m.paymentStatus === 'PAID')
+      .map((m) => m.id)
+      .sort()
+      .join(',')
+  }, [data?.medicineRequests])
+
+  useEffect(() => {
+    if (loading || !data) return
+    for (const t of data.testRequests ?? []) {
+      if (t.paymentStatus !== 'PAID') continue
+      const k = `toast-lab-paid-${t.id}`
+      if (paymentToastShownRef.current.has(k)) continue
+      paymentToastShownRef.current.add(k)
+      let msg = `Payment received for ${t.testName}`
+      if (t.receiptNumber) msg += ` — receipt no. ${t.receiptNumber}`
+      msg += '. Follow lab instructions for sample collection or visit.'
+      toast.success(msg, { toastId: k, autoClose: 3000 })
+    }
+    for (const m of data.medicineRequests ?? []) {
+      if (m.status !== 'COMPLETED' || m.paymentStatus !== 'PAID') continue
+      const k = `toast-med-ready-${m.id}`
+      if (paymentToastShownRef.current.has(k)) continue
+      paymentToastShownRef.current.add(k)
+      toast.success(`Your medicine order "${m.medicineName}" is ready. Please collect now.`, {
+        toastId: k,
+        autoClose: 3000,
+      })
+    }
+  }, [loading, data, paidLabToastSignature, readyMedicineToastSignature])
 
   const loadProfile = useCallback(() => {
     setError(null)
@@ -323,10 +400,6 @@ export const PatientProfile = () => {
     testRequests = [],
   } = data
 
-  const readyAndPaidMedicine = medicineRequests.filter(
-    (m) => m.status === 'COMPLETED' && m.paymentStatus === 'PAID'
-  )
-  const paidLabTestsNotify = testRequests.filter((t) => t.paymentStatus === 'PAID')
   const labPaidRequests = testRequests.filter((t) => t.paymentStatus === 'PAID')
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -563,8 +636,25 @@ export const PatientProfile = () => {
       return false
     })
 
-    // Strict gating: show report only if this paid request matches current visit day.
-    return matches[0] ?? null
+    if (matches.length > 0) return matches[0]
+
+    // Fallback: production data can have date drift between request and visit.
+    // If names match, still treat as paid so report/receipt does not get stuck at "pending".
+    const byName = labPaidRequests.filter((r) =>
+      labNormalizedNamesMatch(
+        normalizeLabName(String(r.testName ?? '').trim()),
+        name
+      )
+    )
+    if (byName.length === 0) return null
+    if (byName.length === 1) return byName[0]
+    return byName
+      .slice()
+      .sort((a, b) => {
+        const at = new Date(a.paidAt ?? a.createdAt ?? 0).getTime()
+        const bt = new Date(b.paidAt ?? b.createdAt ?? 0).getTime()
+        return bt - at
+      })[0]
   }
 
   const handleViewLabReceipt = (payload: {
@@ -713,32 +803,7 @@ export const PatientProfile = () => {
       <main className="patient-profile-main">
         <h1 className="patient-profile-title">My Health Profile</h1>
 
-        {(readyAndPaidMedicine.length > 0 || paidLabTestsNotify.length > 0) && (
-          <section className="patient-profile-section">
-            <h2>Notifications</h2>
-            <div className="patient-profile-notification-box">
-              {readyAndPaidMedicine.map((m) => (
-                <p key={`med-notify-${m.id}`} style={{ margin: '0 0 8px' }}>
-                  Your medicine order <strong>{m.medicineName}</strong> is ready. Please collect now.
-                </p>
-              ))}
-              {paidLabTestsNotify.map((t) => (
-                <p key={`test-notify-${t.id}`} style={{ margin: '0 0 8px' }}>
-                  Payment received for <strong>{t.testName}</strong>
-                  {t.receiptNumber && (
-                    <>
-                      {' '}— receipt no. <strong>{t.receiptNumber}</strong>
-                    </>
-                  )}
-                  . Please follow lab instructions for sample collection or visit.
-                </p>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section className="patient-profile-section">
-          <h2>My Details</h2>
+        <PatientProfileAccordionSection title="My Details" defaultOpen>
           <div className="patient-profile-details">
             <p><strong>Name:</strong> {[patient.firstName, patient.lastName].filter(Boolean).join(' ')}</p>
             <p><strong>Mobile:</strong> {patient.mobileNumber}</p>
@@ -747,14 +812,13 @@ export const PatientProfile = () => {
             {patient.bloodGroup && <p><strong>Blood group:</strong> {patient.bloodGroup}</p>}
             {patient.address && <p><strong>Address:</strong> {patient.address}</p>}
           </div>
-        </section>
+        </PatientProfileAccordionSection>
 
-        <section className="patient-profile-section">
-          <h2>Appointments</h2>
+        <PatientProfileAccordionSection title="Appointments">
           {visits.length === 0 ? (
             <p className="patient-profile-empty">No appointments yet.</p>
           ) : (
-            <ul className="patient-profile-list">
+            <ul className="patient-profile-list patient-profile-list-accordion">
               {visits.map((v) => (
                 <li key={v._id} className="patient-profile-card">
                   <div>
@@ -767,7 +831,7 @@ export const PatientProfile = () => {
               ))}
             </ul>
           )}
-        </section>
+        </PatientProfileAccordionSection>
 
         <section className="patient-profile-section">
           <div className="patient-profile-heading-with-hint">
@@ -876,72 +940,96 @@ export const PatientProfile = () => {
                 Orders you send from this app. Below, &quot;Tests on your visits&quot; are tests added on a
                 consultation — they are separate rows (same name can look like a duplicate).
               </p>
-              <ul className="patient-profile-list">
+              <ul className="patient-profile-list patient-profile-list-accordion">
                 {testRequests.map((t) => {
                   const paymentLabel = formatTestPaymentLabel(t.paymentMode, t.serviceType)
                   const showHomeAcceptMsg =
                     t.serviceType === 'HOME_SERVICE' &&
                     (t.status === 'ACCEPTED' || t.status === 'COMPLETED') &&
                     t.paymentStatus === 'PENDING'
+                  const cardKey = `test-req-${t.id}`
+                  const expanded = !!expandedCards[cardKey]
+                  const orderShort =
+                    (
+                      {
+                        PENDING: 'Waiting for lab',
+                        ACCEPTED: 'Accepted by lab',
+                        COMPLETED: 'Ready',
+                        CANCELLED: 'Cancelled',
+                      } as Record<string, string>
+                    )[t.status ?? ''] ?? ''
                   return (
-                  <li key={t.id} className="patient-profile-card patient-profile-request-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                      <strong>{t.testName}</strong>
-                      {t.notes && <span className="patient-profile-muted"> — {t.notes}</span>}
-                      <span className="patient-profile-badge">Requested by me</span>
-                    </div>
-                    <span className="patient-profile-muted" style={{ marginTop: 6 }}>
-                      {t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}
-                      {' · '}
-                      {paymentLabel}
-                      {t.preferredProviderName ? ` · Lab: ${t.preferredProviderName}` : ''}
-                      {t.preferredDateTime && ` · Preferred ${formatDateTime(t.preferredDateTime)}`}
-                      {t.expectedFulfillmentMinutes ? ` · Need in ${t.expectedFulfillmentMinutes} min` : ''}
-                    </span>
-                    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                      <span className="patient-profile-status-chip">
-                        Order:{' '}
-                        {t.status === 'PENDING' && 'Waiting for lab'}
-                        {t.status === 'ACCEPTED' && 'Accepted by lab'}
-                        {t.status === 'COMPLETED' && 'Ready'}
-                        {t.status === 'CANCELLED' && 'Cancelled'}
+                  <li key={t.id} className="patient-profile-card patient-profile-collapsible-card">
+                    <button
+                      type="button"
+                      className="patient-profile-card-header-btn"
+                      onClick={() => toggleCard(cardKey)}
+                      aria-expanded={expanded}
+                    >
+                      <div className="patient-profile-card-header-text">
+                        <div className="patient-profile-card-header-row">
+                          <strong>{t.testName}</strong>
+                          <span className="patient-profile-badge">Requested by me</span>
+                        </div>
+                        <div className="patient-profile-card-header-chips">
+                          <span className="patient-profile-status-chip">Order: {orderShort}</span>
+                          <span
+                            className="patient-profile-status-chip"
+                            style={{ background: '#f1f5f9', color: '#334155' }}
+                          >
+                            Payment: {t.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="patient-profile-accordion-icon" aria-hidden>
+                        {expanded ? '▼' : '▶'}
                       </span>
-                      <span className="patient-profile-status-chip" style={{ background: '#f1f5f9', color: '#334155' }}>
-                        Payment: {t.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
-                      </span>
-                    </div>
-                    {showHomeAcceptMsg && (
-                      <p className="patient-profile-home-strip">
-                        Our representative will call you shortly, or reach your address in your preferred time window.
-                      </p>
-                    )}
-                    {t.paymentStatus === 'PAID' && (
-                      <div className="patient-profile-receipt-box">
-                        <strong>Receipt</strong>
-                        {t.receiptNumber && (
-                          <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
-                            No. <strong>{t.receiptNumber}</strong>
-                            {t.paidAt && <span className="patient-profile-muted"> · {formatDateTime(t.paidAt)}</span>}
+                    </button>
+                    {expanded ? (
+                      <div className="patient-profile-card-expand">
+                        {t.notes ? <p className="patient-profile-muted" style={{ margin: '0 0 8px' }}>{t.notes}</p> : null}
+                        <span className="patient-profile-muted" style={{ display: 'block', marginBottom: 8 }}>
+                          {t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}
+                          {' · '}
+                          {paymentLabel}
+                          {t.preferredProviderName ? ` · Lab: ${t.preferredProviderName}` : ''}
+                          {t.preferredDateTime && ` · Preferred ${formatDateTime(t.preferredDateTime)}`}
+                          {t.expectedFulfillmentMinutes ? ` · Need in ${t.expectedFulfillmentMinutes} min` : ''}
+                        </span>
+                        {showHomeAcceptMsg && (
+                          <p className="patient-profile-home-strip">
+                            Our representative will call you shortly, or reach your address in your preferred time window.
                           </p>
                         )}
-                        <button
-                          type="button"
-                          className="patient-profile-link-btn"
-                          style={{ marginTop: 8 }}
-                          onClick={() =>
-                            handleViewLabReceipt({
-                              testName: t.testName,
-                              receiptNumber: t.receiptNumber,
-                              paidAt: t.paidAt,
-                              serviceType: t.serviceType,
-                              price: undefined,
-                            })
-                          }
-                        >
-                          View / print receipt
-                        </button>
+                        {t.paymentStatus === 'PAID' && (
+                          <div className="patient-profile-receipt-box">
+                            <strong>Receipt</strong>
+                            {t.receiptNumber && (
+                              <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
+                                No. <strong>{t.receiptNumber}</strong>
+                                {t.paidAt && <span className="patient-profile-muted"> · {formatDateTime(t.paidAt)}</span>}
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              className="patient-profile-link-btn"
+                              style={{ marginTop: 8 }}
+                              onClick={() =>
+                                handleViewLabReceipt({
+                                  testName: t.testName,
+                                  receiptNumber: t.receiptNumber,
+                                  paidAt: t.paidAt,
+                                  serviceType: t.serviceType,
+                                  price: undefined,
+                                })
+                              }
+                            >
+                              View / print receipt
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    ) : null}
                   </li>
                   )
                 })}
@@ -958,75 +1046,108 @@ export const PatientProfile = () => {
               <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
                 Linked to your appointment visit — not the same list as &quot;My test requests&quot; above.
               </p>
-              <ul className="patient-profile-list">
-              {allDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => (
-                <li key={test._id} className="patient-profile-card">
-                  <div>
-                    <strong>{test.testName}</strong>
-                    <span> — {formatDate(visitDate)}</span>
-                    {doctorName && <span> (Dr. {doctorName})</span>}
-                  </div>
-                  {(() => {
-                    const receiptMatch = findReceiptForDiagnosticTest(
-                      test.testName,
-                      visitDate,
-                      test.createdAt
-                    )
-                    const paidMatch = findPaidForDiagnosticTest(
-                      test.testName,
-                      visitDate,
-                      test.createdAt
-                    )
-                    const hasPaid = !!paidMatch
-                    const buttons: React.ReactNode[] = []
+              <ul className="patient-profile-list patient-profile-list-accordion">
+              {allDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => {
+                const visitCardKey = `visit-test-${test._id}`
+                const visitExpanded = !!expandedCards[visitCardKey]
+                const receiptMatch = findReceiptForDiagnosticTest(
+                  test.testName,
+                  visitDate,
+                  test.createdAt
+                )
+                const paidMatch = findPaidForDiagnosticTest(
+                  test.testName,
+                  visitDate,
+                  test.createdAt
+                )
+                const hasPaid = !!paidMatch
+                const canSeeReport = test.hasReport && hasPaid
+                const headerHint =
+                  canSeeReport || hasPaid ? 'Tap to view report or receipt' : 'Payment pending for report access'
 
-                    // Requirement: patient should not see report until lab marks payment as PAID.
-                    if (test.hasReport && hasPaid) {
-                      buttons.push(
-                        <button
-                          key="report"
-                          type="button"
-                          className="patient-profile-link-btn"
-                          onClick={() =>
-                            patientPortalService.openDiagnosticReport(visitId, test._id)
-                          }
-                        >
-                          View Report
-                        </button>
-                      )
-                    }
-
-                    if (hasPaid) {
-                      buttons.push(
-                        <button
-                          key="receipt"
-                          type="button"
-                          className="patient-profile-link-btn"
-                          onClick={() =>
-                            handleViewLabReceipt({
-                              testName: test.testName,
-                              receiptNumber: receiptMatch?.receiptNumber,
-                              paidAt: paidMatch?.paidAt,
-                              serviceType: (receiptMatch?.serviceType ?? paidMatch?.serviceType) as any,
-                              price: test.price,
-                            })
-                          }
-                        >
-                          View / print receipt
-                        </button>
-                      )
-                    }
-
-                    if (buttons.length === 0) return null
-
-                    return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        {buttons}
+                return (
+                <li key={test._id} className="patient-profile-card patient-profile-collapsible-card">
+                  <button
+                    type="button"
+                    className="patient-profile-card-header-btn"
+                    onClick={() => toggleCard(visitCardKey)}
+                    aria-expanded={visitExpanded}
+                  >
+                    <div className="patient-profile-card-header-text">
+                      <div className="patient-profile-card-header-row">
+                        <strong>{test.testName}</strong>
                       </div>
-                    )
-                  })()}
+                      <span className="patient-profile-muted patient-profile-card-subline">
+                        {formatDate(visitDate)}
+                        {doctorName ? ` · Dr. ${doctorName}` : ''}
+                      </span>
+                      <span className="patient-profile-muted patient-profile-card-subline" style={{ fontSize: 12 }}>
+                        {headerHint}
+                      </span>
+                    </div>
+                    <span className="patient-profile-accordion-icon" aria-hidden>
+                      {visitExpanded ? '▼' : '▶'}
+                    </span>
+                  </button>
+                  {visitExpanded ? (
+                    <div className="patient-profile-card-expand">
+                      {(() => {
+                        const buttons: React.ReactNode[] = []
+                        if (canSeeReport) {
+                          buttons.push(
+                            <button
+                              key="report"
+                              type="button"
+                              className="patient-profile-link-btn"
+                              onClick={() =>
+                                patientPortalService.openDiagnosticReport(visitId, test._id)
+                              }
+                            >
+                              View Report
+                            </button>
+                          )
+                        }
+                        if (hasPaid) {
+                          buttons.push(
+                            <button
+                              key="receipt"
+                              type="button"
+                              className="patient-profile-link-btn"
+                              onClick={() =>
+                                handleViewLabReceipt({
+                                  testName: test.testName,
+                                  receiptNumber: receiptMatch?.receiptNumber,
+                                  paidAt: paidMatch?.paidAt,
+                                  serviceType: (receiptMatch?.serviceType ?? paidMatch?.serviceType) as
+                                    | 'LAB_VISIT'
+                                    | 'HOME_SERVICE'
+                                    | undefined,
+                                  price: test.price,
+                                })
+                              }
+                            >
+                              View / print receipt
+                            </button>
+                          )
+                        }
+                        if (buttons.length === 0) {
+                          return (
+                            <p className="patient-profile-muted" style={{ margin: 0 }}>
+                              No report or receipt yet. After the lab marks payment as paid, links will appear here.
+                            </p>
+                          )
+                        }
+                        return (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                            {buttons}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  ) : null}
                 </li>
-              ))}
+                )
+              })}
             </ul>
             </>
           ) : null}
@@ -1139,67 +1260,94 @@ export const PatientProfile = () => {
             </button>
           </form>
           {medicineRequests.length > 0 ? (
-            <ul className="patient-profile-list">
-              {medicineRequests.map((m) => (
-                <li
-                  key={m.id}
-                  className="patient-profile-card patient-profile-request-card"
-                  style={{ flexDirection: 'column', alignItems: 'stretch' }}
-                >
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                    <strong>{m.medicineName}</strong>
-                    {m.dosage && <span> — {m.dosage}</span>}
-                    {m.notes && <span className="patient-profile-muted"> — {m.notes}</span>}
-                    <span className="patient-profile-badge">Requested by me</span>
-                  </div>
-                  <span className="patient-profile-muted" style={{ marginTop: 6 }}>
-                    {m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} ·{' '}
-                    {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
-                    {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
-                    {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
-                  </span>
-                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <span className="patient-profile-status-chip">
-                      Order:{' '}
-                      {m.status === 'PENDING' && 'Waiting for pharmacy'}
-                      {m.status === 'ACCEPTED' && 'Accepted by chemist'}
-                      {m.status === 'COMPLETED' && 'Ready'}
-                      {m.status === 'CANCELLED' && 'Cancelled'}
+            <ul className="patient-profile-list patient-profile-list-accordion">
+              {medicineRequests.map((m) => {
+                const medKey = `med-req-${m.id}`
+                const medExp = !!expandedCards[medKey]
+                const orderMed =
+                  (
+                    {
+                      PENDING: 'Waiting for pharmacy',
+                      ACCEPTED: 'Accepted by chemist',
+                      COMPLETED: 'Ready',
+                      CANCELLED: 'Cancelled',
+                    } as Record<string, string>
+                  )[m.status ?? ''] ?? ''
+                return (
+                <li key={m.id} className="patient-profile-card patient-profile-collapsible-card">
+                  <button
+                    type="button"
+                    className="patient-profile-card-header-btn"
+                    onClick={() => toggleCard(medKey)}
+                    aria-expanded={medExp}
+                  >
+                    <div className="patient-profile-card-header-text">
+                      <div className="patient-profile-card-header-row">
+                        <strong>{m.medicineName}</strong>
+                        <span className="patient-profile-badge">Requested by me</span>
+                      </div>
+                      <div className="patient-profile-card-header-chips">
+                        <span className="patient-profile-status-chip">Order: {orderMed}</span>
+                        <span
+                          className="patient-profile-status-chip"
+                          style={{ background: '#f1f5f9', color: '#334155' }}
+                        >
+                          Payment: {m.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="patient-profile-accordion-icon" aria-hidden>
+                      {medExp ? '▼' : '▶'}
                     </span>
-                    <span className="patient-profile-status-chip" style={{ background: '#f1f5f9', color: '#334155' }}>
-                      Payment: {m.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
-                    </span>
-                  </div>
-                  {m.paymentStatus === 'PAID' && (
-                    <div className="patient-profile-receipt-box">
-                      <strong>Receipt</strong>
-                      {(m.receiptNumber || m.paidAt) && (
-                        <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
-                          {m.receiptNumber && (
-                            <>
-                              No. <strong>{m.receiptNumber}</strong>
-                            </>
-                          )}
-                          {m.paidAt && (
-                            <span className="patient-profile-muted">
-                              {m.receiptNumber ? ' · ' : ''}
-                              {formatDateTime(m.paidAt)}
-                            </span>
-                          )}
+                  </button>
+                  {medExp ? (
+                    <div className="patient-profile-card-expand">
+                      {(m.dosage || m.notes) && (
+                        <p className="patient-profile-muted" style={{ margin: '0 0 8px' }}>
+                          {m.dosage && <span>Dosage: {m.dosage}</span>}
+                          {m.dosage && m.notes ? ' · ' : ''}
+                          {m.notes && <span>{m.notes}</span>}
                         </p>
                       )}
-                      <button
-                        type="button"
-                        className="patient-profile-link-btn"
-                        style={{ marginTop: 10, display: 'inline-block' }}
-                        onClick={() => handleViewMedicineOrderReceipt(m)}
-                      >
-                        View bill / Receipt
-                      </button>
+                      <span className="patient-profile-muted" style={{ display: 'block', marginBottom: 8 }}>
+                        {m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} ·{' '}
+                        {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
+                        {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
+                        {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
+                      </span>
+                      {m.paymentStatus === 'PAID' && (
+                        <div className="patient-profile-receipt-box">
+                          <strong>Receipt</strong>
+                          {(m.receiptNumber || m.paidAt) && (
+                            <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
+                              {m.receiptNumber && (
+                                <>
+                                  No. <strong>{m.receiptNumber}</strong>
+                                </>
+                              )}
+                              {m.paidAt && (
+                                <span className="patient-profile-muted">
+                                  {m.receiptNumber ? ' · ' : ''}
+                                  {formatDateTime(m.paidAt)}
+                                </span>
+                              )}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="patient-profile-link-btn"
+                            style={{ marginTop: 10, display: 'inline-block' }}
+                            onClick={() => handleViewMedicineOrderReceipt(m)}
+                          >
+                            View bill / Receipt
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ) : null}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           ) : (
             <p className="patient-profile-empty">No medicine requests yet. Add above and doctor will see.</p>
@@ -1211,58 +1359,79 @@ export const PatientProfile = () => {
           {!pharmacyDispensations?.length ? (
             <p className="patient-profile-empty">No pharmacy records yet.</p>
           ) : (
-            <ul className="patient-profile-list">
-              {pharmacyDispensations.map((d) => (
-                <li key={d.id} className="patient-profile-card">
-                  <div>
-                    <strong>{formatDateTime(d.createdAt)}</strong>
-                    <span> — {d.dispensedBy}</span>
-                  </div>
-                  <p className="patient-profile-muted">
-                    ₹{d.totalAmount} • {d.paymentStatus}
-                  </p>
-                  {d.receiptNumber && (
-                    <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
-                      Receipt no. <strong>{d.receiptNumber}</strong>
-                    </p>
-                  )}
-                  {!!d.items?.length && (
-                    <div style={{ marginTop: 10 }}>
-                      <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#334155' }}>
-                        Medicines
-                      </p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {d.items.map((it, i) => (
-                          <div
-                            key={`${d.id}-item-${i}`}
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              gap: 12,
-                              fontSize: 13,
-                              color: '#0f172a',
-                            }}
-                          >
-                            <span style={{ fontWeight: 500 }}>
-                              {it.medicineName}
-                              {it.quantity ? ` x ${it.quantity}` : ''}
-                            </span>
-                            <span style={{ color: '#475569' }}>₹{it.amount}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+            <ul className="patient-profile-list patient-profile-list-accordion">
+              {pharmacyDispensations.map((d) => {
+                const phKey = `pharm-disp-${d.id}`
+                const phExp = !!expandedCards[phKey]
+                const itemCount = d.items?.length ?? 0
+                return (
+                <li key={d.id} className="patient-profile-card patient-profile-collapsible-card">
                   <button
                     type="button"
-                    className="patient-profile-link-btn"
-                    style={{ marginTop: 12 }}
-                    onClick={() => handleViewPharmacyReceipt(d)}
+                    className="patient-profile-card-header-btn"
+                    onClick={() => toggleCard(phKey)}
+                    aria-expanded={phExp}
                   >
-                    View bill / Receipt
+                    <div className="patient-profile-card-header-text">
+                      <div className="patient-profile-card-header-row">
+                        <strong>{formatDateTime(d.createdAt)}</strong>
+                      </div>
+                      <span className="patient-profile-muted patient-profile-card-subline">
+                        {d.dispensedBy} · ₹{d.totalAmount} · {d.paymentStatus}
+                        {itemCount ? ` · ${itemCount} line${itemCount === 1 ? '' : 's'}` : ''}
+                      </span>
+                      {d.receiptNumber && (
+                        <span className="patient-profile-muted patient-profile-card-subline" style={{ fontSize: 12 }}>
+                          Receipt {d.receiptNumber}
+                        </span>
+                      )}
+                    </div>
+                    <span className="patient-profile-accordion-icon" aria-hidden>
+                      {phExp ? '▼' : '▶'}
+                    </span>
                   </button>
+                  {phExp ? (
+                    <div className="patient-profile-card-expand">
+                      {!!d.items?.length && (
+                        <div style={{ marginBottom: 12 }}>
+                          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#334155' }}>
+                            Medicines
+                          </p>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {d.items.map((it, i) => (
+                              <div
+                                key={`${d.id}-item-${i}`}
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  fontSize: 13,
+                                  color: '#0f172a',
+                                }}
+                              >
+                                <span style={{ fontWeight: 500 }}>
+                                  {it.medicineName}
+                                  {it.quantity ? ` x ${it.quantity}` : ''}
+                                </span>
+                                <span style={{ color: '#475569' }}>₹{it.amount}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="patient-profile-link-btn"
+                        style={{ marginTop: 4 }}
+                        onClick={() => handleViewPharmacyReceipt(d)}
+                      >
+                        View bill / Receipt
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </section>
@@ -1296,13 +1465,15 @@ export const PatientProfile = () => {
                   <span className="patient-profile-muted">
                     {formatDate(d.uploadedAt)}
                     {d.source === 'patient' && ' (uploaded by me)'}
+                    {d.isFileAvailable === false && ' (file unavailable on this server)'}
                   </span>
                   <button
                     type="button"
                     className="patient-profile-link-btn"
+                    disabled={d.isFileAvailable === false}
                     onClick={() => patientPortalService.openDocument(d.id)}
                   >
-                    View
+                    {d.isFileAvailable === false ? 'Unavailable' : 'View'}
                   </button>
                 </li>
               ))}
@@ -1419,6 +1590,107 @@ const patientProfileStyles = `
     font-weight: 600;
     margin: 0 0 12px;
     color: #334155;
+  }
+  .patient-profile-accordion-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .patient-profile-accordion-section .patient-profile-section {
+    margin-bottom: 0;
+  }
+  .patient-profile-accordion-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    background: #fff;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+  .patient-profile-accordion-trigger:hover {
+    background: #f8fafc;
+  }
+  .patient-profile-accordion-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #334155;
+  }
+  .patient-profile-accordion-icon {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: #64748b;
+    width: 1.25rem;
+    text-align: center;
+  }
+  .patient-profile-accordion-panel {
+    padding: 0 16px 16px;
+    border-top: 1px solid #f1f5f9;
+  }
+  .patient-profile-accordion-panel .patient-profile-details {
+    border-radius: 10px;
+  }
+  .patient-profile-accordion-panel .patient-profile-empty {
+    border-radius: 10px;
+  }
+  .patient-profile-list-accordion {
+    max-height: none;
+  }
+  .patient-profile-collapsible-card {
+    padding: 0;
+    overflow: hidden;
+  }
+  .patient-profile-card-header-btn {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 16px;
+    background: #fff;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .patient-profile-card-header-btn:hover {
+    background: #f8fafc;
+  }
+  .patient-profile-card-header-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .patient-profile-card-header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .patient-profile-card-header-row .patient-profile-badge {
+    margin-left: 0;
+  }
+  .patient-profile-card-header-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .patient-profile-card-subline {
+    display: block;
+    margin-top: 4px;
+  }
+  .patient-profile-card-expand {
+    padding: 0 16px 14px;
+    border-top: 1px solid #f1f5f9;
+    background: #fafbfc;
   }
   .patient-profile-section-heading-row {
     display: flex;
@@ -1635,14 +1907,6 @@ const patientProfileStyles = `
     padding: 2px 8px;
     border-radius: 9999px;
     font-weight: 600;
-  }
-  .patient-profile-notification-box {
-    background: #fffbeb;
-    border: 1px solid #fcd34d;
-    border-radius: 10px;
-    padding: 12px 14px;
-    color: #92400e;
-    font-size: 0.92rem;
   }
   .patient-profile-home-strip {
     margin: 10px 0 0;

@@ -40,6 +40,34 @@ function patientTestNamesMatchForPaymentGate(requestName: string, diagnosticName
   return false;
 }
 
+function pickPaidRequestForDiagnosticAccess(
+  paidRequests: Array<{ testName?: string; paidAt?: Date; createdAt?: Date }>,
+  diagnosticName: string,
+  visitDate: Date
+): { testName?: string; paidAt?: Date; createdAt?: Date } | null {
+  const testName = String(diagnosticName ?? "").trim();
+  if (!testName) return null;
+  const byName = paidRequests.filter((r) =>
+    patientTestNamesMatchForPaymentGate(String(r.testName ?? ""), testName)
+  );
+  if (!byName.length) return null;
+  const visitDayKey = new Date(visitDate).toISOString().slice(0, 10);
+  const sameDay = byName.filter((r) => {
+    const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
+    const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
+    return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
+  });
+  if (sameDay.length > 0) return sameDay[0];
+  if (byName.length === 1) return byName[0];
+  return byName
+    .slice()
+    .sort((a, b) => {
+      const at = new Date(a.paidAt ?? a.createdAt ?? 0).getTime();
+      const bt = new Date(b.paidAt ?? b.createdAt ?? 0).getTime();
+      return bt - at;
+    })[0];
+}
+
 function haversineKm(
   lat1: number,
   lon1: number,
@@ -493,8 +521,20 @@ router.get(
         return;
       }
 
-      const fullPath = resolveUploadFilePath((doc as any).path);
-      if (!uploadFileExists(fullPath)) {
+      const storedPath = String((doc as any).path ?? "").trim();
+      const baseName = storedPath ? path.basename(storedPath) : "";
+      const candidates = [
+        resolveUploadFilePath(storedPath),
+        baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+        baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+        baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+      ].filter(Boolean);
+      const fullPath = candidates.find((p) => uploadFileExists(p));
+      if (!fullPath) {
+        if (/^https?:\/\//i.test(storedPath)) {
+          res.redirect(storedPath);
+          return;
+        }
         res.status(404).json({ message: "File not found on server" });
         return;
       }
@@ -558,7 +598,6 @@ router.get(
 
       // Security gate: patient should access report only after lab marks payment as PAID.
       // We match by patientId + testName and compare visit day with paid/created day.
-      const visitDayKey = new Date((visit as any).visitDate).toISOString().slice(0, 10);
       const testName = String((test as any).testName ?? "").trim();
       if (!testName) {
         res.status(403).json({ message: "Payment required to access report" });
@@ -570,13 +609,12 @@ router.get(
       })
         .lean();
 
-      const canAccess = paidRequests.some((r: any) => {
-        if (!patientTestNamesMatchForPaymentGate(String(r.testName ?? ""), testName)) return false;
-        const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
-        const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
-        return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
-      });
-      if (!canAccess) {
+      const paidMatch = pickPaidRequestForDiagnosticAccess(
+        paidRequests as any[],
+        testName,
+        (visit as any).visitDate
+      );
+      if (!paidMatch) {
         res.status(403).json({ message: "Payment required to access report" });
         return;
       }
@@ -631,7 +669,6 @@ router.get(
       }
 
       // Security gate: patient should access report only after lab marks payment as PAID.
-      const visitDayKey = new Date((visit as any).visitDate).toISOString().slice(0, 10);
       const testName = String((test as any).testName ?? "").trim();
       if (!testName) {
         res.status(403).json({ message: "Payment required to access report" });
@@ -644,14 +681,12 @@ router.get(
       })
         .lean();
 
-      const canAccess = paidRequests.some((r: any) => {
-        if (!patientTestNamesMatchForPaymentGate(String(r.testName ?? ""), testName)) return false;
-        const paidAtKey = r.paidAt ? new Date(r.paidAt).toISOString().slice(0, 10) : null;
-        const createdAtKey = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
-        return (paidAtKey && paidAtKey === visitDayKey) || createdAtKey === visitDayKey;
-      });
-
-      if (!canAccess) {
+      const paidMatch = pickPaidRequestForDiagnosticAccess(
+        paidRequests as any[],
+        testName,
+        (visit as any).visitDate
+      );
+      if (!paidMatch) {
         res.status(403).json({ message: "Payment required to access report" });
         return;
       }

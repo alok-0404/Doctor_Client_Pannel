@@ -79,8 +79,10 @@ app.use("/auth", authRoutes);
 app.use("/patients", patientRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/api/ocr", ocrRoutes);
-app.use("/public", publicRoutes);
+// Keep /public/patient before /public to avoid /public route shadowing
+// patient-portal endpoints like /public/patient/tests.
 app.use("/public/patient", publicPatientRoutes);
+app.use("/public", publicRoutes);
 app.use("/appointments", appointmentRoutes);
 app.use("/pharmacy", pharmacyRoutes);
 app.use("/orders", orderRoutes);
