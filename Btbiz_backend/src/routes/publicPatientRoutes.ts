@@ -68,6 +68,19 @@ function pickPaidRequestForDiagnosticAccess(
     })[0];
 }
 
+function resolveDiagnosticReportPath(storedPath: unknown): string | null {
+  const raw = String(storedPath ?? "").trim();
+  if (!raw) return null;
+  const baseName = path.basename(raw);
+  const candidates = [
+    resolveUploadFilePath(raw),
+    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+  ].filter(Boolean);
+  return candidates.find((p) => uploadFileExists(p)) ?? null;
+}
+
 function haversineKm(
   lat1: number,
   lon1: number,
@@ -619,8 +632,13 @@ router.get(
         return;
       }
 
-      const fullPath = resolveUploadFilePath((test as any).reportPath);
-      if (!uploadFileExists(fullPath)) {
+      const reportPath = (test as any).reportPath;
+      const fullPath = resolveDiagnosticReportPath(reportPath);
+      if (!fullPath) {
+        if (/^https?:\/\//i.test(String(reportPath ?? ""))) {
+          res.redirect(String(reportPath));
+          return;
+        }
         res.status(404).json({ message: "Report file not found on the server" });
         return;
       }
@@ -691,8 +709,13 @@ router.get(
         return;
       }
 
-      const fullPath = resolveUploadFilePath((test as any).reportPath);
-      if (!uploadFileExists(fullPath)) {
+      const reportPath = (test as any).reportPath;
+      const fullPath = resolveDiagnosticReportPath(reportPath);
+      if (!fullPath) {
+        if (/^https?:\/\//i.test(String(reportPath ?? ""))) {
+          res.redirect(String(reportPath));
+          return;
+        }
         res.status(404).json({ message: "Report file not found on the server" });
         return;
       }

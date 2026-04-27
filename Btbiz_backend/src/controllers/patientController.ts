@@ -53,6 +53,19 @@ const patientToJson = (p: {
   emergencyContactPhone: p.emergencyContactPhone
 });
 
+function resolveDiagnosticReportPath(storedPath: unknown): string | null {
+  const raw = String(storedPath ?? "").trim();
+  if (!raw) return null;
+  const baseName = path.basename(raw);
+  const candidates = [
+    resolveUploadFilePath(raw),
+    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+  ].filter(Boolean);
+  return candidates.find((p) => uploadFileExists(p)) ?? null;
+}
+
 type ConfidenceTag = "HIGH" | "MEDIUM" | "LOW";
 
 const TEST_KEYWORDS = [
@@ -1027,8 +1040,12 @@ export const getDiagnosticTestReportFile = async (
       return;
     }
 
-    const fullPath = resolveUploadFilePath(test.reportPath);
-    if (!uploadFileExists(fullPath)) {
+    const fullPath = resolveDiagnosticReportPath(test.reportPath);
+    if (!fullPath) {
+      if (/^https?:\/\//i.test(String(test.reportPath ?? ""))) {
+        res.redirect(String(test.reportPath));
+        return;
+      }
       res.status(404).json({ message: "Report file not found on the server" });
       return;
     }
