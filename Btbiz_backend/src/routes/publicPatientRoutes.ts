@@ -697,7 +697,10 @@ router.get(
         patient: patientId,
       }).lean();
       if (!doc) {
-        res.status(404).json({ message: "Document not found" });
+        res.status(404).json({
+          message: "Document record not found for this patient",
+          code: "DOCUMENT_RECORD_NOT_FOUND",
+        });
         return;
       }
       const storedPath = String((doc as any).path ?? "").trim();
@@ -720,7 +723,10 @@ router.get(
           res.redirect(storedPath);
           return;
         }
-        res.status(404).json({ message: "File not found on server" });
+        res.status(404).json({
+          message: "Document file missing on server storage",
+          code: "DOCUMENT_FILE_MISSING",
+        });
         return;
       }
       const forceDownload = ["1", "true", "yes"].includes(
@@ -755,7 +761,10 @@ router.get(
       }).lean();
 
       if (!doc) {
-        res.status(404).json({ message: "Document not found" });
+        res.status(404).json({
+          message: "Document record not found for this patient",
+          code: "DOCUMENT_RECORD_NOT_FOUND",
+        });
         return;
       }
 
@@ -779,7 +788,10 @@ router.get(
           res.redirect(storedPath);
           return;
         }
-        res.status(404).json({ message: "File not found on server" });
+        res.status(404).json({
+          message: "Document file missing on server storage",
+          code: "DOCUMENT_FILE_MISSING",
+        });
         return;
       }
       const forceDownload = ["1", "true", "yes"].includes(

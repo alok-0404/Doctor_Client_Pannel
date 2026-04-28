@@ -934,9 +934,34 @@ export const patientService = {
     }
 
     try {
+      // Prefer tokenized public URL first; this is browser-agnostic and avoids blob/PDF preview quirks.
+      const linkRes = await api.get('/public/patient/documents/link', {
+        params: { patientId, documentId },
+      })
+      const tokenizedUrl = (linkRes.data as { url?: string })?.url
+      if (tokenizedUrl) {
+        if (previewWin) {
+          previewWin.location.href = tokenizedUrl
+        } else {
+          window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
+        }
+        return
+      }
+    } catch {
+      // Ignore and fallback to authenticated blob flow.
+    }
+
+    try {
       const res = await api.get(
         `/patients/${patientId}/documents/${documentId}/file`,
-        { responseType: 'blob' }
+        {
+          responseType: 'blob',
+          params: { _ts: Date.now() },
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        }
       )
       const blob = res.data as Blob
       const url = URL.createObjectURL(blob)
@@ -945,10 +970,13 @@ export const patientService = {
       } else {
         window.open(url, '_blank', 'noopener,noreferrer')
       }
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      // Keep blob URL alive longer; short revoke can render blank tab for PDFs/images.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (err: any) {
       const forbidden = err?.response?.status === 403
-      if (!forbidden) throw err
+      if (!forbidden) {
+        throw err
+      }
 
       const escapeHtml = (v: string): string =>
         v

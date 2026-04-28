@@ -636,13 +636,20 @@ export const getDocumentFile = async (
     }).lean();
 
     if (!doc) {
-      res.status(404).json({ message: "Document not found" });
+      res.status(404).json({
+        message: "Document record not found for this patient",
+        code: "DOCUMENT_RECORD_NOT_FOUND",
+      });
       return;
     }
 
     const fullPath = findExistingUploadFilePath(doc.path);
     if (!uploadFileExists(fullPath)) {
       if ((doc as any).fileData) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("Surrogate-Control", "no-store");
         res.setHeader("Content-Type", doc.mimeType);
         res.setHeader(
           "Content-Disposition",
@@ -651,11 +658,18 @@ export const getDocumentFile = async (
         res.send((doc as any).fileData);
         return;
       }
-      res.status(404).json({ message: "File not found on server" });
+      res.status(404).json({
+        message: "Document file missing on server storage",
+        code: "DOCUMENT_FILE_MISSING",
+      });
       return;
     }
 
     res.setHeader("Content-Type", doc.mimeType);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="${doc.originalName.replace(/"/g, '\\"')}"`

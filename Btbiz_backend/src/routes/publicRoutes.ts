@@ -869,13 +869,17 @@ router.get("/patient/documents/link", async (req, res) => {
       .select("_id path fileData")
       .lean();
     if (!doc) {
-      res.status(404).json({ message: "Document not found" });
+      res.status(404).json({
+        message: "Document record not found for this patient",
+        code: "DOCUMENT_RECORD_NOT_FOUND",
+      });
       return;
     }
     const storedPath = String((doc as any).path ?? "").trim();
     const fullPath = resolvePublicDocumentPath(storedPath);
     const isRemoteFile = /^https?:\/\//i.test(storedPath);
-    if (!fullPath && !isRemoteFile) {
+    const hasInlineBytes = !!(doc as any).fileData;
+    if (!fullPath && !isRemoteFile && !hasInlineBytes) {
       // Prevent issuing dead links when the physical file no longer exists.
       res.status(410).json({
         message: "Document file is not available on server. Please re-upload the prescription.",
@@ -944,7 +948,10 @@ router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0
         res.redirect(raw);
         return;
       }
-      res.status(404).json({ message: "File not found on server" });
+      res.status(404).json({
+        message: "Document file missing on server storage",
+        code: "DOCUMENT_FILE_MISSING",
+      });
       return;
     }
     res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");

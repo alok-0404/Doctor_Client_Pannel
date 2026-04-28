@@ -42,24 +42,25 @@ const DocumentViewButton: FC<DocumentViewButtonProps> = ({ patientId, documentId
       await patientService.openDocument(patientId, documentId)
     } catch {
       if (fallbackText) {
-        const win = window.open('', '_blank', 'noopener,noreferrer')
-        if (win) {
-          win.document.write(`
-            <html>
-              <head>
-                <title>Prescription text</title>
-                <meta charset="utf-8" />
-              </head>
-              <body style="margin:0; padding:16px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#0f172a;">
-                <h1 style="font-size:16px; margin:0 0 12px;">Prescription text</h1>
-                <pre style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:13px; line-height:1.5; padding:12px; border-radius:8px; background:#ffffff; border:1px solid #e2e8f0; max-width:960px; overflow:auto;">
+        const html = `
+          <html>
+            <head>
+              <title>Prescription text</title>
+              <meta charset="utf-8" />
+            </head>
+            <body style="margin:0; padding:16px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#0f172a;">
+              <h1 style="font-size:16px; margin:0 0 12px;">Prescription text</h1>
+              <pre style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:13px; line-height:1.5; padding:12px; border-radius:8px; background:#ffffff; border:1px solid #e2e8f0; max-width:960px; overflow:auto;">
 ${escapeHtml(fallbackText)}
-                </pre>
-              </body>
-            </html>
-          `)
-          win.document.close()
-        } else {
+              </pre>
+            </body>
+          </html>
+        `
+        const blob = new Blob([html], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const opened = window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        if (!opened) {
           // eslint-disable-next-line no-alert
           alert('Unable to open prescription text in a new tab.')
         }
