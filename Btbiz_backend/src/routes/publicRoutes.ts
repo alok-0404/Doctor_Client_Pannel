@@ -906,6 +906,8 @@ router.get("/patient/documents/link", async (req, res) => {
 router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+)/file", async (req, res) => {
   try {
     const { token } = req.params;
+    const downloadQuery = String(req.query.download ?? "").trim().toLowerCase();
+    const forceDownload = downloadQuery === "1" || downloadQuery === "true" || downloadQuery === "yes";
     if (!token) {
       res.status(400).json({ message: "token is required" });
       return;
@@ -938,7 +940,7 @@ router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0
         res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
         res.setHeader(
           "Content-Disposition",
-          `inline; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+          `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
         );
         res.send((doc as any).fileData);
         return;
@@ -957,7 +959,7 @@ router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0
     res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
     res.setHeader(
       "Content-Disposition",
-      `inline; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+      `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
     );
     res.sendFile(fullPath);
   } catch (error) {
