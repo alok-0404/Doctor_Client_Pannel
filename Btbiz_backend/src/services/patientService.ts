@@ -286,6 +286,7 @@ export const getFullPatientHistory = async (patientId: string) => {
       ocrConfidence: (d as any).ocrConfidence,
       source: (d as any).uploadedBy ? "staff" : "patient",
       isFileAvailable:
+        !!(d as any).fileData ||
         isRemoteUploadPath((d as any).path) ||
         uploadFileExists(findExistingUploadFilePath((d as any).path)),
     })),

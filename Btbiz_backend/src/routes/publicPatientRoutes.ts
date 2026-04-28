@@ -20,10 +20,14 @@ import {
   verifyPatientOtp,
   selectPatientProfile,
 } from "../services/patientAuthService";
-import { findExistingUploadFilePath } from "../utils/uploadPath";
+import {
+  findExistingUploadFilePath,
+  getUploadsRootDir,
+  toStoredUploadPath,
+} from "../utils/uploadPath";
 
 const router = Router();
-const uploadDir = path.resolve(process.cwd(), "uploads");
+const uploadDir = getUploadsRootDir();
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -277,6 +281,7 @@ router.post(
         res.status(400).json({ message: "File is required" });
         return;
       }
+      const fileBytes = await fs.promises.readFile(file.path);
       const patientId = req.patient!._id;
 
       const doc = await PatientDocument.create({
@@ -285,7 +290,8 @@ router.post(
         originalName: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
-        path: file.path,
+        path: toStoredUploadPath(file.path, file.filename),
+        fileData: fileBytes,
       });
 
       try {
@@ -697,6 +703,19 @@ router.get(
       const storedPath = String((doc as any).path ?? "").trim();
       const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {
+        const inlineBytes = (doc as any).fileData;
+        if (inlineBytes) {
+          const forceDownload = ["1", "true", "yes"].includes(
+            String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
+          );
+          res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+          res.setHeader(
+            "Content-Disposition",
+            `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+          );
+          res.send(inlineBytes);
+          return;
+        }
         if (/^https?:\/\//i.test(storedPath)) {
           res.redirect(storedPath);
           return;
@@ -743,6 +762,19 @@ router.get(
       const storedPath = String((doc as any).path ?? "").trim();
       const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {
+        const inlineBytes = (doc as any).fileData;
+        if (inlineBytes) {
+          const forceDownload = ["1", "true", "yes"].includes(
+            String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
+          );
+          res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+          res.setHeader(
+            "Content-Disposition",
+            `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+          );
+          res.send(inlineBytes);
+          return;
+        }
         if (/^https?:\/\//i.test(storedPath)) {
           res.redirect(storedPath);
           return;

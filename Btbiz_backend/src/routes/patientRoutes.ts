@@ -20,10 +20,11 @@ import {
   uploadDiagnosticTestReport,
   uploadPatientDocument
 } from "../controllers/patientController";
+import { getUploadsRootDir } from "../utils/uploadPath";
 
 const router = Router();
 
-const uploadDir = path.resolve(process.cwd(), "uploads");
+const uploadDir = getUploadsRootDir();
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }

@@ -866,7 +866,7 @@ router.get("/patient/documents/link", async (req, res) => {
       _id: documentId,
       patient: patientId,
     })
-      .select("_id path")
+      .select("_id path fileData")
       .lean();
     if (!doc) {
       res.status(404).json({ message: "Document not found" });
@@ -930,6 +930,15 @@ router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0
     }
     const fullPath = resolvePublicDocumentPath((doc as any).path);
     if (!fullPath) {
+      if ((doc as any).fileData) {
+        res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+        );
+        res.send((doc as any).fileData);
+        return;
+      }
       const raw = String((doc as any).path ?? "");
       if (/^https?:\/\//i.test(raw)) {
         res.redirect(raw);

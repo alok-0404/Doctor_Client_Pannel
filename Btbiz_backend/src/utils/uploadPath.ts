@@ -20,6 +20,26 @@ export function uploadFileExists(fullPath: string): boolean {
   return !!(fullPath && fs.existsSync(fullPath));
 }
 
+export function getUploadsRootDir(): string {
+  return path.resolve(__dirname, "../../uploads");
+}
+
+export function toStoredUploadPath(filePath: string | undefined | null, filename?: string): string {
+  if (filename && typeof filename === "string" && filename.trim()) {
+    return `uploads/${filename.trim()}`;
+  }
+  const raw = String(filePath ?? "").trim();
+  if (!raw) return "";
+  const normalizedRaw = raw.replace(/\\/g, "/");
+  const uploadsIdx = normalizedRaw.lastIndexOf("/uploads/");
+  if (uploadsIdx >= 0) {
+    return normalizedRaw.slice(uploadsIdx + 1);
+  }
+  if (normalizedRaw.startsWith("uploads/")) return normalizedRaw;
+  const base = path.basename(normalizedRaw);
+  return base ? `uploads/${base}` : normalizedRaw;
+}
+
 export function isRemoteUploadPath(storedPath: string | undefined | null): boolean {
   const raw = String(storedPath ?? "").trim();
   return /^https?:\/\//i.test(raw);

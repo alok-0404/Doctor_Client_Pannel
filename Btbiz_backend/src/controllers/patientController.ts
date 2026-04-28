@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import fs from "fs";
 
 import { Doctor } from "../models/Doctor";
 import { DoctorNotification } from "../models/DoctorNotification";
@@ -10,7 +11,11 @@ import ocrService from "../ocrService";
 import { getIo } from "../socket";
 import { Visit } from "../models/Visit";
 import { env } from "../config/env";
-import { findExistingUploadFilePath, uploadFileExists } from "../utils/uploadPath";
+import {
+  findExistingUploadFilePath,
+  toStoredUploadPath,
+  uploadFileExists,
+} from "../utils/uploadPath";
 import { sendEmailWithAttachment } from "../services/emailService";
 import { sendWhatsAppMessage } from "../services/whatsappService";
 import {
@@ -548,7 +553,8 @@ export const uploadPatientDocument = async (
       originalName: file.originalname,
       mimeType: file.mimetype,
       size: file.size,
-      path: file.path
+      path: toStoredUploadPath(file.path, file.filename),
+      fileData: await fs.promises.readFile(file.path),
     });
 
     // Try to extract text using OCR in the background of this request.
@@ -636,6 +642,15 @@ export const getDocumentFile = async (
 
     const fullPath = findExistingUploadFilePath(doc.path);
     if (!uploadFileExists(fullPath)) {
+      if ((doc as any).fileData) {
+        res.setHeader("Content-Type", doc.mimeType);
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${doc.originalName.replace(/"/g, '\\"')}"`
+        );
+        res.send((doc as any).fileData);
+        return;
+      }
       res.status(404).json({ message: "File not found on server" });
       return;
     }
@@ -945,7 +960,7 @@ export const uploadDiagnosticTestReport = async (
     }
 
     await DiagnosticTest.findByIdAndUpdate(testId, {
-      reportPath: file.path,
+      reportPath: toStoredUploadPath(file.path, file.filename),
       reportFileName: file.originalname,
       reportMimeType: file.mimetype,
       reportUploadedAt: new Date()

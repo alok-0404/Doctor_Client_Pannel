@@ -9,6 +9,7 @@ export interface IPatientDocument extends Document {
   mimeType: string;
   size: number;
   path: string;
+  fileData?: Buffer;
   /**
    * Optional OCR text extracted from the document (if OCR runs).
    */
@@ -37,6 +38,7 @@ const PatientDocumentSchema = new Schema<IPatientDocument>(
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
     path: { type: String, required: true },
+    fileData: { type: Buffer },
     ocrText: { type: String },
     ocrConfidence: { type: Number }
   },
