@@ -85,6 +85,49 @@ function resolveDocumentFilePath(storedPath: unknown): string | null {
   return findExistingUploadFilePath(raw) || null;
 }
 
+function normalizeBinaryPayload(value: unknown): Buffer | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (typeof value === "object") {
+    const maybe = value as any;
+    if (Buffer.isBuffer(maybe.buffer)) return maybe.buffer;
+    if (maybe.buffer instanceof ArrayBuffer) return Buffer.from(maybe.buffer);
+    if (Array.isArray(maybe.data)) return Buffer.from(maybe.data);
+  }
+  return null;
+}
+
+function decodePossibleBase64Payload(value: unknown): Buffer | null {
+  if (typeof value !== "string") return null;
+  let raw = value.trim();
+  if (!raw) return null;
+  if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
+    raw = raw.slice(1, -1);
+  }
+  const commaIndex = raw.indexOf(",");
+  if (raw.startsWith("data:") && commaIndex >= 0) {
+    raw = raw.slice(commaIndex + 1);
+  }
+  const compact = raw.replace(/\s+/g, "");
+  if (!compact || compact.length < 16) return null;
+  if (compact.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact)) return null;
+  try {
+    const decoded = Buffer.from(compact, "base64");
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeLegacyBase64FileBuffer(rawBytes: Buffer): Buffer | null {
+  const text = rawBytes.toString("utf8").trim();
+  if (!text) return null;
+  return decodePossibleBase64Payload(text);
+}
+
 function haversineKm(
   lat1: number,
   lon1: number,
@@ -706,7 +749,9 @@ router.get(
       const storedPath = String((doc as any).path ?? "").trim();
       const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {
-        const inlineBytes = (doc as any).fileData;
+        const inlineBytes =
+          normalizeBinaryPayload((doc as any).fileData) ||
+          decodePossibleBase64Payload((doc as any).fileData);
         if (inlineBytes) {
           const forceDownload = ["1", "true", "yes"].includes(
             String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
@@ -737,6 +782,16 @@ router.get(
         "Content-Disposition",
         `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
       );
+      const legacyDecodedBytes = decodeLegacyBase64FileBuffer(await fs.promises.readFile(fullPath));
+      if (legacyDecodedBytes) {
+        res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
+        res.setHeader(
+          "Content-Disposition",
+          `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+        );
+        res.send(legacyDecodedBytes);
+        return;
+      }
       res.sendFile(fullPath);
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -771,7 +826,9 @@ router.get(
       const storedPath = String((doc as any).path ?? "").trim();
       const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {
-        const inlineBytes = (doc as any).fileData;
+        const inlineBytes =
+          normalizeBinaryPayload((doc as any).fileData) ||
+          decodePossibleBase64Payload((doc as any).fileData);
         if (inlineBytes) {
           const forceDownload = ["1", "true", "yes"].includes(
             String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
@@ -802,6 +859,11 @@ router.get(
         "Content-Disposition",
         `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
       );
+      const legacyDecodedBytes = decodeLegacyBase64FileBuffer(await fs.promises.readFile(fullPath));
+      if (legacyDecodedBytes) {
+        res.send(legacyDecodedBytes);
+        return;
+      }
       res.sendFile(fullPath);
     } catch (error) {
       // eslint-disable-next-line no-console
