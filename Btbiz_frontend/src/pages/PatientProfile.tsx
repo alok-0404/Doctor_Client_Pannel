@@ -1456,7 +1456,7 @@ export const PatientProfile = () => {
           ) : (
             <ul
               className={`patient-profile-list ${
-                documents.length > 5 ? 'patient-profile-list-scroll' : ''
+                documents.length > 3 ? 'patient-profile-doc-list-scroll' : ''
               }`}
             >
               {documents.map((d) => (
@@ -1471,7 +1471,7 @@ export const PatientProfile = () => {
                     type="button"
                     className="patient-profile-link-btn"
                     disabled={d.isFileAvailable === false}
-                    onClick={() => patientPortalService.openDocument(d.id)}
+                    onClick={() => patientPortalService.openDocument(d.id, patient.id)}
                   >
                     {d.isFileAvailable === false ? 'Unavailable' : 'View'}
                   </button>
@@ -1758,8 +1758,8 @@ const patientProfileStyles = `
     overflow-y: auto;
     padding-right: 6px;
   }
-  .patient-profile-list-scroll {
-    max-height: 420px;
+  .patient-profile-doc-list-scroll {
+    max-height: 280px;
     overflow-y: auto;
     padding-right: 6px;
   }

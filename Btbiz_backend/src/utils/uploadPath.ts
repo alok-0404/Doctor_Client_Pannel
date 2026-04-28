@@ -19,3 +19,49 @@ export function resolveUploadFilePath(storedPath: string | undefined | null): st
 export function uploadFileExists(fullPath: string): boolean {
   return !!(fullPath && fs.existsSync(fullPath));
 }
+
+export function isRemoteUploadPath(storedPath: string | undefined | null): boolean {
+  const raw = String(storedPath ?? "").trim();
+  return /^https?:\/\//i.test(raw);
+}
+
+/**
+ * Resolve upload paths stored in mixed formats:
+ * - absolute path
+ * - relative `uploads/<file>`
+ * - legacy paths containing `/uploads/...`
+ * - windows-style separators on non-windows hosts
+ */
+export function findExistingUploadFilePath(storedPath: string | undefined | null): string {
+  const raw = String(storedPath ?? "").trim();
+  if (!raw) return "";
+
+  const baseResolved = resolveUploadFilePath(raw);
+  const normalizedRaw = raw.replace(/\\/g, "/");
+  const baseName = path.basename(normalizedRaw);
+  const uploadsSuffix = normalizedRaw.includes("/uploads/")
+    ? normalizedRaw.slice(normalizedRaw.lastIndexOf("/uploads/") + 1)
+    : "";
+  const relativeFromUploads = uploadsSuffix.startsWith("uploads/")
+    ? uploadsSuffix.replace(/^uploads\//, "")
+    : normalizedRaw.startsWith("uploads/")
+      ? normalizedRaw.replace(/^uploads\//, "")
+      : "";
+
+  const candidates = [
+    baseResolved,
+    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
+    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
+    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
+    uploadsSuffix ? path.resolve(process.cwd(), uploadsSuffix) : "",
+    uploadsSuffix ? path.resolve(process.cwd(), "Btbiz_backend", uploadsSuffix) : "",
+    uploadsSuffix ? path.resolve(__dirname, "../../", uploadsSuffix) : "",
+    relativeFromUploads ? path.resolve(process.cwd(), "uploads", relativeFromUploads) : "",
+    relativeFromUploads
+      ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", relativeFromUploads)
+      : "",
+    relativeFromUploads ? path.resolve(__dirname, "../../uploads", relativeFromUploads) : "",
+  ].filter(Boolean);
+
+  return candidates.find((p) => uploadFileExists(p)) ?? "";
+}

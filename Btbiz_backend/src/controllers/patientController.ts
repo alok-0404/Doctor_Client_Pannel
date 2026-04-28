@@ -1,5 +1,3 @@
-import path from "path";
-
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 
@@ -10,10 +8,9 @@ import { Patient } from "../models/Patient";
 import { PatientDocument } from "../models/PatientDocument";
 import ocrService from "../ocrService";
 import { getIo } from "../socket";
-// import path from "path";
 import { Visit } from "../models/Visit";
 import { env } from "../config/env";
-import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
+import { findExistingUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 import { sendEmailWithAttachment } from "../services/emailService";
 import { sendWhatsAppMessage } from "../services/whatsappService";
 import {
@@ -56,14 +53,7 @@ const patientToJson = (p: {
 function resolveDiagnosticReportPath(storedPath: unknown): string | null {
   const raw = String(storedPath ?? "").trim();
   if (!raw) return null;
-  const baseName = path.basename(raw);
-  const candidates = [
-    resolveUploadFilePath(raw),
-    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
-    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
-    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
-  ].filter(Boolean);
-  return candidates.find((p) => uploadFileExists(p)) ?? null;
+  return findExistingUploadFilePath(raw) || null;
 }
 
 type ConfidenceTag = "HIGH" | "MEDIUM" | "LOW";
@@ -644,7 +634,7 @@ export const getDocumentFile = async (
       return;
     }
 
-    const fullPath = resolveUploadFilePath(doc.path);
+    const fullPath = findExistingUploadFilePath(doc.path);
     if (!uploadFileExists(fullPath)) {
       res.status(404).json({ message: "File not found on server" });
       return;
@@ -997,7 +987,7 @@ export const uploadDiagnosticTestReport = async (
             }\n\nRegards,\nBTBiz Doctor`,
             attachment: {
               filename: file.originalname,
-              path: resolveUploadFilePath(file.path),
+              path: findExistingUploadFilePath(file.path) || file.path,
               contentType: file.mimetype,
             },
           })

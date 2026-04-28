@@ -12,7 +12,11 @@ import { FamilyMember } from "../models/FamilyMember";
 import type { AppointmentChannel } from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
-import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
+import {
+  findExistingUploadFilePath,
+  isRemoteUploadPath,
+  uploadFileExists,
+} from "../utils/uploadPath";
 
 const getMobileCandidates = (mobile: string): string[] => {
   const digits = mobile.replace(/\D/g, "");
@@ -281,7 +285,9 @@ export const getFullPatientHistory = async (patientId: string) => {
       ocrText: (d as any).ocrText,
       ocrConfidence: (d as any).ocrConfidence,
       source: (d as any).uploadedBy ? "staff" : "patient",
-      isFileAvailable: uploadFileExists(resolveUploadFilePath((d as any).path)),
+      isFileAvailable:
+        isRemoteUploadPath((d as any).path) ||
+        uploadFileExists(findExistingUploadFilePath((d as any).path)),
     })),
     medicineRequests: medicineRequests.map((m) => ({
       id: (m as any)._id.toString(),

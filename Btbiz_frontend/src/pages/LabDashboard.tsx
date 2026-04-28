@@ -74,6 +74,7 @@ export const LabDashboard = () => {
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingTestRequests, setIncomingTestRequests] = useState<LabOrderRequest[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
   const labWorkspaceRef = useRef<HTMLDivElement>(null)
   const [receiptData, setReceiptData] = useState<{
     patient: { name: string; mobile: string }
@@ -235,7 +236,10 @@ export const LabDashboard = () => {
       const list = await orderService.getTestRequests()
       // Keep panel clean: show only active requests.
       const next = list.filter(
-        (request) => request.status !== 'COMPLETED' && request.status !== 'CANCELLED'
+        (request) =>
+          request.status !== 'COMPLETED' &&
+          request.status !== 'CANCELLED' &&
+          !hiddenRequestIdsRef.current.has(request.id)
       )
       setIncomingTestRequests((prev) => {
         const prevKey = JSON.stringify(prev)
@@ -359,15 +363,31 @@ export const LabDashboard = () => {
     r: LabOrderRequest,
     patch: Partial<{ status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'; paymentStatus: 'PENDING' | 'PAID' }>
   ) => {
-    await orderService.updateTestRequest(r.id, patch)
-    await loadIncomingTestRequests()
-    if (patient?.id === r.patientId) {
-      try {
-        const h = await patientService.getFullHistory(patient.id)
-        setHistory(h)
-      } catch {
-        /* ignore */
+    const shouldHideImmediately = patch.status === 'COMPLETED' || patch.status === 'CANCELLED'
+    const previousRequests = incomingTestRequests
+
+    if (shouldHideImmediately) {
+      hiddenRequestIdsRef.current.add(r.id)
+      setIncomingTestRequests((prev) => prev.filter((request) => request.id !== r.id))
+    }
+
+    try {
+      await orderService.updateTestRequest(r.id, patch)
+      await loadIncomingTestRequests()
+      if (patient?.id === r.patientId) {
+        try {
+          const h = await patientService.getFullHistory(patient.id)
+          setHistory(h)
+        } catch {
+          /* ignore */
+        }
       }
+    } catch {
+      if (shouldHideImmediately) {
+        hiddenRequestIdsRef.current.delete(r.id)
+        setIncomingTestRequests(previousRequests)
+      }
+      alert('Could not update request. Please try again.')
     }
   }
 

@@ -686,7 +686,7 @@ export const patientPortalService = {
     })
     return ((res.data as any)?.providers ?? []) as ServiceProviderOption[]
   },
-  async openDocument(documentId: string): Promise<void> {
+  async openDocument(documentId: string, patientId?: string): Promise<void> {
     // Open tab in user-click context first, otherwise popup blockers may block blob preview.
     const previewWin = window.open('', '_blank')
     if (previewWin) {
@@ -700,8 +700,25 @@ export const patientPortalService = {
       previewWin.document.close()
     }
     try {
-      const res = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
-      const blob = res.data as Blob
+      const resolvedPatientId = patientId || patientStorage.getPatientId()
+      if (resolvedPatientId) {
+        const linkRes = await patientApi.get('/public/patient/documents/link', {
+          params: { patientId: resolvedPatientId, documentId },
+        })
+        const tokenizedUrl = (linkRes.data as { url?: string })?.url
+        if (tokenizedUrl) {
+          if (previewWin) {
+            previewWin.location.href = tokenizedUrl
+          } else {
+            window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
+          }
+          return
+        }
+      }
+
+      // Fallback: try authenticated blob route when short-link route is unavailable.
+      const fileRes = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
+      const blob = fileRes.data as Blob
       const objectUrl = URL.createObjectURL(blob)
       if (previewWin) {
         previewWin.location.href = objectUrl
@@ -716,6 +733,8 @@ export const patientPortalService = {
         msg = 'Document file not found.'
       } else if (e?.response?.status === 403) {
         msg = 'You are not allowed to view this document.'
+      } else if (e?.response?.status === 401) {
+        msg = 'Your session expired. Please login again.'
       } else if (e?.response?.data instanceof Blob) {
         try {
           const text = await e.response.data.text()

@@ -20,7 +20,7 @@ import {
   verifyPatientOtp,
   selectPatientProfile,
 } from "../services/patientAuthService";
-import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
+import { findExistingUploadFilePath } from "../utils/uploadPath";
 
 const router = Router();
 const uploadDir = path.resolve(process.cwd(), "uploads");
@@ -72,57 +72,13 @@ function pickPaidRequestForDiagnosticAccess(
 function resolveDiagnosticReportPath(storedPath: unknown): string | null {
   const raw = String(storedPath ?? "").trim();
   if (!raw) return null;
-  const baseName = path.basename(raw);
-  const normalizedRaw = raw.replace(/\\/g, "/");
-  const uploadsSuffix = normalizedRaw.includes("/uploads/")
-    ? normalizedRaw.slice(normalizedRaw.lastIndexOf("/uploads/") + 1)
-    : "";
-  const relativeFromUploads = uploadsSuffix.startsWith("uploads/")
-    ? uploadsSuffix.replace(/^uploads\//, "")
-    : "";
-  const candidates = [
-    resolveUploadFilePath(raw),
-    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
-    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
-    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
-    uploadsSuffix ? path.resolve(process.cwd(), uploadsSuffix) : "",
-    uploadsSuffix ? path.resolve(process.cwd(), "Btbiz_backend", uploadsSuffix) : "",
-    uploadsSuffix ? path.resolve(__dirname, "../../", uploadsSuffix) : "",
-    relativeFromUploads ? path.resolve(process.cwd(), "uploads", relativeFromUploads) : "",
-    relativeFromUploads
-      ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", relativeFromUploads)
-      : "",
-    relativeFromUploads ? path.resolve(__dirname, "../../uploads", relativeFromUploads) : "",
-  ].filter(Boolean);
-  return candidates.find((p) => uploadFileExists(p)) ?? null;
+  return findExistingUploadFilePath(raw) || null;
 }
 
 function resolveDocumentFilePath(storedPath: unknown): string | null {
   const raw = String(storedPath ?? "").trim();
   if (!raw) return null;
-  const baseName = path.basename(raw);
-  const normalizedRaw = raw.replace(/\\/g, "/");
-  const uploadsSuffix = normalizedRaw.includes("/uploads/")
-    ? normalizedRaw.slice(normalizedRaw.lastIndexOf("/uploads/") + 1)
-    : "";
-  const relativeFromUploads = uploadsSuffix.startsWith("uploads/")
-    ? uploadsSuffix.replace(/^uploads\//, "")
-    : "";
-  const candidates = [
-    resolveUploadFilePath(raw),
-    baseName ? path.resolve(process.cwd(), "uploads", baseName) : "",
-    baseName ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", baseName) : "",
-    baseName ? path.resolve(__dirname, "../../uploads", baseName) : "",
-    uploadsSuffix ? path.resolve(process.cwd(), uploadsSuffix) : "",
-    uploadsSuffix ? path.resolve(process.cwd(), "Btbiz_backend", uploadsSuffix) : "",
-    uploadsSuffix ? path.resolve(__dirname, "../../", uploadsSuffix) : "",
-    relativeFromUploads ? path.resolve(process.cwd(), "uploads", relativeFromUploads) : "",
-    relativeFromUploads
-      ? path.resolve(process.cwd(), "Btbiz_backend", "uploads", relativeFromUploads)
-      : "",
-    relativeFromUploads ? path.resolve(__dirname, "../../uploads", relativeFromUploads) : "",
-  ].filter(Boolean);
-  return candidates.find((p) => uploadFileExists(p)) ?? null;
+  return findExistingUploadFilePath(raw) || null;
 }
 
 function haversineKm(
