@@ -660,10 +660,11 @@ router.post(
   }
 );
 
-// GET /public/patient/documents/:documentId/file - serve document (patient auth)
-// NOTE: Keep this public tokenized route BEFORE the auth route below.
+// GET /public/patient/documents/:token/file - serve document from signed token
+// IMPORTANT: token pattern is strict JWT (three dot-separated parts), so it does not shadow
+// the authenticated documentId route (`/documents/:documentId/file`) below.
 router.get(
-  "/documents/:token/file",
+  "/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+)/file",
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { token } = req.params;

@@ -899,7 +899,7 @@ router.get("/patient/documents/link", async (req, res) => {
 
 // GET /public/patient/documents/:token/file
 // Public tokenized file endpoint for patient-facing channels (WhatsApp/SMS links).
-router.get("/patient/documents/:token/file", async (req, res) => {
+router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+)/file", async (req, res) => {
   try {
     const { token } = req.params;
     if (!token) {
