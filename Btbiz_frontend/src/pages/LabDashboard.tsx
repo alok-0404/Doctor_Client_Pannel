@@ -233,8 +233,10 @@ export const LabDashboard = () => {
     if (!silent) setRequestsLoading(true)
     try {
       const list = await orderService.getTestRequests()
-      // Show all requests (including already-paid) so lab can audit what bot just created.
-      const next = list
+      // Keep panel clean: show only active requests.
+      const next = list.filter(
+        (request) => request.status !== 'COMPLETED' && request.status !== 'CANCELLED'
+      )
       setIncomingTestRequests((prev) => {
         const prevKey = JSON.stringify(prev)
         const nextKey = JSON.stringify(next)
@@ -378,6 +380,71 @@ export const LabDashboard = () => {
     }
   }
 
+  const getDateBucket = (isoDate: string): 'today' | 'yesterday' | 'older' => {
+    const requestDate = new Date(isoDate)
+    if (Number.isNaN(requestDate.getTime())) return 'older'
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startOfYesterday = new Date(startOfToday)
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+
+    if (requestDate >= startOfToday) return 'today'
+    if (requestDate >= startOfYesterday) return 'yesterday'
+    return 'older'
+  }
+
+  const todayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'today')
+  const yesterdayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'yesterday')
+
+  const renderRequestCard = (r: LabOrderRequest) => (
+    <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
+      <p style={{ margin: '4px 0', fontSize: 13 }}>{r.testName}{r.notes ? ` · ${r.notes}` : ''}</p>
+      <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+        {r.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
+        {r.preferredDateTime ? ` · Preferred ${new Date(r.preferredDateTime).toLocaleString('en-IN')}` : ''}
+        {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
+      </p>
+      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+        Request time: {new Date(r.createdAt).toLocaleString('en-IN')}
+      </p>
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingTestRequest(r)}>
+          Accept
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'CANCELLED' })}>
+          Cancel
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })}>
+          Ready
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })}>
+          Mark paid
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderRequestSection = (
+    title: string,
+    requests: LabOrderRequest[],
+    emptyLabel: string
+  ) => (
+    <div>
+      <p style={{ margin: '6px 0 8px', fontSize: 12, fontWeight: 700, letterSpacing: 0.5, color: '#475569' }}>
+        {title}
+      </p>
+      {requests.length === 0 ? (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#94a3b8' }}>{emptyLabel}</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {requests.map((request) => renderRequestCard(request))}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="app-shell">
       <Header doctorName={name} />
@@ -409,34 +476,15 @@ export const LabDashboard = () => {
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 10,
+                  gap: 16,
                   maxHeight: incomingTestRequests.length > 5 ? 420 : undefined,
                   overflowY: incomingTestRequests.length > 5 ? 'auto' : undefined,
                   paddingRight: incomingTestRequests.length > 5 ? 6 : undefined,
                 }}
               >
-                {incomingTestRequests.map((r) => (
-                  <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
-                    <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
-                    <p style={{ margin: '4px 0', fontSize: 13 }}>{r.testName}{r.notes ? ` · ${r.notes}` : ''}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
-                      {r.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
-                      {r.preferredDateTime ? ` · Preferred ${new Date(r.preferredDateTime).toLocaleString('en-IN')}` : ''}
-                      {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
-                    </p>
-                    <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingTestRequest(r)}>
-                        Accept
-                      </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })}>
-                        Ready
-                      </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })}>
-                        Mark paid
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                {renderRequestSection('TODAY', todayRequests, 'No requests today.')}
+                {renderRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
+                {renderRequestSection('ALL REQUEST', incomingTestRequests, 'No requests available.')}
               </div>
             )}
               </Card>
