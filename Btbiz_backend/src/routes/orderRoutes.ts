@@ -116,19 +116,20 @@ router.get("/test-requests", async (req, res) => {
       return;
     }
 
-    let labProviderId = req.doctor._id;
+    const providerIds = [req.doctor._id];
     if (req.doctor.role === "LAB_ASSISTANT") {
       const assistant = await Doctor.findById(req.doctor._id)
         .select("createdByDoctorId")
         .lean();
-      labProviderId = (assistant as any)?.createdByDoctorId?.toString?.() || req.doctor._id;
+      const parentLabId = (assistant as any)?.createdByDoctorId?.toString?.();
+      if (parentLabId) providerIds.push(parentLabId);
     }
 
     const requests = await PatientTestRequest.find({
       $or: [
         { preferredProvider: { $exists: false } },
         { preferredProvider: null },
-        { preferredProvider: labProviderId },
+        { preferredProvider: { $in: providerIds } },
       ],
     })
       .sort({ createdAt: -1 })

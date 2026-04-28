@@ -848,6 +848,20 @@ function resolvePublicDocumentPath(storedPath: unknown): string | null {
   return candidates.find((p) => uploadFileExists(p)) ?? null;
 }
 
+function normalizeBinaryPayload(value: unknown): Buffer | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (typeof value === "object") {
+    const maybe = value as any;
+    if (Buffer.isBuffer(maybe.buffer)) return maybe.buffer;
+    if (maybe.buffer instanceof ArrayBuffer) return Buffer.from(maybe.buffer);
+    if (Array.isArray(maybe.data)) return Buffer.from(maybe.data);
+  }
+  return null;
+}
+
 // GET /public/patient/documents/link?patientId=...&documentId=...
 // Returns a short-lived public link for prescription/document file.
 router.get("/patient/documents/link", async (req, res) => {
@@ -936,13 +950,14 @@ router.get("/patient/documents/:token([A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0
     }
     const fullPath = resolvePublicDocumentPath((doc as any).path);
     if (!fullPath) {
-      if ((doc as any).fileData) {
+      const inlineBytes = normalizeBinaryPayload((doc as any).fileData);
+      if (inlineBytes) {
         res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
         res.setHeader(
           "Content-Disposition",
           `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
         );
-        res.send((doc as any).fileData);
+        res.send(inlineBytes);
         return;
       }
       const raw = String((doc as any).path ?? "");

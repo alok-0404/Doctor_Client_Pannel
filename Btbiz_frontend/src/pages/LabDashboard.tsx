@@ -235,10 +235,13 @@ export const LabDashboard = () => {
     try {
       const list = await orderService.getTestRequests()
       // Keep panel clean: show only active requests.
+      const seenIds = new Set<string>()
       const next = list.filter(
         (request) =>
           request.status !== 'COMPLETED' &&
           request.status !== 'CANCELLED' &&
+          !seenIds.has(request.id) &&
+          (seenIds.add(request.id), true) &&
           !hiddenRequestIdsRef.current.has(request.id)
       )
       setIncomingTestRequests((prev) => {
@@ -350,11 +353,16 @@ export const LabDashboard = () => {
   }
 
   const handleAcceptIncomingTestRequest = async (r: LabOrderRequest) => {
+    const previousRequests = incomingTestRequests
+    setIncomingTestRequests((prev) =>
+      prev.map((request) => (request.id === r.id ? { ...request, status: 'ACCEPTED' } : request))
+    )
     try {
       await orderService.updateTestRequest(r.id, { status: 'ACCEPTED' })
       await openPatientAndPrefillFromTestRequest(r)
-      await loadIncomingTestRequests()
+      await loadIncomingTestRequests(true)
     } catch {
+      setIncomingTestRequests(previousRequests)
       alert('Could not accept request. Please try again.')
     }
   }
@@ -369,11 +377,23 @@ export const LabDashboard = () => {
     if (shouldHideImmediately) {
       hiddenRequestIdsRef.current.add(r.id)
       setIncomingTestRequests((prev) => prev.filter((request) => request.id !== r.id))
+    } else {
+      setIncomingTestRequests((prev) =>
+        prev.map((request) =>
+          request.id === r.id
+            ? {
+                ...request,
+                ...(patch.status ? { status: patch.status } : {}),
+                ...(patch.paymentStatus ? { paymentStatus: patch.paymentStatus } : {}),
+              }
+            : request
+        )
+      )
     }
 
     try {
       await orderService.updateTestRequest(r.id, patch)
-      await loadIncomingTestRequests()
+      await loadIncomingTestRequests(true)
       if (patient?.id === r.patientId) {
         try {
           const h = await patientService.getFullHistory(patient.id)
@@ -416,6 +436,7 @@ export const LabDashboard = () => {
 
   const todayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'today')
   const yesterdayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'yesterday')
+  const olderRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'older')
 
   const renderRequestCard = (r: LabOrderRequest) => (
     <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
@@ -504,7 +525,7 @@ export const LabDashboard = () => {
               >
                 {renderRequestSection('TODAY', todayRequests, 'No requests today.')}
                 {renderRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
-                {renderRequestSection('ALL REQUEST', incomingTestRequests, 'No requests available.')}
+                {renderRequestSection('OLDER', olderRequests, 'No older requests.')}
               </div>
             )}
               </Card>
