@@ -401,7 +401,9 @@ router.post(
         return;
       }
       const fromArray = Array.isArray(body.medicines) ? body.medicines : [];
-      const single = body.medicineName
+      // If batch `medicines[]` is provided, do not append legacy single fields.
+      // Otherwise first item is duplicated (common bot compatibility bug).
+      const single = fromArray.length === 0 && body.medicineName
         ? [{ medicineName: body.medicineName, quantity: body.quantity, dosage: body.dosage, notes: body.notes }]
         : [];
       const rows = [...fromArray, ...single]

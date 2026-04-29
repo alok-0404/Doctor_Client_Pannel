@@ -4,6 +4,8 @@ export interface IPatientMedicineRequest {
   patient: Types.ObjectId;
   /** Preferred pharmacy chosen by patient (optional). */
   preferredProvider?: Types.ObjectId;
+  /** Optional batch id to group multiple medicines from one request action */
+  requestGroupId?: string;
   medicineName: string;
   dosage?: string;
   quantity?: number;
@@ -39,6 +41,7 @@ const PatientMedicineRequestSchema = new Schema<IPatientMedicineRequest>(
       ref: "Doctor",
       index: true,
     },
+    requestGroupId: { type: String, index: true },
     medicineName: { type: String, required: true },
     dosage: { type: String },
     quantity: { type: Number },

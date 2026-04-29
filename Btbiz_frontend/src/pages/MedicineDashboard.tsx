@@ -244,18 +244,25 @@ export const MedicineDashboard = () => {
   }, [])
 
   const prefillRowsFromOrderRequest = (r: PharmacyOrderRequest) => {
-    const baseName = r.medicineName.trim()
-    const withDosage = r.dosage?.trim() ? `${baseName} (${r.dosage.trim()})` : baseName
-    const qty = r.quantity != null && r.quantity > 0 ? String(Math.floor(r.quantity)) : '1'
-    setRows([
-      {
-        id: String(Date.now()),
-        medicineName: withDosage,
-        mrp: '',
-        discount: '0',
-        quantity: qty,
-      },
-    ])
+    const sourceItems =
+      Array.isArray(r.medicines) && r.medicines.length > 0
+        ? r.medicines
+        : [{ medicineName: r.medicineName, dosage: r.dosage, quantity: r.quantity }]
+    const mappedRows = sourceItems
+      .filter((it) => String(it.medicineName ?? '').trim().length > 0)
+      .map((it, idx) => {
+        const baseName = String(it.medicineName ?? '').trim()
+        const withDosage = it.dosage?.trim() ? `${baseName} (${it.dosage.trim()})` : baseName
+        const qty = it.quantity != null && it.quantity > 0 ? String(Math.floor(it.quantity)) : '1'
+        return {
+          id: String(Date.now() + idx),
+          medicineName: withDosage,
+          mrp: '',
+          discount: '0',
+          quantity: qty,
+        }
+      })
+    setRows(mappedRows.length > 0 ? mappedRows : [{ id: String(Date.now()), medicineName: '', mrp: '', discount: '0', quantity: '1' }])
     setCreateError(null)
   }
 
@@ -389,11 +396,18 @@ export const MedicineDashboard = () => {
                 {incomingRequests.map((r) => (
                   <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
                     <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
-                    <p style={{ margin: '4px 0', fontSize: 13 }}>
-                      {r.medicineName}
-                      {r.dosage ? ` · ${r.dosage}` : ''}
-                      {r.quantity ? ` · Qty ${r.quantity}` : ''}
-                    </p>
+                    <div style={{ margin: '4px 0', fontSize: 13 }}>
+                      {(r.medicines && r.medicines.length > 0
+                        ? r.medicines
+                        : [{ medicineName: r.medicineName, dosage: r.dosage, quantity: r.quantity }]
+                      ).map((m, idx) => (
+                        <p key={`${r.id}-${idx}`} style={{ margin: idx === 0 ? '0 0 2px' : '0 0 2px' }}>
+                          {m.medicineName}
+                          {m.dosage ? ` · ${m.dosage}` : ''}
+                          {m.quantity ? ` · Qty ${m.quantity}` : ''}
+                        </p>
+                      ))}
+                    </div>
                     <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
                       {r.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
                       {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}

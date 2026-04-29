@@ -301,10 +301,13 @@ export interface AssistantCheckedInItem extends DoctorAppointmentItem {
 
 export interface PharmacyOrderRequest {
   id: string
+  requestGroupId?: string
   patientId: string
   patientName: string
   patientMobile: string
   medicineName: string
+  medicineNames?: string[]
+  medicines?: Array<{ medicineName: string; dosage?: string; quantity?: number; notes?: string }>
   dosage?: string
   quantity?: number
   notes?: string

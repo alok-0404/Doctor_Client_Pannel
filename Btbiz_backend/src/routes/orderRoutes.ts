@@ -29,29 +29,54 @@ router.get("/medicine-requests", async (req, res) => {
       .populate("preferredProvider", "name")
       .lean();
 
-    res.status(200).json({
-      requests: requests.map((r: any) => ({
-        id: r._id.toString(),
-        patientId: r.patient?._id?.toString(),
-        patientName: [r.patient?.firstName, r.patient?.lastName].filter(Boolean).join(" ") || "Patient",
-        patientMobile: r.patient?.mobileNumber ?? "",
-        medicineName: r.medicineName,
-        dosage: r.dosage,
-        quantity: r.quantity,
-        notes: r.notes,
-        serviceType: r.serviceType,
-        paymentMode: r.paymentMode,
-        paymentStatus: r.paymentStatus,
-        status: r.status,
-        expectedFulfillmentMinutes: r.expectedFulfillmentMinutes,
-        fulfilledAt: r.fulfilledAt,
-        receiptNumber: r.receiptNumber,
-        paidAt: r.paidAt,
-        preferredProviderId: r.preferredProvider?._id?.toString?.(),
-        preferredProviderName: r.preferredProvider?.name,
-        createdAt: r.createdAt,
-      })),
-    });
+    const grouped = new Map<string, any>();
+    for (const r of requests as any[]) {
+      const key = (r.requestGroupId && String(r.requestGroupId).trim()) || r._id.toString();
+      const medicineName = String(r.medicineName || "").trim();
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: key,
+          requestGroupId: r.requestGroupId ? String(r.requestGroupId) : undefined,
+          patientId: r.patient?._id?.toString(),
+          patientName: [r.patient?.firstName, r.patient?.lastName].filter(Boolean).join(" ") || "Patient",
+          patientMobile: r.patient?.mobileNumber ?? "",
+          medicineNames: medicineName ? [medicineName] : [],
+          medicines: medicineName
+            ? [{ medicineName, dosage: r.dosage, quantity: r.quantity, notes: r.notes }]
+            : [],
+          notes: r.notes,
+          serviceType: r.serviceType,
+          paymentMode: r.paymentMode,
+          paymentStatus: r.paymentStatus,
+          status: r.status,
+          expectedFulfillmentMinutes: r.expectedFulfillmentMinutes,
+          fulfilledAt: r.fulfilledAt,
+          receiptNumber: r.receiptNumber,
+          paidAt: r.paidAt,
+          preferredProviderId: r.preferredProvider?._id?.toString?.(),
+          preferredProviderName: r.preferredProvider?.name,
+          createdAt: r.createdAt,
+        });
+      } else {
+        const g = grouped.get(key);
+        if (medicineName && !g.medicineNames.includes(medicineName)) g.medicineNames.push(medicineName);
+        if (medicineName) {
+          g.medicines.push({
+            medicineName,
+            dosage: r.dosage,
+            quantity: r.quantity,
+            notes: r.notes,
+          });
+        }
+      }
+    }
+
+    const mapped = Array.from(grouped.values()).map((g) => ({
+      ...g,
+      medicineName: g.medicineNames.join(", "),
+    }));
+
+    res.status(200).json({ requests: mapped });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("get medicine requests error:", error);
@@ -111,22 +136,45 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       update.fulfilledAt = new Date();
     }
 
-    const existing = await PatientMedicineRequest.findById(requestId).lean();
-    if (body.paymentStatus === "PAID" && existing && (existing as any).paymentStatus !== "PAID") {
-      update.paidAt = new Date();
-      if (!(existing as any).receiptNumber) {
-        const suffix = requestId.toString().slice(-6).toUpperCase();
-        update.receiptNumber = `MED-${suffix}-${Date.now().toString(36).toUpperCase()}`;
-      }
-    }
-
     if (Object.keys(update).length === 0) {
       res.status(400).json({ message: "No valid fields to update" });
       return;
     }
 
-    await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
-    res.status(200).json({ message: "Medicine request updated" });
+    if (mongoose.Types.ObjectId.isValid(requestId)) {
+      const existing = await PatientMedicineRequest.findById(requestId).lean();
+      if (body.paymentStatus === "PAID" && existing && (existing as any).paymentStatus !== "PAID") {
+        update.paidAt = new Date();
+        if (!(existing as any).receiptNumber) {
+          const suffix = requestId.toString().slice(-6).toUpperCase();
+          update.receiptNumber = `MED-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+        }
+      }
+      await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
+      res.status(200).json({ message: "Medicine request updated" });
+      return;
+    }
+
+    // grouped request id (requestGroupId): update all medicine rows in that batch together
+    const groupRows = await PatientMedicineRequest.find({ requestGroupId: requestId })
+      .select("_id paymentStatus")
+      .lean();
+    if (!groupRows.length) {
+      res.status(404).json({ message: "Medicine request group not found" });
+      return;
+    }
+
+    if (body.paymentStatus === "PAID") {
+      const anyNotPaid = groupRows.some((r: any) => r.paymentStatus !== "PAID");
+      if (anyNotPaid) {
+        update.paidAt = new Date();
+        const suffix = requestId.slice(-6).toUpperCase();
+        update.receiptNumber = `MED-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+      }
+    }
+
+    await PatientMedicineRequest.updateMany({ requestGroupId: requestId }, { $set: update });
+    res.status(200).json({ message: "Medicine request group updated" });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("update medicine request error:", error);
