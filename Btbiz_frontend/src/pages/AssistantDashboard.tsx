@@ -688,6 +688,20 @@ export const AssistantDashboard = () => {
     return () => clearTimeout(timeout)
   }, [docUploadSuccess])
 
+  const isBotBookedAppointment = (a: DoctorAppointmentItem): boolean => {
+    const source = String(a.source ?? '').toUpperCase()
+    const reason = String(a.reason ?? '').toUpperCase()
+    if (source.includes('WHATSAPP') || source.includes('BOT')) return true
+    // Bot and public booking payloads commonly store consultation type as reason.
+    return reason === 'NEW_CONSULTATION' || reason === 'REVIEW_APPOINTMENT'
+  }
+
+  const getAssistantAppointmentSubtitle = (a: DoctorAppointmentItem): string | null => {
+    if (isBotBookedAppointment(a)) return 'Booked by BOT'
+    const reason = a.reason?.trim()
+    return reason && reason.length > 0 ? reason : null
+  }
+
   return (
     <div className="app-shell">
       <Header clinicName="Check‑in desk" doctorName={name} />
@@ -959,7 +973,9 @@ export const AssistantDashboard = () => {
                   >
                     <div>
                       <strong>{a.patientName}</strong>
-                      {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
+                      {getAssistantAppointmentSubtitle(a) && (
+                        <div style={{ color: '#607d8b', fontSize: 12 }}>{getAssistantAppointmentSubtitle(a)}</div>
+                      )}
                       {a.distanceKm != null ? (
                         <div style={{ marginTop: 4, fontSize: 12, color: a.distanceKm <= 0.5 ? '#2e7d32' : '#0d47a1' }}>
                           {a.distanceKm <= 0.5
@@ -970,9 +986,17 @@ export const AssistantDashboard = () => {
                         <div style={{ marginTop: 4, fontSize: 12, color: '#9aa5b1' }}>
                           Clinic location not set
                         </div>
-                      ) : (
+                      ) : !isBotBookedAppointment(a) ? (
                         <div style={{ marginTop: 4, fontSize: 12, color: '#9aa5b1' }}>
                           Location not shared yet
+                        </div>
+                      ) : a.patientAddress?.trim() ? (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
+                          {a.patientAddress.trim()}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#9aa5b1' }}>
+                          Location not provided in bot booking
                         </div>
                       )}
                     </div>

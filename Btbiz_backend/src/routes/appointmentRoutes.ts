@@ -62,6 +62,7 @@ function mapVisitToAppointment(
     patientId,
     patientName,
     patientMobile: patient?.mobileNumber ?? undefined,
+    patientAddress: patient?.address ?? undefined,
     visitDate: v.visitDate,
     reason: v.reason,
     notes: v.notes,
@@ -95,7 +96,7 @@ router.get("/doctor/today", async (req, res) => {
       assistantCheckedInAt: { $exists: false }
     })
       .sort({ visitDate: 1 })
-      .populate("patient", "firstName lastName mobileNumber")
+      .populate("patient", "firstName lastName mobileNumber address")
       .lean();
 
     const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
@@ -136,7 +137,7 @@ router.get("/doctor/upcoming", async (req, res) => {
     })
       .sort({ visitDate: 1 })
       .limit(100)
-      .populate("patient", "firstName lastName mobileNumber")
+      .populate("patient", "firstName lastName mobileNumber address")
       .lean();
 
     const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
@@ -178,7 +179,7 @@ router.get("/assistant/doctor-today", async (req, res) => {
       visitDate: { $gte: startOfDay, $lte: endOfDay }
     })
       .sort({ visitDate: 1 })
-      .populate("patient", "firstName lastName mobileNumber")
+      .populate("patient", "firstName lastName mobileNumber address")
       .lean();
 
     const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
