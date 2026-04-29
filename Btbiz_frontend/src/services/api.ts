@@ -974,8 +974,14 @@ export const patientService = {
       try {
         const linkRes = await api.get(`/patients/${patientId}/documents/${documentId}/secure-link`)
         const token = (linkRes.data as { token: string }).token
-        // POST keeps JWT out of the URL path (Replit / reverse proxies often choke on very long paths).
-        const previewRes = await api.post('/patients/documents/secure-preview', { token })
+        // Prefer POST so JWT is not in URL path. Fallback to legacy GET for old deployments.
+        let previewRes
+        try {
+          previewRes = await api.post('/patients/documents/secure-preview', { token })
+        } catch (postErr: any) {
+          if (postErr?.response?.status !== 404) throw postErr
+          previewRes = await api.get(`/patients/documents/secure-preview/${token}`)
+        }
         const payload = previewRes.data as {
           document: {
             originalName: string
