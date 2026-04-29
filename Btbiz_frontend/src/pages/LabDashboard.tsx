@@ -36,6 +36,13 @@ function normalizeLabTestName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function getRequestTestNames(r: LabOrderRequest): string[] {
+  const fromArray = (r.testNames ?? []).map((name) => String(name ?? '').trim()).filter(Boolean)
+  if (fromArray.length > 0) return fromArray
+  const fallback = String(r.testName ?? '').trim()
+  return fallback ? [fallback] : []
+}
+
 const COMMON_LAB_TESTS = [
   'CBC',
   'HbA1c',
@@ -270,7 +277,7 @@ export const LabDashboard = () => {
   }, [patient?.id])
 
   const prefillAddTestFromOrderRequest = (r: LabOrderRequest) => {
-    const name = (r.testNames?.[0] || r.testName || '').trim()
+    const name = getRequestTestNames(r)[0] ?? ''
     if (!name) return
     const exact = COMMON_LAB_TESTS.find((t) => t.toLowerCase() === name.toLowerCase())
     if (exact) {
@@ -318,7 +325,11 @@ export const LabDashboard = () => {
           }
           prefillAddTestFromOrderRequest(r)
           scrollLabWorkspaceIntoView()
-          return
+          return {
+            patientId: summary.id,
+            visitId: h.visits?.[0]?._id ?? null,
+            visitTests: h.visits?.[0]?.diagnosticTests ?? [],
+          }
         } catch {
           /* fall through */
         }
@@ -328,7 +339,7 @@ export const LabDashboard = () => {
         setSearchError('Patient mobile is missing or invalid on this request.')
         setPatient(null)
         setHistory(null)
-        return
+        return null
       }
 
       const options = await patientService.searchByMobileOptions(digits)
@@ -336,20 +347,52 @@ export const LabDashboard = () => {
         setPatient(null)
         setHistory(null)
         setSearchError('No patient found for this mobile. Try searching manually.')
-        return
+        return null
       }
 
       setMatchedPatients(options)
       const match =
         r.patientId ? options.find((p) => p.id === r.patientId) ?? options[0] : options[0]
       await loadPatientProfile(match)
+      const refreshed = await patientService.getFullHistory(match.id)
+      const visitId = refreshed.visits?.[0]?._id ?? null
       prefillAddTestFromOrderRequest(r)
       scrollLabWorkspaceIntoView()
+      return {
+        patientId: match.id,
+        visitId,
+        visitTests: refreshed.visits?.[0]?.diagnosticTests ?? [],
+      }
     } catch {
       setSearchError('Could not load patient. Try Search by mobile.')
+      return null
     } finally {
       setSearchLoading(false)
     }
+  }
+
+  const addRequestTestsToVisit = async (
+    r: LabOrderRequest,
+    patientId: string,
+    visitId: string,
+    currentTests: DiagnosticTestItem[]
+  ): Promise<{ addedCount: number; skippedCount: number }> => {
+    const requested = getRequestTestNames(r)
+    if (requested.length === 0) return { addedCount: 0, skippedCount: 0 }
+
+    const existing = new Set(currentTests.map((t) => normalizeLabTestName(t.testName)))
+    const missing = requested.filter((name) => !existing.has(normalizeLabTestName(name)))
+
+    if (missing.length === 0) {
+      return { addedCount: 0, skippedCount: requested.length }
+    }
+
+    await patientService.addDiagnosticTests(
+      patientId,
+      visitId,
+      missing.map((testName) => ({ testName }))
+    )
+    return { addedCount: missing.length, skippedCount: requested.length - missing.length }
   }
 
   const handleAcceptIncomingTestRequest = async (r: LabOrderRequest) => {
@@ -359,7 +402,26 @@ export const LabDashboard = () => {
     )
     try {
       await orderService.updateTestRequest(r.id, { status: 'ACCEPTED' })
-      await openPatientAndPrefillFromTestRequest(r)
+      const context = await openPatientAndPrefillFromTestRequest(r)
+      if (context?.patientId && context.visitId) {
+        const { addedCount, skippedCount } = await addRequestTestsToVisit(
+          r,
+          context.patientId,
+          context.visitId,
+          context.visitTests
+        )
+        if (addedCount > 0) {
+          const refreshed = await patientService.getFullHistory(context.patientId)
+          setHistory(refreshed)
+        }
+        if (addedCount > 0 || skippedCount > 0) {
+          const parts: string[] = []
+          if (addedCount > 0) parts.push(`${addedCount} test auto-added`)
+          if (skippedCount > 0) parts.push(`${skippedCount} already present`)
+          setAddTestError(null)
+          alert(`Accepted. ${parts.join(' · ')}.`)
+        }
+      }
       await loadIncomingTestRequests(true)
     } catch {
       setIncomingTestRequests(previousRequests)
