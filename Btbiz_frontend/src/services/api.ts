@@ -37,6 +37,28 @@ patientApi.interceptors.request.use((config) => {
   return config
 })
 
+function openBlobInBrowser(
+  blob: Blob,
+  preferredWindow?: Window | null
+): void {
+  const objectUrl = URL.createObjectURL(blob)
+  if (preferredWindow && !preferredWindow.closed) {
+    preferredWindow.location.href = objectUrl
+  } else {
+    // Anchor click fallback is more reliable across Chrome/Edge/Firefox.
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+  // Keep URL alive for slow PDF/image renderers (notably Firefox).
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+}
+
 export interface DoctorLoginPayload {
   email: string
   password: string
@@ -732,13 +754,7 @@ export const patientPortalService = {
       // Fallback: try authenticated blob route when short-link route is unavailable.
       const fileRes = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
       const blob = fileRes.data as Blob
-      const objectUrl = URL.createObjectURL(blob)
-      if (previewWin) {
-        previewWin.location.href = objectUrl
-      } else {
-        window.open(objectUrl, '_blank', 'noopener,noreferrer')
-      }
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      openBlobInBrowser(blob, previewWin)
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
       let msg = 'Could not open document. Please try again.'
@@ -798,13 +814,7 @@ export const patientPortalService = {
         }
         return
       }
-      const objectUrl = URL.createObjectURL(blob)
-      if (previewWin) {
-        previewWin.location.href = objectUrl
-      } else {
-        window.open(objectUrl, '_blank', 'noopener,noreferrer')
-      }
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      openBlobInBrowser(blob, previewWin)
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
       let msg = 'Could not open report. If payment is pending, complete payment first.'
@@ -927,9 +937,7 @@ export const patientService = {
       { responseType: 'blob' }
     )
     const blob = res.data as Blob
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    openBlobInBrowser(blob)
   },
 
   async openDocument(patientId: string, documentId: string): Promise<void> {

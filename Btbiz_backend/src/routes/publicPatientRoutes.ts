@@ -85,6 +85,25 @@ function resolveDocumentFilePath(storedPath: unknown): string | null {
   return findExistingUploadFilePath(raw) || null;
 }
 
+function setBrowserCompatibleFileHeaders(
+  res: Response,
+  mimeType: string,
+  originalName: string,
+  asDownload = false
+): void {
+  res.setHeader("Content-Type", mimeType || "application/octet-stream");
+  res.setHeader(
+    "Content-Disposition",
+    `${asDownload ? "attachment" : "inline"}; filename="${originalName.replace(/"/g, '\\"')}"`
+  );
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Accept-Ranges", "bytes");
+}
+
 function normalizeBinaryPayload(value: unknown): Buffer | null {
   if (!value) return null;
   if (Buffer.isBuffer(value)) return value;
@@ -758,10 +777,11 @@ router.get(
           const forceDownload = ["1", "true", "yes"].includes(
             String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
           );
-          res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
-          res.setHeader(
-            "Content-Disposition",
-            `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+          setBrowserCompatibleFileHeaders(
+            res,
+            (doc as any).mimeType || "application/octet-stream",
+            (doc as any).originalName || "document",
+            forceDownload
           );
           res.send(inlineBytes);
           return;
@@ -779,17 +799,19 @@ router.get(
       const forceDownload = ["1", "true", "yes"].includes(
         String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
       );
-      res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
-      res.setHeader(
-        "Content-Disposition",
-        `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+      setBrowserCompatibleFileHeaders(
+        res,
+        (doc as any).mimeType || "application/octet-stream",
+        (doc as any).originalName || "document",
+        forceDownload
       );
       const legacyDecodedBytes = decodeLegacyBase64FileBuffer(await fs.promises.readFile(fullPath));
       if (legacyDecodedBytes) {
-        res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
-        res.setHeader(
-          "Content-Disposition",
-          `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+        setBrowserCompatibleFileHeaders(
+          res,
+          (doc as any).mimeType || "application/octet-stream",
+          (doc as any).originalName || "document",
+          forceDownload
         );
         res.send(legacyDecodedBytes);
         return;
@@ -835,10 +857,11 @@ router.get(
           const forceDownload = ["1", "true", "yes"].includes(
             String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
           );
-          res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
-          res.setHeader(
-            "Content-Disposition",
-            `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+          setBrowserCompatibleFileHeaders(
+            res,
+            (doc as any).mimeType || "application/octet-stream",
+            (doc as any).originalName || "document",
+            forceDownload
           );
           res.send(inlineBytes);
           return;
@@ -856,10 +879,11 @@ router.get(
       const forceDownload = ["1", "true", "yes"].includes(
         String((req.query.download ?? req.query.dl ?? "")).toLowerCase()
       );
-      res.setHeader("Content-Type", (doc as any).mimeType || "application/octet-stream");
-      res.setHeader(
-        "Content-Disposition",
-        `${forceDownload ? "attachment" : "inline"}; filename="${((doc as any).originalName || "document").replace(/"/g, '\\"')}"`
+      setBrowserCompatibleFileHeaders(
+        res,
+        (doc as any).mimeType || "application/octet-stream",
+        (doc as any).originalName || "document",
+        forceDownload
       );
       const legacyDecodedBytes = decodeLegacyBase64FileBuffer(await fs.promises.readFile(fullPath));
       if (legacyDecodedBytes) {
@@ -952,10 +976,11 @@ router.get(
         res.status(404).json({ message: "Report file not found on the server" });
         return;
       }
-      res.setHeader("Content-Type", (test as any).reportMimeType || "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        `inline; filename="${((test as any).reportFileName || "report").replace(/"/g, '\\"')}"`
+      setBrowserCompatibleFileHeaders(
+        res,
+        (test as any).reportMimeType || "application/pdf",
+        (test as any).reportFileName || "report",
+        false
       );
       res.sendFile(fullPath);
     } catch (error) {
@@ -1029,10 +1054,11 @@ router.get(
         res.status(404).json({ message: "Report file not found on the server" });
         return;
       }
-      res.setHeader("Content-Type", (test as any).reportMimeType || "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        `inline; filename="${((test as any).reportFileName || "report").replace(/"/g, '\\"')}"`
+      setBrowserCompatibleFileHeaders(
+        res,
+        (test as any).reportMimeType || "application/pdf",
+        (test as any).reportFileName || "report",
+        false
       );
       res.sendFile(fullPath);
     } catch (error) {

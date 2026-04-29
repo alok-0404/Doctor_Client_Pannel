@@ -55,6 +55,25 @@ const patientToJson = (p: {
   emergencyContactPhone: p.emergencyContactPhone
 });
 
+function setBrowserCompatibleFileHeaders(
+  res: Response,
+  mimeType: string,
+  originalName: string,
+  asDownload = false
+): void {
+  res.setHeader("Content-Type", mimeType || "application/octet-stream");
+  res.setHeader(
+    "Content-Disposition",
+    `${asDownload ? "attachment" : "inline"}; filename="${originalName.replace(/"/g, '\\"')}"`
+  );
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Accept-Ranges", "bytes");
+}
+
 function resolveDiagnosticReportPath(storedPath: unknown): string | null {
   const raw = String(storedPath ?? "").trim();
   if (!raw) return null;
@@ -660,14 +679,11 @@ export const getDocumentFile = async (
     const fullPath = findExistingUploadFilePath(doc.path);
     if (!uploadFileExists(fullPath)) {
       if ((doc as any).fileData) {
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-        res.setHeader("Content-Type", doc.mimeType);
-        res.setHeader(
-          "Content-Disposition",
-          `inline; filename="${doc.originalName.replace(/"/g, '\\"')}"`
+        setBrowserCompatibleFileHeaders(
+          res,
+          doc.mimeType,
+          doc.originalName || "document",
+          false
         );
         res.send((doc as any).fileData);
         return;
@@ -679,14 +695,11 @@ export const getDocumentFile = async (
       return;
     }
 
-    res.setHeader("Content-Type", doc.mimeType);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.setHeader("Surrogate-Control", "no-store");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${doc.originalName.replace(/"/g, '\\"')}"`
+    setBrowserCompatibleFileHeaders(
+      res,
+      doc.mimeType,
+      doc.originalName || "document",
+      false
     );
     res.sendFile(fullPath);
   } catch (error) {
@@ -1088,10 +1101,11 @@ export const getDiagnosticTestReportFile = async (
       return;
     }
 
-    res.setHeader("Content-Type", test.reportMimeType || "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${(test.reportFileName || "report").replace(/"/g, '\\"')}"`
+    setBrowserCompatibleFileHeaders(
+      res,
+      test.reportMimeType || "application/pdf",
+      test.reportFileName || "report",
+      false
     );
     res.sendFile(fullPath);
   } catch (error) {
