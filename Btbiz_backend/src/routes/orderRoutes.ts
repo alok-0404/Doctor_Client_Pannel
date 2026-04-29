@@ -74,6 +74,12 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       status?: "PENDING" | "ACCEPTED" | "COMPLETED" | "CANCELLED";
       paymentStatus?: "PENDING" | "PAID";
       expectedFulfillmentMinutes?: number;
+      receiptNumber?: string;
+      paidAt?: string;
+      subtotal?: number;
+      totalDiscount?: number;
+      totalAmount?: number;
+      paidAmount?: number;
     };
 
     const update: Record<string, unknown> = {};
@@ -81,6 +87,25 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
     if (body.paymentStatus) update.paymentStatus = body.paymentStatus;
     if (typeof body.expectedFulfillmentMinutes === "number" && body.expectedFulfillmentMinutes > 0) {
       update.expectedFulfillmentMinutes = Math.round(body.expectedFulfillmentMinutes);
+    }
+    if (typeof body.receiptNumber === "string" && body.receiptNumber.trim()) {
+      update.receiptNumber = body.receiptNumber.trim();
+    }
+    if (typeof body.paidAt === "string" && body.paidAt.trim()) {
+      const dt = new Date(body.paidAt);
+      if (!Number.isNaN(dt.getTime())) update.paidAt = dt;
+    }
+    if (typeof body.subtotal === "number" && body.subtotal >= 0) {
+      update.subtotal = body.subtotal;
+    }
+    if (typeof body.totalDiscount === "number" && body.totalDiscount >= 0) {
+      update.totalDiscount = body.totalDiscount;
+    }
+    if (typeof body.totalAmount === "number" && body.totalAmount >= 0) {
+      update.totalAmount = body.totalAmount;
+    }
+    if (typeof body.paidAmount === "number" && body.paidAmount >= 0) {
+      update.paidAmount = body.paidAmount;
     }
     if (body.status === "COMPLETED") {
       update.fulfilledAt = new Date();

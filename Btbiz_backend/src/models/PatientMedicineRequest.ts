@@ -18,6 +18,11 @@ export interface IPatientMedicineRequest {
   /** Set when pharmacy marks payment as PAID */
   receiptNumber?: string;
   paidAt?: Date;
+  /** Optional bill totals from pharmacy billing flow */
+  subtotal?: number;
+  totalDiscount?: number;
+  totalAmount?: number;
+  paidAmount?: number;
   createdAt: Date;
 }
 
@@ -67,6 +72,10 @@ const PatientMedicineRequestSchema = new Schema<IPatientMedicineRequest>(
     fulfilledAt: { type: Date },
     receiptNumber: { type: String },
     paidAt: { type: Date },
+    subtotal: { type: Number },
+    totalDiscount: { type: Number },
+    totalAmount: { type: Number },
+    paidAmount: { type: Number },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
