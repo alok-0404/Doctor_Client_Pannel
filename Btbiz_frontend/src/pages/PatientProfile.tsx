@@ -712,6 +712,10 @@ export const PatientProfile = () => {
     serviceType?: 'PICKUP' | 'HOME_DELIVERY'
     paymentMode?: 'ONLINE' | 'OFFLINE'
     preferredProviderName?: string
+    subtotal?: number
+    totalDiscount?: number
+    totalAmount?: number
+    paidAmount?: number
   }) => {
     const safeReceipt = escapeHtml(m.receiptNumber ?? '—')
     const safePaidAt = escapeHtml(m.paidAt ? formatDateTime(m.paidAt) : '—')
@@ -726,6 +730,10 @@ export const PatientProfile = () => {
     const serviceLabel =
       m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup from medical'
     const payLabel = formatMedicinePaymentLabel(m.paymentMode, m.serviceType)
+    const subtotal = Number(m.subtotal ?? 0)
+    const totalDiscount = Number(m.totalDiscount ?? 0)
+    const totalAmount = Number(m.totalAmount ?? 0)
+    const paidAmount = Number(m.paidAmount ?? totalAmount)
 
     const body = `<!doctype html>
       <html>
@@ -748,6 +756,11 @@ export const PatientProfile = () => {
             ${m.quantity != null ? `<p style="margin:0 0 6px;"><strong>Qty:</strong> ${Number(m.quantity)}</p>` : ''}
             ${m.notes ? `<p style="margin:0 0 6px;"><strong>Notes:</strong> ${safeNotes}</p>` : ''}
             <p style="margin:8px 0 0;"><strong>Service:</strong> ${escapeHtml(serviceLabel)} · <strong>Payment:</strong> ${escapeHtml(payLabel)}</p>
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:12px 0;" />
+            <p style="margin:0 0 6px;"><strong>Subtotal:</strong> ₹${subtotal.toFixed(2)}</p>
+            <p style="margin:0 0 6px;"><strong>Total discount:</strong> ₹${totalDiscount.toFixed(2)}</p>
+            <p style="margin:0 0 6px;"><strong>Total bill:</strong> ₹${totalAmount.toFixed(2)}</p>
+            <p style="margin:0;"><strong>Paid amount:</strong> ₹${paidAmount.toFixed(2)}</p>
           </div>
           <div style="margin-top:18px;">
             <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
@@ -1314,6 +1327,7 @@ export const PatientProfile = () => {
                         {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
                         {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
                         {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
+                        {typeof m.totalAmount === 'number' ? ` · Amount ₹${m.totalAmount.toFixed(2)}` : ''}
                       </span>
                       {m.paymentStatus === 'PAID' && (
                         <div className="patient-profile-receipt-box">

@@ -42,6 +42,8 @@ export const AssistantDashboard = () => {
   const [hasTodayVisit, setHasTodayVisit] = useState(false)
   const [todayVisitId, setTodayVisitId] = useState<string | null>(null)
   const [prefilledFromVisitAt, setPrefilledFromVisitAt] = useState<string | null>(null)
+  /** When assistant check-in was recorded on the visit (wall clock), if any. */
+  const [prefilledAssistantCheckInAt, setPrefilledAssistantCheckInAt] = useState<string | null>(null)
 
   // Form state for new patient / edit
   const [firstName, setFirstName] = useState('')
@@ -283,12 +285,17 @@ export const AssistantDashboard = () => {
       // Always prefill from latest known visit values (even if not today's visit).
       try {
         const history = await patientService.getFullHistory(found.id)
+        const visitIdStr = String(latestVisit.id)
         const latestKnownVisit =
-          (history.visits as any[] | undefined)?.find((v) => v._id === latestVisit.id) ??
+          (history.visits as any[] | undefined)?.find((v) => String(v._id) === visitIdStr) ??
           (history.visits as any[] | undefined)?.[0]
         if (latestKnownVisit) {
           setPrefilledFromVisitAt(
             latestKnownVisit.visitDate ? new Date(latestKnownVisit.visitDate).toISOString() : null
+          )
+          const checkedInRaw = (latestKnownVisit as { assistantCheckedInAt?: string | Date }).assistantCheckedInAt
+          setPrefilledAssistantCheckInAt(
+            checkedInRaw ? new Date(checkedInRaw).toISOString() : null
           )
           setDiseaseReason(latestKnownVisit.reason ?? '')
           setNotesForDoctor(latestKnownVisit.notes ?? '')
@@ -306,6 +313,7 @@ export const AssistantDashboard = () => {
           setOtherVitalsNotes(latestKnownVisit.otherVitalsNotes ?? '')
         } else {
           setPrefilledFromVisitAt(null)
+          setPrefilledAssistantCheckInAt(null)
           setDiseaseReason('')
           setNotesForDoctor('')
           setBpSystolic('')
@@ -317,6 +325,7 @@ export const AssistantDashboard = () => {
         }
       } catch {
         setPrefilledFromVisitAt(null)
+        setPrefilledAssistantCheckInAt(null)
         setDiseaseReason('')
         setNotesForDoctor('')
         setBpSystolic('')
@@ -330,6 +339,7 @@ export const AssistantDashboard = () => {
       setHasTodayVisit(false)
       setTodayVisitId(null)
       setPrefilledFromVisitAt(null)
+      setPrefilledAssistantCheckInAt(null)
       setDiseaseReason('')
       setNotesForDoctor('')
       setBpSystolic('')
@@ -444,6 +454,7 @@ export const AssistantDashboard = () => {
         setPatient(null)
         setPatientId(null)
         setPrefilledFromVisitAt(null)
+        setPrefilledAssistantCheckInAt(null)
         setStep('new_patient')
       }
     } catch {
@@ -482,6 +493,7 @@ export const AssistantDashboard = () => {
       setPatient(created)
       setPatientId(created.id)
       setPrefilledFromVisitAt(null)
+      setPrefilledAssistantCheckInAt(null)
       setFormSuccess('Patient registered. Now fill mandatory vitals and refer to doctor.')
       setStep('checkin')
     } catch (err: any) {
@@ -554,6 +566,7 @@ export const AssistantDashboard = () => {
       setPatientId(null)
       setTodayVisitId(null)
       setPrefilledFromVisitAt(null)
+      setPrefilledAssistantCheckInAt(null)
       setMobileSearch('')
     } catch (err: unknown) {
       const parsed = parseAssistantReferralError(err)
@@ -599,6 +612,7 @@ export const AssistantDashboard = () => {
     setHasTodayVisit(false)
     setTodayVisitId(null)
     setPrefilledFromVisitAt(null)
+    setPrefilledAssistantCheckInAt(null)
     setMobileSearch('')
     setFamilyOptions(null)
     setFamilyPickMobile(null)
@@ -1224,15 +1238,28 @@ export const AssistantDashboard = () => {
               {prefilledFromVisitAt && (
                 <p
                   className="search-subtitle"
-                  style={{ marginTop: 6, color: '#0d47a1', fontSize: 12 }}
+                  style={{ marginTop: 6, color: '#0d47a1', fontSize: 12, lineHeight: 1.45 }}
                 >
-                  Prefilled from last visit:{' '}
+                  Vitals prefilled from the latest visit.{' '}
+                  <strong>Scheduled appointment</strong> (from booking / preferred slot — not “saved just now”):{' '}
                   <strong>
                     {new Date(prefilledFromVisitAt).toLocaleString('en-IN', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}
                   </strong>
+                  {prefilledAssistantCheckInAt ? (
+                    <>
+                      {' '}
+                      · Assistant check-in:{' '}
+                      <strong>
+                        {new Date(prefilledAssistantCheckInAt).toLocaleString('en-IN', {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </strong>
+                    </>
+                  ) : null}
                 </p>
               )}
             </header>
@@ -1263,8 +1290,7 @@ export const AssistantDashboard = () => {
                 />
               </div>
               <TextField id="c-blood-group" label="Blood group" value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} />
-              <TextField id="c-emergency-name" label="Emergency contact" value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} />
-              <TextField id="c-emergency-phone" type="tel" label="Emergency phone" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} />
+              <TextField id="c-emergency-name" label="Emergency contact name" value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} />
               <Button type="submit" disabled={saveLoading} style={{ alignSelf: 'flex-start' }}>
                 {saveLoading ? 'Saving…' : 'Update patient details'}
               </Button>

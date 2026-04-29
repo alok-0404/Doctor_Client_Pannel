@@ -137,34 +137,112 @@ async function ensureDistinctPatientsPerFamilyAccount(accountId: mongoose.Types.
   }
 }
 
-/** Combine appointmentDate (YYYY-MM-DD) and preferredSlot text into a Date with time.
- *  If preferredSlot can't be parsed, falls back to midnight (original behaviour).
+/** IST calendar date from appointmentDate (YYYY-MM-DD or ISO prefix). */
+function istCalendarDateStr(appointmentDate: string): string {
+  const raw = String(appointmentDate ?? "").trim();
+  const ymd = raw.length >= 10 ? raw.slice(0, 10) : "";
+  if (ymd && /^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  const d = new Date(raw);
+  if (!Number.isNaN(d.getTime())) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === "year")?.value;
+    const mo = parts.find((p) => p.type === "month")?.value;
+    const da = parts.find((p) => p.type === "day")?.value;
+    if (y && mo && da) return `${y}-${mo}-${da}`;
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+function istWallClockToUtcDate(dateStr: string, hour24: number, minute: number): Date {
+  const hh = String(Math.max(0, Math.min(23, hour24))).padStart(2, "0");
+  const mm = String(Math.max(0, Math.min(59, minute))).padStart(2, "0");
+  return new Date(`${dateStr}T${hh}:${mm}:00+05:30`);
+}
+
+/** 12h + am/pm → 24h hour (minute unchanged). */
+function applyMeridiem12(hour12: number, minute: number, mer: "am" | "pm"): { h: number; m: number } {
+  if (mer === "am") {
+    if (hour12 === 12) return { h: 0, m: minute };
+    return { h: hour12, m: minute };
+  }
+  if (hour12 === 12) return { h: 12, m: minute };
+  return { h: hour12 + 12, m: minute };
+}
+
+function pickMeridiem(segment: string): "am" | "pm" | null {
+  const t = segment.toLowerCase();
+  if (/\bpm\b/.test(t)) return "pm";
+  if (/\bam\b/.test(t)) return "am";
+  return null;
+}
+
+function leadingHourMinute(segment: string): { hour: number; minute: number } | null {
+  const m = segment.match(/(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return { hour: parseInt(m[1], 10), minute: m[2] ? parseInt(m[2], 10) : 0 };
+}
+
+/**
+ * Combine appointmentDate and preferredSlot into a real instant (stored as UTC in Mongo).
+ * - Uses Asia/Kolkata wall time for the chosen calendar day (same idea as /doctors/:id/appointment-quota).
+ * - Parses portal ranges like "2:00 - 3:00 PM" using the **end** meridian for the start when needed.
+ * - Parses WhatsApp-style text via first "H[:MM] am|pm" token (e.g. "Evening (4 PM – 7 PM)" → 4 PM).
  */
 function buildVisitDate(appointmentDate: string, preferredSlot?: string): Date {
-  const visitDate = new Date(appointmentDate);
-  if (!preferredSlot) {
-    return visitDate;
+  const dateStr = istCalendarDateStr(appointmentDate);
+  const istNoon = () => istWallClockToUtcDate(dateStr, 12, 0);
+
+  const slot = String(preferredSlot ?? "").trim();
+  if (!slot) {
+    return istNoon();
   }
 
-  const lower = preferredSlot.toLowerCase();
-  // Try to extract first time like "10", "10:30", "10am", "10:30 pm" from the slot string
-  const match = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-  if (!match) {
-    return visitDate;
+  const norm = slot.replace(/\u2013|\u2014/g, "-");
+
+  // 1) Range: "10:00 - 11:00 AM", "2:00 - 3:00 PM", "11:00 AM - 12:00 PM"
+  const rangeParts = norm.split(/\s*-\s/).map((p) => p.trim()).filter(Boolean);
+  if (rangeParts.length >= 2) {
+    const leftHm = leadingHourMinute(rangeParts[0]);
+    const rightHm = leadingHourMinute(rangeParts[1]);
+    if (leftHm && rightHm) {
+      const merLeft = pickMeridiem(rangeParts[0]);
+      const merRight = pickMeridiem(rangeParts[1]);
+      const mer = merLeft ?? merRight;
+      if (mer) {
+        const { h, m } = applyMeridiem12(leftHm.hour, leftHm.minute, mer);
+        return istWallClockToUtcDate(dateStr, h, m);
+      }
+    }
   }
 
-  let hour = parseInt(match[1], 10);
-  const minute = match[2] ? parseInt(match[2], 10) : 0;
-  const suffix = match[3];
-
-  if (suffix === "pm" && hour < 12) {
-    hour += 12;
-  } else if (suffix === "am" && hour === 12) {
-    hour = 0;
+  // 2) First explicit "h[:mm] am|pm" in the whole string (bot / free text)
+  const explicit = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi.exec(norm);
+  if (explicit) {
+    const hour12 = parseInt(explicit[1], 10);
+    const minute = explicit[2] ? parseInt(explicit[2], 10) : 0;
+    const mer = explicit[3].toLowerCase() as "am" | "pm";
+    const { h, m } = applyMeridiem12(hour12, minute, mer);
+    return istWallClockToUtcDate(dateStr, h, m);
   }
 
-  visitDate.setHours(hour, minute, 0, 0);
-  return visitDate;
+  // 3) Legacy: first digits, optional trailing meridiem on whole string
+  const loose = norm.match(/(\d{1,2})(?::(\d{2}))?/);
+  if (loose) {
+    const hour12 = parseInt(loose[1], 10);
+    const minute = loose[2] ? parseInt(loose[2], 10) : 0;
+    const mer = pickMeridiem(norm);
+    if (mer) {
+      const { h, m } = applyMeridiem12(hour12, minute, mer);
+      return istWallClockToUtcDate(dateStr, h, m);
+    }
+  }
+
+  return istNoon();
 }
 
 function deriveDobFromAge(age?: number): Date | undefined {

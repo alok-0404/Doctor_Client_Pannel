@@ -36,6 +36,11 @@ router.use(authenticateDoctor);
 // GET /patients/search?mobile=
 router.get("/search", searchPatientByMobile);
 
+// Secure prescription preview — POST preferred (JWT in body avoids long-URL / proxy issues on Replit).
+// GET /patients/documents/secure-preview/:token kept for backward compatibility.
+router.post("/documents/secure-preview", getPrescriptionSecurePreview);
+router.get("/documents/secure-preview/:token", getPrescriptionSecurePreview);
+
 // POST /patients - create new patient
 router.post("/", createPatient);
 
@@ -55,8 +60,6 @@ router.post("/:patientId/documents", upload.single("file"), uploadPatientDocumen
 router.get("/:patientId/documents/:documentId/file", getDocumentFile);
 // GET /patients/:patientId/documents/:documentId/secure-link - create short-lived token for lab/pharmacy
 router.get("/:patientId/documents/:documentId/secure-link", getPrescriptionSecureLink);
-// GET /patients/documents/secure-preview/:token - fetch role-limited preview (no file bytes)
-router.get("/documents/secure-preview/:token", getPrescriptionSecurePreview);
 
 // GET /patients/:patientId/full-history
 router.get("/:patientId/full-history", getPatientFullHistory);

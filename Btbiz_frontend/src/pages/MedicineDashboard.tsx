@@ -65,6 +65,7 @@ export const MedicineDashboard = () => {
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingRequests, setIncomingRequests] = useState<PharmacyOrderRequest[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
   const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const loadPatientProfile = async (p: PatientSummary) => {
@@ -82,6 +83,7 @@ export const MedicineDashboard = () => {
     setMatchedPatients([])
     setSelectedPatientId('')
     setCurrentDispensationId(null)
+    setActiveRequestId(null)
     const digits = mobileSearch.replace(/\D/g, '')
     if (digits.length < 10) {
       setSearchError('Enter a valid 10-digit mobile number.')
@@ -182,6 +184,19 @@ export const MedicineDashboard = () => {
       const receipt = await pharmacyService.getReceipt(currentDispensationId)
       setReceiptData(receipt)
       setShowReceipt(true)
+      if (activeRequestId) {
+        await orderService.updateMedicineRequest(activeRequestId, {
+          paymentStatus: 'PAID',
+          status: 'COMPLETED',
+          receiptNumber: receipt.receiptNumber,
+          paidAt: receipt.paidAt,
+          subtotal: receipt.subtotal,
+          totalDiscount: receipt.totalDiscount,
+          totalAmount: receipt.totalAmount,
+          paidAmount: receipt.paidAmount,
+        })
+        await loadIncomingRequests()
+      }
       if (patient?.id) {
         const h = await patientService.getFullHistory(patient.id)
         setHistory(h)
@@ -211,6 +226,7 @@ export const MedicineDashboard = () => {
     setPaymentAmount('')
     setReceiptData(null)
     setShowReceipt(false)
+    setActiveRequestId(null)
   }
 
   const loadIncomingRequests = async () => {
@@ -255,6 +271,7 @@ export const MedicineDashboard = () => {
   const openPatientAndPrefillFromRequest = async (r: PharmacyOrderRequest) => {
     setSearchError(null)
     setCurrentDispensationId(null)
+    setActiveRequestId(r.id)
     setPaymentAmount('')
     setReceiptData(null)
     setShowReceipt(false)

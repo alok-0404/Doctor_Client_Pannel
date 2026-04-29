@@ -432,6 +432,12 @@ export const orderService = {
       status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
       paymentStatus: 'PENDING' | 'PAID'
       expectedFulfillmentMinutes: number
+      receiptNumber: string
+      paidAt: string
+      subtotal: number
+      totalDiscount: number
+      totalAmount: number
+      paidAmount: number
     }>
   ): Promise<void> {
     await api.patch(`/orders/medicine-requests/${requestId}`, payload)
@@ -600,6 +606,10 @@ export interface FullPatientHistory {
     fulfilledAt?: string
     receiptNumber?: string
     paidAt?: string
+    subtotal?: number
+    totalDiscount?: number
+    totalAmount?: number
+    paidAmount?: number
     preferredProviderId?: string
     preferredProviderName?: string
     preferredProviderAddress?: string
@@ -933,51 +943,11 @@ export const patientService = {
       previewWin.document.close()
     }
 
-    try {
-      // Prefer tokenized public URL first; this is browser-agnostic and avoids blob/PDF preview quirks.
-      const linkRes = await api.get('/public/patient/documents/link', {
-        params: { patientId, documentId },
-      })
-      const tokenizedUrl = (linkRes.data as { url?: string })?.url
-      if (tokenizedUrl) {
-        if (previewWin) {
-          previewWin.location.href = tokenizedUrl
-        } else {
-          window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
-        }
-        return
-      }
-    } catch {
-      // Ignore and fallback to authenticated blob flow.
-    }
+    const currentRole = authStorage.getRole()
+    const mustUseSecurePreview =
+      currentRole === 'LAB_ASSISTANT' || currentRole === 'LAB_MANAGER' || currentRole === 'PHARMACY'
 
-    try {
-      const res = await api.get(
-        `/patients/${patientId}/documents/${documentId}/file`,
-        {
-          responseType: 'blob',
-          params: { _ts: Date.now() },
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-        }
-      )
-      const blob = res.data as Blob
-      const url = URL.createObjectURL(blob)
-      if (previewWin) {
-        previewWin.location.href = url
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer')
-      }
-      // Keep blob URL alive longer; short revoke can render blank tab for PDFs/images.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (err: any) {
-      const forbidden = err?.response?.status === 403
-      if (!forbidden) {
-        throw err
-      }
-
+    const openSecurePreview = async (): Promise<void> => {
       const escapeHtml = (v: string): string =>
         v
           .replace(/&/g, '&amp;')
@@ -988,7 +958,6 @@ export const patientService = {
 
       const win = previewWin ?? window.open('', '_blank')
       if (!win) {
-        // eslint-disable-next-line no-alert
         alert('Popup blocked. Please allow popups to view secure preview.')
         return
       }
@@ -1005,7 +974,8 @@ export const patientService = {
       try {
         const linkRes = await api.get(`/patients/${patientId}/documents/${documentId}/secure-link`)
         const token = (linkRes.data as { token: string }).token
-        const previewRes = await api.get(`/patients/documents/secure-preview/${token}`)
+        // POST keeps JWT out of the URL path (Replit / reverse proxies often choke on very long paths).
+        const previewRes = await api.post('/patients/documents/secure-preview', { token })
         const payload = previewRes.data as {
           document: {
             originalName: string
@@ -1102,6 +1072,61 @@ export const patientService = {
         `)
         win.document.close()
       }
+    }
+
+    if (mustUseSecurePreview) {
+      await openSecurePreview()
+      return
+    }
+
+    if (!mustUseSecurePreview) {
+      try {
+        // Prefer tokenized public URL first for doctor/assistant flows.
+        const linkRes = await api.get('/public/patient/documents/link', {
+          params: { patientId, documentId },
+        })
+        const tokenizedUrl = (linkRes.data as { url?: string })?.url
+        if (tokenizedUrl) {
+          if (previewWin) {
+            previewWin.location.href = tokenizedUrl
+          } else {
+            window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
+          }
+          return
+        }
+      } catch {
+        // Ignore and fallback to authenticated/secure flow.
+      }
+    }
+
+    try {
+      const res = await api.get(
+        `/patients/${patientId}/documents/${documentId}/file`,
+        {
+          responseType: 'blob',
+          params: { _ts: Date.now() },
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        }
+      )
+      const blob = res.data as Blob
+      const url = URL.createObjectURL(blob)
+      if (previewWin) {
+        previewWin.location.href = url
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+      // Keep blob URL alive longer; short revoke can render blank tab for PDFs/images.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err: any) {
+      const forbidden = err?.response?.status === 403
+      if (!forbidden) {
+        throw err
+      }
+
+      await openSecurePreview()
     }
   },
 

@@ -80,6 +80,20 @@ const TEST_KEYWORDS = [
   "blood test",
   "test",
   "lab",
+  "crp",
+  "dengue",
+  "ns1",
+  "malaria",
+  "widal",
+  "culture",
+  "antigen",
+  "antibody",
+  "parasite",
+  "serology",
+  "pcr",
+  "vitamin d",
+  "b12",
+  "ferritin",
 ];
 
 const MEDICINE_HINTS = [
@@ -736,7 +750,14 @@ export const getPrescriptionSecurePreview = async (
   res: Response
 ): Promise<void> => {
   try {
-    const { token } = req.params;
+    const bodyToken =
+      req.body && typeof (req.body as { token?: unknown }).token === "string"
+        ? String((req.body as { token: string }).token).trim()
+        : "";
+    const queryToken =
+      typeof req.query.token === "string" ? req.query.token.trim() : "";
+    const pathToken = typeof req.params.token === "string" ? req.params.token.trim() : "";
+    const token = bodyToken || queryToken || pathToken;
     const role = req.doctor?.role;
     if (!role) {
       res.status(401).json({ message: "Unauthorized" });
@@ -794,15 +815,15 @@ export const getPrescriptionSecurePreview = async (
     const isPharmacy = role === "PHARMACY";
     const isLab = role === "LAB_ASSISTANT" || role === "LAB_MANAGER";
 
-    // Role-based filtering for the "Raw OCR" section too:
-    // - Lab roles: hide medicine-like lines
-    // - Pharmacy role: hide test-like lines
+    // Role-based filtering for the "Raw OCR" section: only lines this role is allowed to see.
+    // (Previously we dropped opposite-role lines but kept UNKNOWN — patient/diagnosis leaked,
+    // especially when ocrConfidence is low and many lines land in lowConfidenceLines on prod.)
     const roleFilteredPreviewText = previewText
       .split(/\r?\n/)
       .filter((line: string) => {
         const lineType = detectLineType(line);
-        if (isLab && lineType === "MEDICINE") return false;
-        if (isPharmacy && lineType === "TEST") return false;
+        if (isLab) return lineType === "TEST";
+        if (isPharmacy) return lineType === "MEDICINE";
         return true;
       })
       .join("\n")
@@ -811,17 +832,15 @@ export const getPrescriptionSecurePreview = async (
     const roleFilteredParsed = {
       medicines: isPharmacy ? parsed.medicines : [],
       tests: isLab ? parsed.tests : [],
-      unknown: parsed.unknown
+      unknown: []
     };
 
-    // Role-based filtering for low-confidence lines too.
-    // - Lab roles: hide medicine-like lines; keep tests + patient/doctor details (usually UNKNOWN)
-    // - Pharmacy role: hide test-like lines; keep medicines + patient/doctor details (usually UNKNOWN)
+    // Low-confidence bucket must follow the same rule as Raw OCR (no UNKNOWN / PII for lab/pharmacy).
     const roleFilteredLowConfidenceLines = parsed.lowConfidenceLines
       .filter((line) => {
         const lineType = detectLineType(line);
-        if (isLab && lineType === "MEDICINE") return false;
-        if (isPharmacy && lineType === "TEST") return false;
+        if (isLab) return lineType === "TEST";
+        if (isPharmacy) return lineType === "MEDICINE";
         return true;
       })
       .slice(0, 20);
