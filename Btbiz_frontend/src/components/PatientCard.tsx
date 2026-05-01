@@ -193,6 +193,21 @@ interface PatientCardProps {
 
 type SectionKey = 'patient' | 'visitHistory' | 'prescriptions' | 'medicines' | 'pharmacyDispensations' | 'tests'
 
+const isLocationLikeAddress = (value?: string): boolean => {
+  const v = String(value ?? '').trim()
+  if (!v) return false
+  const lower = v.toLowerCase()
+  if (
+    lower.includes('maps.google.com') ||
+    lower.includes('google.com/maps') ||
+    lower.includes('maps.app.goo.gl') ||
+    lower.includes('shared location')
+  ) {
+    return true
+  }
+  return /^\s*-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?\s*$/.test(v)
+}
+
 export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
     patient: true,
@@ -214,6 +229,7 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
   const openMedicines = openSections.medicines
   const openPharmacyDispensations = openSections.pharmacyDispensations
   const openTests = openSections.tests
+  const visibleAddress = data.address && !isLocationLikeAddress(data.address) ? data.address : undefined
 
   return (
     <div className="patient-layout">
@@ -250,10 +266,10 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                   </dd>
                 </div>
               )}
-              {data.address && (
-                <div className="patient-summary-row">
+              {visibleAddress && (
+                <div className="patient-summary-row patient-summary-row-address">
                   <dt>Address</dt>
-                  <dd>{data.address}</dd>
+                  <dd>{visibleAddress}</dd>
                 </div>
               )}
               {data.heightCm && data.weightKg && (

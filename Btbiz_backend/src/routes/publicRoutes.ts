@@ -253,6 +253,68 @@ function deriveDobFromAge(age?: number): Date | undefined {
   return dob;
 }
 
+/**
+ * Persist only user-typed address text.
+ * Location links / coordinate-only inputs should not overwrite patient address.
+ */
+function sanitizePatientAddress(input?: string): string | undefined {
+  const value = String(input ?? "").trim();
+  if (!value) return undefined;
+
+  const lower = value.toLowerCase();
+  if (
+    lower.includes("maps.google.com") ||
+    lower.includes("google.com/maps") ||
+    lower.includes("maps.app.goo.gl") ||
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.includes("shared location")
+  ) {
+    return undefined;
+  }
+
+  if (/^\s*-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?\s*$/.test(value)) {
+    return undefined;
+  }
+
+  return value;
+}
+
+function extractCoordsFromText(input?: string): { lat: number; lng: number } | null {
+  const value = String(input ?? "").trim();
+  if (!value) return null;
+
+  const qMatch = /[?&]q=(-?\d+(?:\.\d+)?)%2C(-?\d+(?:\.\d+)?)/i.exec(value);
+  if (qMatch) {
+    const lat = Number(qMatch[1]);
+    const lng = Number(qMatch[2]);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+  }
+
+  const plainQMatch = /[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i.exec(value);
+  if (plainQMatch) {
+    const lat = Number(plainQMatch[1]);
+    const lng = Number(plainQMatch[2]);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+  }
+
+  const sharedTextMatch = /shared\s+location\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/i.exec(value);
+  if (sharedTextMatch) {
+    const lat = Number(sharedTextMatch[1]);
+    const lng = Number(sharedTextMatch[2]);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+  }
+
+  const rawPairMatch = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(value);
+  if (rawPairMatch) {
+    const lat = Number(rawPairMatch[1]);
+    const lng = Number(rawPairMatch[2]);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) return { lat, lng };
+  }
+
+  return null;
+}
+
 // GET /public/doctors - list consultants for appointment dropdown (with clinic location for distance)
 router.get("/doctors", async (_req, res) => {
   try {
@@ -1097,14 +1159,16 @@ router.post("/appointments/old", async (req, res) => {
     if (body.gender) {
       updatePayload.gender = body.gender;
     }
-    if (body.address) {
-      updatePayload.address = body.address;
+    const safeAddress = sanitizePatientAddress(body.address);
+    if (safeAddress) {
+      updatePayload.address = safeAddress;
     }
     if (Object.keys(updatePayload).length > 0) {
       await updatePatientService((patient as any)._id.toString(), updatePayload);
     }
 
     const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
+    const locationFromAddress = extractCoordsFromText(body.address);
     const notesParts = [`OPD No: ${body.opdNumber}`];
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
 
@@ -1114,8 +1178,8 @@ router.post("/appointments/old", async (req, res) => {
       visitDate,
       reason: body.consultationType,
       notes: notesParts.join(". "),
-      patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude,
+      patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
+      patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING"
     });
 
@@ -1178,7 +1242,7 @@ router.post("/appointments/new", async (req, res) => {
       patient = await createPatientService({
         firstName: body.patientName,
         mobileNumber: body.mobileNumber,
-        address: body.address,
+        address: sanitizePatientAddress(body.address),
         gender: body.gender as "MALE" | "FEMALE" | "OTHER" | undefined,
         dateOfBirth: safeDob
       });
@@ -1197,6 +1261,7 @@ router.post("/appointments/new", async (req, res) => {
     }
 
     const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
+    const locationFromAddress = extractCoordsFromText(body.address);
     const notesParts = [`City: ${body.city || ""}`];
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
 
@@ -1206,8 +1271,8 @@ router.post("/appointments/new", async (req, res) => {
       visitDate,
       reason: "New appointment",
       notes: notesParts.join(". "),
-      patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude,
+      patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
+      patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING"
     });
 
@@ -1496,7 +1561,8 @@ router.post("/appointments/family", async (req, res) => {
       }
     }
     if (body.gender) updatePayload.gender = body.gender;
-    if (body.address) updatePayload.address = body.address;
+    const safeFamilyAddress = sanitizePatientAddress(body.address);
+    if (safeFamilyAddress) updatePayload.address = safeFamilyAddress;
     if (safeDob) updatePayload.dateOfBirth = safeDob;
 
     if (Object.keys(updatePayload).length > 0) {
@@ -1504,6 +1570,7 @@ router.post("/appointments/family", async (req, res) => {
     }
 
     const visitDate = buildVisitDate(body.appointmentDate, body.preferredSlot);
+    const locationFromAddress = extractCoordsFromText(body.address);
     const notesParts: string[] = [];
     if (body.opdNumber) notesParts.push(`OPD No: ${body.opdNumber}`);
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
@@ -1514,8 +1581,8 @@ router.post("/appointments/family", async (req, res) => {
       visitDate,
       reason: body.consultationType || "Family appointment",
       notes: notesParts.join(". ") || undefined,
-      patientLatitude: body.patientLatitude,
-      patientLongitude: body.patientLongitude,
+      patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
+      patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING"
     });
 

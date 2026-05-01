@@ -827,6 +827,10 @@ body {
   color: var(--med-text-muted);
 }
 
+.patient-summary-row-address {
+  margin-bottom: 10px;
+}
+
 .patient-summary-row dt {
   font-weight: 400;
 }
