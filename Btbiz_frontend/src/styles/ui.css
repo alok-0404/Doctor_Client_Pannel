@@ -828,7 +828,23 @@ body {
 }
 
 .patient-summary-row-address {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+  justify-content: start;
   margin-bottom: 10px;
+}
+
+.patient-summary-row-address dt {
+  line-height: 1.45;
+}
+
+.patient-summary-row-address dd {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .patient-summary-row dt {
