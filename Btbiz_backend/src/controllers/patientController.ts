@@ -25,6 +25,7 @@ import {
   findPatientByMobile,
   findPatientsByMobile,
   getFullPatientHistory,
+  updateDiagnosticTestPricesOnVisit,
   updatePatient as updatePatientService,
   updateVisitVitals
 } from "../services/patientService";
@@ -968,6 +969,82 @@ export const addDiagnosticTests = async (
 
     // eslint-disable-next-line no-console
     console.error("addDiagnosticTests error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const updateDiagnosticTestPrices = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const role = req.doctor?.role;
+    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT") {
+      res.status(403).json({
+        message: "Only doctor or lab assistant can update diagnostic test prices"
+      });
+      return;
+    }
+
+    const { patientId, visitId } = req.params;
+    const body = (req.body || {}) as { tests?: Array<{ testName?: string; price?: unknown }> };
+
+    if (!patientId || !visitId) {
+      res.status(400).json({ message: "patientId and visitId are required" });
+      return;
+    }
+
+    const raw = body.tests;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      res.status(400).json({ message: "tests array with at least one entry is required" });
+      return;
+    }
+
+    const tests = raw
+      .map((t) => {
+        const testName = String(t.testName ?? "").trim();
+        const p =
+          typeof t.price === "number" && !Number.isNaN(t.price)
+            ? t.price
+            : parseFloat(String(t.price ?? ""));
+        return { testName, price: p };
+      })
+      .filter((t) => t.testName.length > 0 && !Number.isNaN(t.price) && t.price >= 0);
+
+    if (tests.length === 0) {
+      res.status(400).json({ message: "At least one valid test name and price is required" });
+      return;
+    }
+
+    const updated = await updateDiagnosticTestPricesOnVisit(patientId, visitId, tests);
+    res.status(200).json({ message: "Diagnostic test prices updated", updated });
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === "INVALID_PATIENT_ID" || error.message === "INVALID_VISIT_ID") {
+        res.status(400).json({ message: error.message });
+        return;
+      }
+      if (error.message === "VISIT_NOT_FOUND") {
+        res.status(404).json({ message: "Visit not found" });
+        return;
+      }
+      if (error.message === "VISIT_DOES_NOT_BELONG_TO_PATIENT") {
+        res.status(400).json({ message: "Visit does not belong to this patient" });
+        return;
+      }
+      if (error.message === "TEST_PRICES_REQUIRED") {
+        res.status(400).json({ message: "At least one price update is required" });
+        return;
+      }
+      if (error.message === "NO_MATCHING_DIAGNOSTIC_TESTS") {
+        res.status(400).json({
+          message: "No matching tests on this visit — accept the lab request first or check test names."
+        });
+        return;
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.error("updateDiagnosticTestPrices error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

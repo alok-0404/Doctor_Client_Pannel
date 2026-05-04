@@ -913,6 +913,16 @@ export const patientService = {
     )
   },
 
+  async patchDiagnosticTestPrices(
+    patientId: string,
+    visitId: string,
+    tests: Array<{ testName: string; price: number }>
+  ): Promise<void> {
+    await api.patch(`/patients/${patientId}/visits/${visitId}/diagnostic-tests/prices`, {
+      tests,
+    })
+  },
+
   async uploadDiagnosticTestReport(
     patientId: string,
     visitId: string,

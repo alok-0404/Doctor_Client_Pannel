@@ -43,6 +43,36 @@ function getRequestTestNames(r: LabOrderRequest): string[] {
   return fallback ? [fallback] : []
 }
 
+/** +91… numbers must use the last 10 digits for search, not the first 10 (which included country code). */
+function normalizeMobileDigitsForSearch(raw: string): string {
+  const d = raw.replace(/\D/g, '')
+  if (d.length >= 10) return d.slice(-10)
+  return d
+}
+
+function splitTotalInrAcrossTests(total: number, count: number): number[] {
+  if (count <= 0) return []
+  const paise = Math.round(total * 100)
+  const base = Math.floor(paise / count)
+  const rem = paise % count
+  return Array.from({ length: count }, (_, i) => (base + (i < rem ? 1 : 0)) / 100)
+}
+
+function findVisitForIncomingLabRequest(
+  history: FullPatientHistory | null,
+  r: LabOrderRequest
+): string | null {
+  if (!history?.visits?.length) return null
+  const requested = getRequestTestNames(r).map(normalizeLabTestName).filter(Boolean)
+  if (requested.length === 0) return history.visits[0]._id
+
+  for (const v of history.visits) {
+    const norms = new Set((v.diagnosticTests ?? []).map((t) => normalizeLabTestName(t.testName)))
+    if (requested.every((n) => norms.has(n))) return v._id
+  }
+  return history.visits[0]._id
+}
+
 const COMMON_LAB_TESTS = [
   'CBC',
   'HbA1c',
@@ -74,12 +104,15 @@ export const LabDashboard = () => {
   const [addTestSelect, setAddTestSelect] = useState('')
   const [addTestCustom, setAddTestCustom] = useState('')
   const [addTestPrice, setAddTestPrice] = useState('')
+  const [manualRateByTestId, setManualRateByTestId] = useState<Record<string, string>>({})
+  const [savingManualRates, setSavingManualRates] = useState(false)
   const [addTestLoading, setAddTestLoading] = useState(false)
   const [addTestError, setAddTestError] = useState<string | null>(null)
   const [uploadingReportForTestId, setUploadingReportForTestId] = useState<string | null>(null)
 
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingTestRequests, setIncomingTestRequests] = useState<LabOrderRequest[]>([])
+  const [incomingRequestBillById, setIncomingRequestBillById] = useState<Record<string, string>>({})
   const [requestsLoading, setRequestsLoading] = useState(false)
   const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
   const labWorkspaceRef = useRef<HTMLDivElement>(null)
@@ -142,6 +175,14 @@ export const LabDashboard = () => {
 
   const selectedVisit = history?.visits?.find((v) => v._id === selectedVisitId)
   const diagnosticTests: DiagnosticTestItem[] = selectedVisit?.diagnosticTests ?? []
+
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const t of diagnosticTests) {
+      next[t._id] = t.price != null ? String(t.price) : ''
+    }
+    setManualRateByTestId(next)
+  }, [selectedVisitId, history])
 
   const getTestNameToAdd = (): string | null => {
     if (addTestSelect === 'Other') {
@@ -237,6 +278,39 @@ export const LabDashboard = () => {
     }
   }
 
+  const handleSaveManualRates = async () => {
+    if (!patient?.id || !selectedVisitId) return
+    const updates: Array<{ testName: string; price: number }> = []
+    for (const t of diagnosticTests) {
+      const raw = (manualRateByTestId[t._id] ?? '').trim()
+      if (!raw) continue
+      const parsed = parseFloat(raw)
+      if (Number.isNaN(parsed) || parsed < 0) {
+        alert(`Invalid rate for ${t.testName}. Please enter a valid non-negative number.`)
+        return
+      }
+      if (t.price == null || Math.abs((t.price ?? 0) - parsed) > 0.0001) {
+        updates.push({ testName: t.testName, price: parsed })
+      }
+    }
+    if (updates.length === 0) {
+      alert('No rate changes to save.')
+      return
+    }
+
+    setSavingManualRates(true)
+    try {
+      await patientService.patchDiagnosticTestPrices(patient.id, selectedVisitId, updates)
+      const h = await patientService.getFullHistory(patient.id)
+      setHistory(h)
+      alert('Rates saved successfully.')
+    } catch {
+      alert('Could not save rates. Please try again.')
+    } finally {
+      setSavingManualRates(false)
+    }
+  }
+
   const loadIncomingTestRequests = async (silent = false) => {
     if (!silent) setRequestsLoading(true)
     try {
@@ -305,7 +379,7 @@ export const LabDashboard = () => {
     setShowReceipt(false)
     setReceiptData(null)
 
-    const digits = r.patientMobile.replace(/\D/g, '').slice(0, 10)
+    const digits = normalizeMobileDigitsForSearch(r.patientMobile)
     setMobileSearch(digits)
     setSearchLoading(true)
 
@@ -473,6 +547,55 @@ export const LabDashboard = () => {
     }
   }
 
+  const handleMarkPaidIncomingRequest = async (r: LabOrderRequest) => {
+    if (r.paymentStatus === 'PAID') return
+    const raw = incomingRequestBillById[r.id]?.trim() ?? ''
+    const total = parseFloat(raw)
+    if (!raw || Number.isNaN(total) || total <= 0) {
+      alert('Enter a valid total bill amount (₹) before marking paid. Amounts are split evenly across tests on the visit.')
+      return
+    }
+    if (!r.patientId) {
+      alert('Patient is missing on this request.')
+      return
+    }
+    const requestedNames = getRequestTestNames(r)
+    if (requestedNames.length === 0) {
+      alert('This request has no tests listed.')
+      return
+    }
+    try {
+      const h = await patientService.getFullHistory(r.patientId)
+      const visitId = findVisitForIncomingLabRequest(h, r)
+      if (!visitId) {
+        alert('No visit found for this patient. Accept the request first so tests are added to a visit.')
+        return
+      }
+      const visit = h.visits?.find((v) => v._id === visitId)
+      const splits = splitTotalInrAcrossTests(total, requestedNames.length)
+      const items: { testName: string; price: number }[] = []
+      for (let i = 0; i < requestedNames.length; i++) {
+        const reqN = normalizeLabTestName(requestedNames[i])
+        const dt = visit?.diagnosticTests?.find((t) => normalizeLabTestName(t.testName) === reqN)
+        if (dt) items.push({ testName: dt.testName, price: splits[i] })
+      }
+      if (items.length < requestedNames.length) {
+        alert(
+          'Some tests from this request are not on the visit yet. Accept the request first, then enter the bill amount.'
+        )
+        return
+      }
+      await patientService.patchDiagnosticTestPrices(r.patientId, visitId, items)
+      await handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })
+      if (patient?.id === r.patientId) {
+        const refreshed = await patientService.getFullHistory(r.patientId)
+        setHistory(refreshed)
+      }
+    } catch {
+      alert('Could not save prices or mark paid. Please try again.')
+    }
+  }
+
   const handleViewReport = async (testId: string) => {
     if (!patient?.id || !selectedVisitId) return
     try {
@@ -512,6 +635,21 @@ export const LabDashboard = () => {
       <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
         Request time: {new Date(r.createdAt).toLocaleString('en-IN')}
       </p>
+      <div style={{ marginTop: 10, maxWidth: 280 }}>
+        <TextField
+          id={`lab-incoming-bill-${r.id}`}
+          label="Total bill (₹)"
+          value={incomingRequestBillById[r.id] ?? ''}
+          onChange={(e) => {
+            const v = e.target.value.replace(/[^\d.]/g, '')
+            setIncomingRequestBillById((prev) => ({ ...prev, [r.id]: v }))
+          }}
+          disabled={r.paymentStatus === 'PAID'}
+        />
+        <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8', lineHeight: 1.35 }}>
+          Required before Mark paid. Total is split evenly across tests for receipts.
+        </p>
+      </div>
       <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingTestRequest(r)}>
           Accept
@@ -522,7 +660,12 @@ export const LabDashboard = () => {
         <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })}>
           Ready
         </Button>
-        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={r.paymentStatus === 'PAID'}
+          onClick={() => void handleMarkPaidIncomingRequest(r)}
+        >
           Mark paid
         </Button>
       </div>
@@ -786,8 +929,25 @@ export const LabDashboard = () => {
                                 >
                                   <td style={{ padding: '10px 12px', color: '#627d98' }}>{idx + 1}</td>
                                   <td style={{ padding: '10px 12px', fontWeight: 500 }}>{t.testName}</td>
-                                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500 }}>
-                                    {t.price != null ? `₹${t.price}` : '—'}
+                                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500, minWidth: 140 }}>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="Enter rate"
+                                      value={manualRateByTestId[t._id] ?? ''}
+                                      onChange={(e) => {
+                                        const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                                        setManualRateByTestId((prev) => ({ ...prev, [t._id]: cleaned }))
+                                      }}
+                                      style={{
+                                        width: 110,
+                                        padding: '6px 8px',
+                                        fontSize: 13,
+                                        textAlign: 'right',
+                                        borderRadius: 6,
+                                        border: '1px solid #d9e2ec',
+                                      }}
+                                    />
                                   </td>
                                   <td style={{ padding: '10px 12px', color: '#486581' }}>
                                     {t.hasReport ? (
@@ -841,6 +1001,21 @@ export const LabDashboard = () => {
                           </tbody>
                         </table>
                       </div>
+                      {diagnosticTests.length > 0 && (
+                        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={savingManualRates}
+                            onClick={() => void handleSaveManualRates()}
+                          >
+                            {savingManualRates ? 'Saving rates…' : 'Save rates'}
+                          </Button>
+                          <span style={{ fontSize: 12, color: '#64748b' }}>
+                            Accept ke baad blank rates yahin manually fill karke save karein.
+                          </span>
+                        </div>
+                      )}
                       {diagnosticTests.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
                           <Button type="button" onClick={openLabReceipt}>

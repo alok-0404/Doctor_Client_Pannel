@@ -399,3 +399,59 @@ export const addDiagnosticTestsToVisit = async (
   return toInsert.length;
 };
 
+export interface DiagnosticTestPriceUpdate {
+  testName: string;
+  price: number;
+}
+
+export const updateDiagnosticTestPricesOnVisit = async (
+  patientId: string,
+  visitId: string,
+  updates: DiagnosticTestPriceUpdate[]
+): Promise<number> => {
+  if (!mongoose.Types.ObjectId.isValid(patientId)) {
+    throw new Error("INVALID_PATIENT_ID");
+  }
+  if (!mongoose.Types.ObjectId.isValid(visitId)) {
+    throw new Error("INVALID_VISIT_ID");
+  }
+  if (!Array.isArray(updates) || updates.length === 0) {
+    throw new Error("TEST_PRICES_REQUIRED");
+  }
+
+  const visit = await Visit.findById(visitId).lean();
+  if (!visit) {
+    throw new Error("VISIT_NOT_FOUND");
+  }
+  if (visit.patient.toString() !== patientId) {
+    throw new Error("VISIT_DOES_NOT_BELONG_TO_PATIENT");
+  }
+
+  const tests = await DiagnosticTest.find({ visit: visitId }).select("testName").lean();
+  const byNorm = new Map<string, { _id: mongoose.Types.ObjectId; testName: string }>();
+  for (const t of tests) {
+    const name = String((t as { testName?: string }).testName ?? "");
+    const key = normalizeDiagnosticTestName(name);
+    if (key && !byNorm.has(key)) {
+      byNorm.set(key, { _id: (t as { _id: mongoose.Types.ObjectId })._id, testName: name });
+    }
+  }
+
+  let modified = 0;
+  for (const u of updates) {
+    if (!u || typeof u.testName !== "string" || !u.testName.trim()) continue;
+    if (typeof u.price !== "number" || Number.isNaN(u.price) || u.price < 0) continue;
+    const key = normalizeDiagnosticTestName(u.testName.trim());
+    const doc = byNorm.get(key);
+    if (doc) {
+      await DiagnosticTest.findByIdAndUpdate(doc._id, { $set: { price: u.price } });
+      modified++;
+    }
+  }
+
+  if (modified === 0) {
+    throw new Error("NO_MATCHING_DIAGNOSTIC_TESTS");
+  }
+  return modified;
+};
+

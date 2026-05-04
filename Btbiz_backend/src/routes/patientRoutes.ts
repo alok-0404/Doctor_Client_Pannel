@@ -9,6 +9,7 @@ import {
   addDiagnosticTests,
   createPatient,
   createVisit,
+  updateDiagnosticTestPrices,
   getDiagnosticTestReportFile,
   getDocumentFile,
   getPrescriptionSecureLink,
@@ -68,6 +69,12 @@ router.get("/:patientId/full-history", getPatientFullHistory);
 router.post(
   "/:patientId/visits/:visitId/diagnostic-tests",
   addDiagnosticTests
+);
+
+// PATCH /patients/:patientId/visits/:visitId/diagnostic-tests/prices (doctor or lab assistant)
+router.patch(
+  "/:patientId/visits/:visitId/diagnostic-tests/prices",
+  updateDiagnosticTestPrices
 );
 
 // POST /patients/:patientId/visits/:visitId/diagnostic-tests/:testId/report (doctor or lab assistant)
