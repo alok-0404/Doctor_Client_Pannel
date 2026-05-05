@@ -43,34 +43,60 @@ function getRequestTestNames(r: LabOrderRequest): string[] {
   return fallback ? [fallback] : []
 }
 
+/** Visit that contains every test from the incoming lab request (visits are newest-first from API). */
+function findVisitForIncomingLabRequest(
+  history: FullPatientHistory | null,
+  r: LabOrderRequest
+): FullPatientHistory['visits'][number] | undefined {
+  if (!history?.visits?.length) return undefined
+  const requested = getRequestTestNames(r).map(normalizeLabTestName).filter(Boolean)
+  if (requested.length === 0) return history.visits[0]
+
+  for (const v of history.visits) {
+    const norms = new Set((v.diagnosticTests ?? []).map((t) => normalizeLabTestName(t.testName)))
+    if (requested.every((n) => norms.has(n))) return v
+  }
+  return history.visits[0]
+}
+
+type LabRequestRateCheck = { ok: true; total: number } | { ok: false; message: string }
+
+function getRateCheckForLabRequest(history: FullPatientHistory, r: LabOrderRequest): LabRequestRateCheck {
+  const visit = findVisitForIncomingLabRequest(history, r)
+  if (!visit) return { ok: false, message: 'No visit found for this patient.' }
+  const requested = getRequestTestNames(r)
+  if (requested.length === 0) return { ok: false, message: 'This request has no tests listed.' }
+  let total = 0
+  for (const name of requested) {
+    const n = normalizeLabTestName(name)
+    const dt = visit.diagnosticTests?.find((t) => normalizeLabTestName(t.testName) === n)
+    if (!dt) {
+      return {
+        ok: false,
+        message: `"${name}" is not on a visit yet. Accept the request first (or open the visit where these tests were added).`,
+      }
+    }
+    if (dt.price == null || Number(dt.price) <= 0) {
+      return {
+        ok: false,
+        message: `Enter a rate for "${dt.testName}" in the Lab tests table and click Save rates before marking paid.`,
+      }
+    }
+    total += Number(dt.price)
+  }
+  return { ok: true, total }
+}
+
+function patientIdsMatch(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false
+  return String(a).trim() === String(b).trim()
+}
+
 /** +91… numbers must use the last 10 digits for search, not the first 10 (which included country code). */
 function normalizeMobileDigitsForSearch(raw: string): string {
   const d = raw.replace(/\D/g, '')
   if (d.length >= 10) return d.slice(-10)
   return d
-}
-
-function splitTotalInrAcrossTests(total: number, count: number): number[] {
-  if (count <= 0) return []
-  const paise = Math.round(total * 100)
-  const base = Math.floor(paise / count)
-  const rem = paise % count
-  return Array.from({ length: count }, (_, i) => (base + (i < rem ? 1 : 0)) / 100)
-}
-
-function findVisitForIncomingLabRequest(
-  history: FullPatientHistory | null,
-  r: LabOrderRequest
-): string | null {
-  if (!history?.visits?.length) return null
-  const requested = getRequestTestNames(r).map(normalizeLabTestName).filter(Boolean)
-  if (requested.length === 0) return history.visits[0]._id
-
-  for (const v of history.visits) {
-    const norms = new Set((v.diagnosticTests ?? []).map((t) => normalizeLabTestName(t.testName)))
-    if (requested.every((n) => norms.has(n))) return v._id
-  }
-  return history.visits[0]._id
 }
 
 const COMMON_LAB_TESTS = [
@@ -112,7 +138,6 @@ export const LabDashboard = () => {
 
   const [showReceipt, setShowReceipt] = useState(false)
   const [incomingTestRequests, setIncomingTestRequests] = useState<LabOrderRequest[]>([])
-  const [incomingRequestBillById, setIncomingRequestBillById] = useState<Record<string, string>>({})
   const [requestsLoading, setRequestsLoading] = useState(false)
   const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
   const labWorkspaceRef = useRef<HTMLDivElement>(null)
@@ -530,69 +555,53 @@ export const LabDashboard = () => {
     try {
       await orderService.updateTestRequest(r.id, patch)
       await loadIncomingTestRequests(true)
-      if (patient?.id === r.patientId) {
+      if (r.patientId) {
         try {
-          const h = await patientService.getFullHistory(patient.id)
-          setHistory(h)
+          const h = await patientService.getFullHistory(r.patientId)
+          if (patient && patientIdsMatch(patient.id, r.patientId)) {
+            setHistory(h)
+          }
         } catch {
           /* ignore */
         }
       }
+      if (patch.status === 'COMPLETED' || patch.status === 'CANCELLED') {
+        setShowReceipt(false)
+        setReceiptData(null)
+        window.location.reload()
+      }
     } catch {
       if (shouldHideImmediately) {
         hiddenRequestIdsRef.current.delete(r.id)
-        setIncomingTestRequests(previousRequests)
       }
+      setIncomingTestRequests(previousRequests)
       alert('Could not update request. Please try again.')
     }
   }
 
   const handleMarkPaidIncomingRequest = async (r: LabOrderRequest) => {
     if (r.paymentStatus === 'PAID') return
-    const raw = incomingRequestBillById[r.id]?.trim() ?? ''
-    const total = parseFloat(raw)
-    if (!raw || Number.isNaN(total) || total <= 0) {
-      alert('Enter a valid total bill amount (₹) before marking paid. Amounts are split evenly across tests on the visit.')
-      return
-    }
     if (!r.patientId) {
       alert('Patient is missing on this request.')
       return
     }
-    const requestedNames = getRequestTestNames(r)
-    if (requestedNames.length === 0) {
-      alert('This request has no tests listed.')
-      return
-    }
     try {
       const h = await patientService.getFullHistory(r.patientId)
-      const visitId = findVisitForIncomingLabRequest(h, r)
-      if (!visitId) {
-        alert('No visit found for this patient. Accept the request first so tests are added to a visit.')
+      const check = getRateCheckForLabRequest(h, r)
+      if (!check.ok) {
+        alert(check.message)
         return
       }
-      const visit = h.visits?.find((v) => v._id === visitId)
-      const splits = splitTotalInrAcrossTests(total, requestedNames.length)
-      const items: { testName: string; price: number }[] = []
-      for (let i = 0; i < requestedNames.length; i++) {
-        const reqN = normalizeLabTestName(requestedNames[i])
-        const dt = visit?.diagnosticTests?.find((t) => normalizeLabTestName(t.testName) === reqN)
-        if (dt) items.push({ testName: dt.testName, price: splits[i] })
-      }
-      if (items.length < requestedNames.length) {
-        alert(
-          'Some tests from this request are not on the visit yet. Accept the request first, then enter the bill amount.'
+      if (
+        !window.confirm(
+          `Mark this lab order as paid? Saved rates for these tests total ₹${check.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
         )
+      ) {
         return
       }
-      await patientService.patchDiagnosticTestPrices(r.patientId, visitId, items)
       await handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })
-      if (patient?.id === r.patientId) {
-        const refreshed = await patientService.getFullHistory(r.patientId)
-        setHistory(refreshed)
-      }
     } catch {
-      alert('Could not save prices or mark paid. Please try again.')
+      alert('Could not verify saved rates. Please try again.')
     }
   }
 
@@ -635,29 +644,34 @@ export const LabDashboard = () => {
       <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
         Request time: {new Date(r.createdAt).toLocaleString('en-IN')}
       </p>
-      <div style={{ marginTop: 10, maxWidth: 280 }}>
-        <TextField
-          id={`lab-incoming-bill-${r.id}`}
-          label="Total bill (₹)"
-          value={incomingRequestBillById[r.id] ?? ''}
-          onChange={(e) => {
-            const v = e.target.value.replace(/[^\d.]/g, '')
-            setIncomingRequestBillById((prev) => ({ ...prev, [r.id]: v }))
-          }}
-          disabled={r.paymentStatus === 'PAID'}
-        />
-        <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8', lineHeight: 1.35 }}>
-          Required before Mark paid. Total is split evenly across tests for receipts.
-        </p>
-      </div>
       <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingTestRequest(r)}>
           Accept
         </Button>
-        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'CANCELLED' })}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            if (!window.confirm('Cancel this request? It will be removed from the list.')) return
+            void handleQuickUpdateTestRequest(r, { status: 'CANCELLED' })
+          }}
+        >
           Cancel
         </Button>
-        <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            if (
+              !window.confirm(
+                'Mark this order as ready (completed)? The page will refresh and this workspace will clear.'
+              )
+            ) {
+              return
+            }
+            void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })
+          }}
+        >
           Ready
         </Button>
         <Button
@@ -1012,7 +1026,7 @@ export const LabDashboard = () => {
                             {savingManualRates ? 'Saving rates…' : 'Save rates'}
                           </Button>
                           <span style={{ fontSize: 12, color: '#64748b' }}>
-                            Accept ke baad blank rates yahin manually fill karke save karein.
+                            Enter each test rate in the table, then click Save rates before Mark paid.
                           </span>
                         </div>
                       )}
