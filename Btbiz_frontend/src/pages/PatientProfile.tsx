@@ -11,6 +11,18 @@ import {
 import { patientStorage } from '../utils/patientStorage'
 import { DnaLoader } from '../components/ui/DnaLoader'
 
+const PATIENT_PROFILE_CACHE_KEY = 'patient_profile_cache_v1'
+
+function readCachedPatientProfile(): FullPatientHistory | null {
+  try {
+    const raw = window.sessionStorage.getItem(PATIENT_PROFILE_CACHE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as FullPatientHistory
+  } catch {
+    return null
+  }
+}
+
 function apiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string } }; message?: string }
   const msg = e?.response?.data?.message
@@ -183,8 +195,8 @@ function ProviderDistanceHint({
 }
 
 export const PatientProfile = () => {
-  const [data, setData] = useState<FullPatientHistory | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<FullPatientHistory | null>(() => readCachedPatientProfile())
+  const [loading, setLoading] = useState(() => readCachedPatientProfile() === null)
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [addingMedicine, setAddingMedicine] = useState(false)
@@ -208,7 +220,12 @@ export const PatientProfile = () => {
   const [providerGeoStatus, setProviderGeoStatus] = useState<'loading' | 'ok' | 'none'>('loading')
   const lastVisibilityRefreshRef = useRef(0)
   const paymentToastShownRef = useRef<Set<string>>(new Set())
+  const dataRef = useRef<FullPatientHistory | null>(data)
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
 
   const toggleCard = (key: string) => {
     setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -257,11 +274,19 @@ export const PatientProfile = () => {
   }, [loading, data, paidLabToastSignature, readyMedicineToastSignature])
 
   const loadProfile = useCallback(() => {
+    const shouldShowBlockingLoader = !dataRef.current
     setError(null)
-    setLoading(true)
+    if (shouldShowBlockingLoader) setLoading(true)
     patientPortalService
       .getProfile()
-      .then(setData)
+      .then((profile) => {
+        setData(profile)
+        try {
+          window.sessionStorage.setItem(PATIENT_PROFILE_CACHE_KEY, JSON.stringify(profile))
+        } catch {
+          // ignore cache write errors
+        }
+      })
       .catch((err: unknown) => {
         const e = err as {
           response?: { status?: number; data?: { message?: string } }
@@ -269,6 +294,11 @@ export const PatientProfile = () => {
           message?: string
         }
         if (e?.response?.status === 401) {
+          try {
+            window.sessionStorage.removeItem(PATIENT_PROFILE_CACHE_KEY)
+          } catch {
+            // ignore cache cleanup errors
+          }
           patientStorage.clear()
           window.location.replace('/patient-login')
           return
@@ -286,7 +316,9 @@ export const PatientProfile = () => {
         }
         setError('Unable to load profile.')
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (shouldShowBlockingLoader) setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -790,6 +822,57 @@ export const PatientProfile = () => {
     })
   })
 
+  const findLinkedDiagnosticForRequest = (request: (typeof testRequests)[number]): {
+    visitId: string
+    test: DiagnosticTestItem
+  } | null => {
+    const requestName = normalizeLabName(String(request.testName ?? '').trim())
+    if (!requestName) return null
+    const requestDay = dateOnly(request.createdAt) ?? dateOnly(request.paidAt)
+
+    const sameDay = allDiagnosticTests.find(({ visitId, visitDate, test }) => {
+      const testName = normalizeLabName(String(test.testName ?? '').trim())
+      if (!labNormalizedNamesMatch(testName, requestName)) return false
+      const visitDay = dateOnly(visitDate)
+      const testDay = dateOnly(test.createdAt)
+      const matchedDay =
+        !!requestDay && ((visitDay && visitDay === requestDay) || (testDay && testDay === requestDay))
+      return matchedDay && !!visitId
+    })
+    if (sameDay) return { visitId: sameDay.visitId, test: sameDay.test }
+
+    const byName = allDiagnosticTests
+      .filter(({ test }) => {
+        const testName = normalizeLabName(String(test.testName ?? '').trim())
+        return labNormalizedNamesMatch(testName, requestName)
+      })
+      .sort((a, b) => {
+        const at = new Date(a.test.createdAt ?? a.visitDate ?? 0).getTime()
+        const bt = new Date(b.test.createdAt ?? b.visitDate ?? 0).getTime()
+        return bt - at
+      })[0]
+
+    return byName ? { visitId: byName.visitId, test: byName.test } : null
+  }
+
+  const isDiagnosticLinkedToAnyRequest = (
+    diagnostic: { visitId: string; visitDate: string; doctorName?: string; test: DiagnosticTestItem }
+  ): boolean => {
+    const testName = normalizeLabName(String(diagnostic.test.testName ?? '').trim())
+    if (!testName) return false
+    const visitDay = dateOnly(diagnostic.visitDate) ?? dateOnly(diagnostic.test.createdAt)
+
+    return testRequests.some((request) => {
+      const requestName = normalizeLabName(String(request.testName ?? '').trim())
+      if (!requestName || !labNormalizedNamesMatch(requestName, testName)) return false
+      const requestDay = dateOnly(request.createdAt) ?? dateOnly(request.paidAt)
+      if (!visitDay || !requestDay) return true
+      return visitDay === requestDay
+    })
+  }
+
+  const visibleDiagnosticTests = allDiagnosticTests.filter((entry) => !isDiagnosticLinkedToAnyRequest(entry))
+
   return (
     <div className="patient-profile">
       <header className="patient-profile-header">
@@ -950,12 +1033,12 @@ export const PatientProfile = () => {
             <div className="patient-profile-subsection">
               <h3 className="patient-profile-subtitle">My test requests</h3>
               <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
-                Orders you send from this app. Below, &quot;Tests on your visits&quot; are tests added on a
-                consultation — they are separate rows (same name can look like a duplicate).
+                Orders you send from this app. Once lab processes a request, report/receipt appears in the same card.
               </p>
               <ul className="patient-profile-list patient-profile-list-accordion">
                 {testRequests.map((t) => {
                   const paymentLabel = formatTestPaymentLabel(t.paymentMode, t.serviceType)
+                  const linkedDiagnostic = findLinkedDiagnosticForRequest(t)
                   const showHomeAcceptMsg =
                     t.serviceType === 'HOME_SERVICE' &&
                     (t.status === 'ACCEPTED' || t.status === 'COMPLETED') &&
@@ -1033,12 +1116,24 @@ export const PatientProfile = () => {
                                   receiptNumber: t.receiptNumber,
                                   paidAt: t.paidAt,
                                   serviceType: t.serviceType,
-                                  price: undefined,
+                                  price: linkedDiagnostic?.test?.price,
                                 })
                               }
                             >
                               View / print receipt
                             </button>
+                            {linkedDiagnostic?.test?.hasReport && (
+                              <button
+                                type="button"
+                                className="patient-profile-link-btn"
+                                style={{ marginTop: 8, marginLeft: 8 }}
+                                onClick={() =>
+                                  patientPortalService.openDiagnosticReport(linkedDiagnostic.visitId, linkedDiagnostic.test._id)
+                                }
+                              >
+                                View report
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1049,18 +1144,18 @@ export const PatientProfile = () => {
               </ul>
             </div>
           )}
-          {allDiagnosticTests.length === 0 && testRequests.length === 0 ? (
+          {visibleDiagnosticTests.length === 0 && testRequests.length === 0 ? (
             <p className="patient-profile-empty">No lab tests yet.</p>
-          ) : allDiagnosticTests.length > 0 ? (
+          ) : visibleDiagnosticTests.length > 0 ? (
             <>
               <h3 className="patient-profile-subtitle" style={{ marginTop: testRequests.length > 0 ? 20 : 0 }}>
-                Tests on your visits (from clinic)
+                Tests added directly by clinic
               </h3>
               <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
-                Linked to your appointment visit — not the same list as &quot;My test requests&quot; above.
+                Only tests that were not requested from this app are shown here.
               </p>
               <ul className="patient-profile-list patient-profile-list-accordion">
-              {allDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => {
+              {visibleDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => {
                 const visitCardKey = `visit-test-${test._id}`
                 const visitExpanded = !!expandedCards[visitCardKey]
                 const receiptMatch = findReceiptForDiagnosticTest(

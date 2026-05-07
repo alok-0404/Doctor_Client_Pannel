@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
@@ -319,7 +320,7 @@ export const LabDashboard = () => {
       }
     }
     if (updates.length === 0) {
-      alert('No rate changes to save.')
+      toast.info('No rate changes to save.')
       return
     }
 
@@ -328,9 +329,9 @@ export const LabDashboard = () => {
       await patientService.patchDiagnosticTestPrices(patient.id, selectedVisitId, updates)
       const h = await patientService.getFullHistory(patient.id)
       setHistory(h)
-      alert('Rates saved successfully.')
+      toast.success('Rates saved successfully.', { autoClose: 2500 })
     } catch {
-      alert('Could not save rates. Please try again.')
+      toast.error('Could not save rates. Please try again.')
     } finally {
       setSavingManualRates(false)
     }
@@ -518,13 +519,13 @@ export const LabDashboard = () => {
           if (addedCount > 0) parts.push(`${addedCount} test auto-added`)
           if (skippedCount > 0) parts.push(`${skippedCount} already present`)
           setAddTestError(null)
-          alert(`Accepted. ${parts.join(' · ')}.`)
+          toast.success(`Accepted. ${parts.join(' · ')}.`, { autoClose: 2800 })
         }
       }
       await loadIncomingTestRequests(true)
     } catch {
       setIncomingTestRequests(previousRequests)
-      alert('Could not accept request. Please try again.')
+      toast.error('Could not accept request. Please try again.')
     }
   }
 
