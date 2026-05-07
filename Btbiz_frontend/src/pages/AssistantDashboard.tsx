@@ -1362,6 +1362,7 @@ export const AssistantDashboard = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input
                     type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null
                       setDocFile(f)
