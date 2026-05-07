@@ -1,4 +1,5 @@
 import { useState, type FC, type ReactNode } from 'react'
+import { toast } from 'react-toastify'
 import { patientService } from '../services/api'
 
 interface TagProps {
@@ -61,12 +62,10 @@ ${escapeHtml(fallbackText)}
         const opened = window.open(url, '_blank')
         setTimeout(() => URL.revokeObjectURL(url), 60_000)
         if (!opened) {
-          // eslint-disable-next-line no-alert
-          alert('Unable to open prescription text in a new tab.')
+          toast.error('Unable to open prescription text in a new tab.')
         }
       } else {
-        // eslint-disable-next-line no-alert
-        alert('Failed to open document.')
+        toast.error('Failed to open document.')
       }
     } finally {
       setLoading(false)
@@ -605,7 +604,7 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                             try {
                               await patientService.openDiagnosticTestReport(patientId, t.visitId!, t.testId!)
                             } catch {
-                              alert('Failed to open report')
+                              toast.error('Failed to open report')
                             }
                           }}
                           className="ui-button ui-button-primary"

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
@@ -203,7 +204,7 @@ export const MedicineDashboard = () => {
       }
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string } } }
-      alert(ax?.response?.data?.message ?? 'Failed to record payment.')
+      toast.error(ax?.response?.data?.message ?? 'Failed to record payment.')
     } finally {
       setPaymentLoading(false)
     }
@@ -217,7 +218,7 @@ export const MedicineDashboard = () => {
       setShowReceipt(true)
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string } } }
-      alert(ax?.response?.data?.message ?? 'Failed to load receipt.')
+      toast.error(ax?.response?.data?.message ?? 'Failed to load receipt.')
     }
   }
 
@@ -338,7 +339,7 @@ export const MedicineDashboard = () => {
       await openPatientAndPrefillFromRequest(r)
       await loadIncomingRequests()
     } catch {
-      alert('Could not accept request. Please try again.')
+      toast.error('Could not accept request. Please try again.')
     }
   }
 

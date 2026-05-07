@@ -132,6 +132,8 @@ export const LabDashboard = () => {
   const [addTestCustom, setAddTestCustom] = useState('')
   const [addTestPrice, setAddTestPrice] = useState('')
   const [manualRateByTestId, setManualRateByTestId] = useState<Record<string, string>>({})
+  const [requestFocusedTestNames, setRequestFocusedTestNames] = useState<string[] | null>(null)
+  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
   const [savingManualRates, setSavingManualRates] = useState(false)
   const [addTestLoading, setAddTestLoading] = useState(false)
   const [addTestError, setAddTestError] = useState<string | null>(null)
@@ -172,6 +174,7 @@ export const LabDashboard = () => {
     setMatchedPatients([])
     setSelectedPatientId('')
     setSelectedVisitId(null)
+    setRequestFocusedTestNames(null)
     setAddTestError(null)
     setShowReceipt(false)
     setReceiptData(null)
@@ -201,14 +204,20 @@ export const LabDashboard = () => {
 
   const selectedVisit = history?.visits?.find((v) => v._id === selectedVisitId)
   const diagnosticTests: DiagnosticTestItem[] = selectedVisit?.diagnosticTests ?? []
+  const focusedDiagnosticTests: DiagnosticTestItem[] =
+    requestFocusedTestNames && requestFocusedTestNames.length > 0
+      ? diagnosticTests.filter((t) =>
+          requestFocusedTestNames.some((n) => normalizeLabTestName(t.testName) === n)
+        )
+      : diagnosticTests
 
   useEffect(() => {
     const next: Record<string, string> = {}
-    for (const t of diagnosticTests) {
+    for (const t of focusedDiagnosticTests) {
       next[t._id] = t.price != null ? String(t.price) : ''
     }
     setManualRateByTestId(next)
-  }, [selectedVisitId, history])
+  }, [selectedVisitId, history, requestFocusedTestNames])
 
   const getTestNameToAdd = (): string | null => {
     if (addTestSelect === 'Other') {
@@ -256,7 +265,7 @@ export const LabDashboard = () => {
 
   const openLabReceipt = () => {
     if (!patient || !selectedVisit) return
-    const tests = diagnosticTests.map((t) => ({
+    const tests = focusedDiagnosticTests.map((t) => ({
       testName: t.testName,
       price: t.price ?? 0,
     }))
@@ -298,7 +307,7 @@ export const LabDashboard = () => {
       const h = await patientService.getFullHistory(patient.id)
       setHistory(h)
     } catch (err: any) {
-      alert(err?.response?.data?.message || 'Failed to upload report')
+      toast.error(err?.response?.data?.message || 'Failed to upload report')
     } finally {
       setUploadingReportForTestId(null)
     }
@@ -307,12 +316,12 @@ export const LabDashboard = () => {
   const handleSaveManualRates = async () => {
     if (!patient?.id || !selectedVisitId) return
     const updates: Array<{ testName: string; price: number }> = []
-    for (const t of diagnosticTests) {
+    for (const t of focusedDiagnosticTests) {
       const raw = (manualRateByTestId[t._id] ?? '').trim()
       if (!raw) continue
       const parsed = parseFloat(raw)
       if (Number.isNaN(parsed) || parsed < 0) {
-        alert(`Invalid rate for ${t.testName}. Please enter a valid non-negative number.`)
+        toast.error(`Invalid rate for ${t.testName}. Please enter a valid non-negative number.`)
         return
       }
       if (t.price == null || Math.abs((t.price ?? 0) - parsed) > 0.0001) {
@@ -406,6 +415,8 @@ export const LabDashboard = () => {
     setReceiptData(null)
 
     const digits = normalizeMobileDigitsForSearch(r.patientMobile)
+    const requestedNormalized = getRequestTestNames(r).map(normalizeLabTestName).filter(Boolean)
+    setRequestFocusedTestNames(requestedNormalized.length ? requestedNormalized : null)
     setMobileSearch(digits)
     setSearchLoading(true)
 
@@ -576,33 +587,29 @@ export const LabDashboard = () => {
         hiddenRequestIdsRef.current.delete(r.id)
       }
       setIncomingTestRequests(previousRequests)
-      alert('Could not update request. Please try again.')
+      toast.error('Could not update request. Please try again.')
     }
   }
 
   const handleMarkPaidIncomingRequest = async (r: LabOrderRequest) => {
     if (r.paymentStatus === 'PAID') return
     if (!r.patientId) {
-      alert('Patient is missing on this request.')
+      toast.error('Patient is missing on this request.')
       return
     }
     try {
       const h = await patientService.getFullHistory(r.patientId)
       const check = getRateCheckForLabRequest(h, r)
       if (!check.ok) {
-        alert(check.message)
+        toast.error(check.message)
         return
       }
-      if (
-        !window.confirm(
-          `Mark this lab order as paid? Saved rates for these tests total ₹${check.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
-        )
-      ) {
-        return
-      }
-      await handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' })
+      setConfirmState({
+        message: `Mark this lab order as paid? Saved rates for these tests total ₹${check.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+        onConfirm: () => void handleQuickUpdateTestRequest(r, { paymentStatus: 'PAID' }),
+      })
     } catch {
-      alert('Could not verify saved rates. Please try again.')
+      toast.error('Could not verify saved rates. Please try again.')
     }
   }
 
@@ -611,7 +618,7 @@ export const LabDashboard = () => {
     try {
       await patientService.openDiagnosticTestReport(patient.id, selectedVisitId, testId)
     } catch {
-      alert('Failed to open report')
+      toast.error('Failed to open report')
     }
   }
 
@@ -653,8 +660,10 @@ export const LabDashboard = () => {
           type="button"
           variant="secondary"
           onClick={() => {
-            if (!window.confirm('Cancel this request? It will be removed from the list.')) return
-            void handleQuickUpdateTestRequest(r, { status: 'CANCELLED' })
+            setConfirmState({
+              message: 'Cancel this request? It will be removed from the list.',
+              onConfirm: () => void handleQuickUpdateTestRequest(r, { status: 'CANCELLED' }),
+            })
           }}
         >
           Cancel
@@ -663,14 +672,10 @@ export const LabDashboard = () => {
           type="button"
           variant="secondary"
           onClick={() => {
-            if (
-              !window.confirm(
-                'Mark this order as ready (completed)? The page will refresh and this workspace will clear.'
-              )
-            ) {
-              return
-            }
-            void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' })
+            setConfirmState({
+              message: 'Mark this order as ready (completed)? The page will refresh and this workspace will clear.',
+              onConfirm: () => void handleQuickUpdateTestRequest(r, { status: 'COMPLETED' }),
+            })
           }}
         >
           Ready
@@ -877,6 +882,7 @@ export const LabDashboard = () => {
                           onChange={(e) => {
                             setSelectedVisitId(e.target.value || null)
                             setAddTestError(null)
+                            setRequestFocusedTestNames(null)
                           }}
                           style={{
                             width: '100%',
@@ -899,11 +905,21 @@ export const LabDashboard = () => {
                       <p className="dashboard-body" style={{ marginBottom: 12 }}>
                         Tests added for this visit:
                       </p>
+                      {requestFocusedTestNames && requestFocusedTestNames.length > 0 && (
+                        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, color: '#486581' }}>
+                            Showing requested tests only (accepted request context).
+                          </span>
+                          <Button type="button" variant="secondary" onClick={() => setRequestFocusedTestNames(null)}>
+                            Show all tests
+                          </Button>
+                        </div>
+                      )}
                       <div
                         style={{
                           overflowX: 'auto',
-                          overflowY: diagnosticTests.length > 5 ? 'auto' : undefined,
-                          maxHeight: diagnosticTests.length > 5 ? 320 : undefined,
+                          overflowY: focusedDiagnosticTests.length > 5 ? 'auto' : undefined,
+                          maxHeight: focusedDiagnosticTests.length > 5 ? 320 : undefined,
                           marginBottom: 16,
                         }}
                       >
@@ -928,14 +944,14 @@ export const LabDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {diagnosticTests.length === 0 ? (
+                            {focusedDiagnosticTests.length === 0 ? (
                               <tr>
                                 <td colSpan={5} style={{ padding: '16px 12px', color: '#627d98', textAlign: 'center' }}>
-                                  No tests added yet. Add a test below.
+                                  No tests match this accepted request yet.
                                 </td>
                               </tr>
                             ) : (
-                              diagnosticTests.map((t, idx) => (
+                              focusedDiagnosticTests.map((t, idx) => (
                                 <tr
                                   key={t._id}
                                   style={{
@@ -1016,7 +1032,7 @@ export const LabDashboard = () => {
                           </tbody>
                         </table>
                       </div>
-                      {diagnosticTests.length > 0 && (
+                      {focusedDiagnosticTests.length > 0 && (
                         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
                           <Button
                             type="button"
@@ -1031,7 +1047,7 @@ export const LabDashboard = () => {
                           </span>
                         </div>
                       )}
-                      {diagnosticTests.length > 0 && (
+                      {focusedDiagnosticTests.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
                           <Button type="button" onClick={openLabReceipt}>
                             View bill / Receipt
@@ -1223,6 +1239,54 @@ export const LabDashboard = () => {
                 onClick={() => setShowReceipt(false)}
               >
                 Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmState && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: 16,
+          }}
+          onClick={() => setConfirmState(null)}
+        >
+          <div
+            style={{
+              width: 'min(480px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              border: '1px solid #dbeafe',
+              boxShadow: '0 22px 45px rgba(15, 23, 42, 0.25)',
+              padding: 20,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="dashboard-kicker" style={{ marginBottom: 8 }}>Please confirm</p>
+            <p style={{ margin: 0, color: '#334155', lineHeight: 1.5 }}>{confirmState.message}</p>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Button type="button" variant="secondary" onClick={() => setConfirmState(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const action = confirmState.onConfirm
+                  setConfirmState(null)
+                  action()
+                }}
+              >
+                Confirm
               </Button>
             </div>
           </div>

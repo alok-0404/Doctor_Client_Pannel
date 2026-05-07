@@ -87,7 +87,7 @@ function openHtmlInNewTab(html: string): void {
   const w = window.open(url, '_blank')
   if (!w) {
     URL.revokeObjectURL(url)
-    alert('Popup blocked. Allow popups for this site to view the receipt.')
+    toast.error('Popup blocked. Allow popups for this site to view the receipt.')
     return
   }
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
@@ -444,7 +444,7 @@ export const PatientProfile = () => {
       e.target.value = ''
     } catch {
       // eslint-disable-next-line no-alert
-      alert('Failed to upload document.')
+      toast.error('Failed to upload document.')
     } finally {
       setUploading(false)
     }
@@ -474,7 +474,7 @@ export const PatientProfile = () => {
       loadProfile()
     } catch (err: unknown) {
       // eslint-disable-next-line no-alert
-      alert(apiErrorMessage(err, 'Failed to add medicine.'))
+      toast.error(apiErrorMessage(err, 'Failed to add medicine.'))
     } finally {
       setAddingMedicine(false)
     }
@@ -502,7 +502,7 @@ export const PatientProfile = () => {
       loadProfile()
     } catch (err: unknown) {
       // eslint-disable-next-line no-alert
-      alert(apiErrorMessage(err, 'Failed to add test.'))
+      toast.error(apiErrorMessage(err, 'Failed to add test.'))
     } finally {
       setAddingTest(false)
     }
@@ -592,7 +592,7 @@ export const PatientProfile = () => {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Failed to open pharmacy receipt:', e)
-      alert('Failed to open receipt. Please try again.')
+      toast.error('Failed to open receipt. Please try again.')
     }
   }
 

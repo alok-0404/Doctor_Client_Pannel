@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { ChangeEvent } from 'react';
 import axios from 'axios';
+import { toast } from 'react-toastify';
 
 interface ExtractedData {
   text: string;
@@ -34,7 +35,7 @@ const HandwritingExtractor: React.FC = () => {
 
   const extractData = async (): Promise<void> => {
     if (!file) {
-      alert('Please select an image first.');
+      toast.error('Please select an image first.');
       return;
     }
 
@@ -68,7 +69,7 @@ const HandwritingExtractor: React.FC = () => {
 
     } catch (error: any) {
       console.error('❌ Error:', error);
-      alert(error.response?.data?.error || 'Something went wrong. Please check the server.');
+      toast.error(error.response?.data?.error || 'Something went wrong. Please check the server.');
     } finally {
       setLoading(false);
     }

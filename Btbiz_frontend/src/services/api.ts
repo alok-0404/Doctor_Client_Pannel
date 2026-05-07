@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { toast } from 'react-toastify'
 import { authStorage } from '../utils/authStorage'
 import { patientStorage } from '../utils/patientStorage'
 
@@ -777,8 +778,7 @@ export const patientPortalService = {
         msg = (e.response.data as { message: string }).message
       }
       if (previewWin && !previewWin.closed) previewWin.close()
-      // eslint-disable-next-line no-alert
-      alert(msg)
+      toast.error(msg)
     }
   },
   async openDiagnosticReport(visitId: string, testId: string): Promise<void> {
@@ -806,12 +806,10 @@ export const patientPortalService = {
         try {
           const j = JSON.parse(text) as { message?: string }
           if (previewWin && !previewWin.closed) previewWin.close()
-          // eslint-disable-next-line no-alert
-          alert(j.message ?? 'Could not open report.')
+          toast.error(j.message ?? 'Could not open report.')
         } catch {
           if (previewWin && !previewWin.closed) previewWin.close()
-          // eslint-disable-next-line no-alert
-          alert('Could not open report.')
+          toast.error('Could not open report.')
         }
         return
       }
@@ -835,8 +833,7 @@ export const patientPortalService = {
         msg = (e.response.data as { message: string }).message
       }
       if (previewWin && !previewWin.closed) previewWin.close()
-      // eslint-disable-next-line no-alert
-      alert(msg)
+      toast.error(msg)
     }
   },
 }
@@ -980,7 +977,7 @@ export const patientService = {
 
       const win = previewWin ?? window.open('', '_blank')
       if (!win) {
-        alert('Popup blocked. Please allow popups to view secure preview.')
+        toast.error('Popup blocked. Please allow popups to view secure preview.')
         return
       }
 
