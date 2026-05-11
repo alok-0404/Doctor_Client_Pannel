@@ -847,6 +847,15 @@ router.get(
         return;
       }
 
+      if ((doc as any).patientPublishStatus === "PENDING_ASSISTANT") {
+        res.status(403).json({
+          message:
+            "Assistant verification is in progress. This document will be available to view after your clinic releases it.",
+          code: "ASSISTANT_VERIFICATION_PENDING",
+        });
+        return;
+      }
+
       const storedPath = String((doc as any).path ?? "").trim();
       const fullPath = resolveDocumentFilePath(storedPath);
       if (!fullPath) {

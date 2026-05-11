@@ -19,7 +19,8 @@ import {
   searchPatientByMobile,
   updatePatient,
   uploadDiagnosticTestReport,
-  uploadPatientDocument
+  uploadPatientDocument,
+  verifyPatientDocumentForPatientProfile
 } from "../controllers/patientController";
 import { getUploadsRootDir } from "../utils/uploadPath";
 
@@ -56,6 +57,12 @@ router.post("/:patientId/visit/:visitId/refer", recordVitalsAndReferForExistingV
 
 // POST /patients/:patientId/documents - upload report/prescription file
 router.post("/:patientId/documents", upload.single("file"), uploadPatientDocument);
+
+// PATCH /patients/:patientId/documents/:documentId/verify-for-patient — release staff upload to patient + lab/pharmacy preview
+router.patch(
+  "/:patientId/documents/:documentId/verify-for-patient",
+  verifyPatientDocumentForPatientProfile
+);
 
 // GET /patients/:patientId/documents/:documentId/file - serve document for doctor/assistant
 router.get("/:patientId/documents/:documentId/file", getDocumentFile);

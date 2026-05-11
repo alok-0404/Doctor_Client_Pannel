@@ -16,6 +16,12 @@ import {
   toStoredUploadPath,
   uploadFileExists,
 } from "../utils/uploadPath";
+import {
+  detectLineType,
+  formatVerifiedMedicineLine,
+  parsePrescriptionOcr,
+  type VerifiedExtractPayload,
+} from "../utils/prescriptionOcrParse";
 import { sendEmailWithAttachment } from "../services/emailService";
 import { sendWhatsAppMessage } from "../services/whatsappService";
 import {
@@ -79,120 +85,6 @@ function resolveDiagnosticReportPath(storedPath: unknown): string | null {
   const raw = String(storedPath ?? "").trim();
   if (!raw) return null;
   return findExistingUploadFilePath(raw) || null;
-}
-
-type ConfidenceTag = "HIGH" | "MEDIUM" | "LOW";
-
-const TEST_KEYWORDS = [
-  "cbc",
-  "hba1c",
-  "lipid",
-  "thyroid",
-  "tsh",
-  "lft",
-  "kft",
-  "sugar",
-  "xray",
-  "x-ray",
-  "ecg",
-  "ultrasound",
-  "urine",
-  "blood test",
-  "test",
-  "lab",
-  "crp",
-  "dengue",
-  "ns1",
-  "malaria",
-  "widal",
-  "culture",
-  "antigen",
-  "antibody",
-  "parasite",
-  "serology",
-  "pcr",
-  "vitamin d",
-  "b12",
-  "ferritin",
-];
-
-const MEDICINE_HINTS = [
-  "tab",
-  "tablet",
-  "cap",
-  "capsule",
-  "syp",
-  "syrup",
-  "inj",
-  "injection",
-  "mg",
-  "ml",
-  "od",
-  "bd",
-  "tds",
-  "hs",
-  "after food",
-  "before food",
-];
-
-function detectLineType(line: string): "MEDICINE" | "TEST" | "UNKNOWN" {
-  const lower = line.toLowerCase();
-  if (TEST_KEYWORDS.some((k) => lower.includes(k))) return "TEST";
-  if (MEDICINE_HINTS.some((k) => lower.includes(k))) return "MEDICINE";
-  return "UNKNOWN";
-}
-
-function computeLineConfidence(
-  line: string,
-  lineType: "MEDICINE" | "TEST" | "UNKNOWN",
-  ocrConfidence?: number
-): ConfidenceTag {
-  const norm = line.trim();
-  if (!norm) return "LOW";
-
-  let score = typeof ocrConfidence === "number" ? Math.max(0, Math.min(100, ocrConfidence)) : 55;
-  if (lineType !== "UNKNOWN") score += 20;
-  if (/\d/.test(norm)) score += 8;
-  if (norm.length >= 12) score += 5;
-  if (/[^a-zA-Z0-9\s.,:+\-()/]/.test(norm)) score -= 12;
-  if (norm.length <= 4) score -= 15;
-
-  if (score >= 78) return "HIGH";
-  if (score >= 55) return "MEDIUM";
-  return "LOW";
-}
-
-function parsePrescriptionOcr(
-  rawOcrText: string,
-  ocrConfidence?: number
-): {
-  medicines: Array<{ text: string; confidence: ConfidenceTag }>;
-  tests: Array<{ text: string; confidence: ConfidenceTag }>;
-  unknown: Array<{ text: string; confidence: ConfidenceTag }>;
-  lowConfidenceLines: string[];
-} {
-  const lines = rawOcrText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .slice(0, 250);
-
-  const medicines: Array<{ text: string; confidence: ConfidenceTag }> = [];
-  const tests: Array<{ text: string; confidence: ConfidenceTag }> = [];
-  const unknown: Array<{ text: string; confidence: ConfidenceTag }> = [];
-  const lowConfidenceLines: string[] = [];
-
-  for (const line of lines) {
-    const lineType = detectLineType(line);
-    const confidence = computeLineConfidence(line, lineType, ocrConfidence);
-    if (confidence === "LOW") lowConfidenceLines.push(line);
-
-    if (lineType === "MEDICINE") medicines.push({ text: line, confidence });
-    else if (lineType === "TEST") tests.push({ text: line, confidence });
-    else unknown.push({ text: line, confidence });
-  }
-
-  return { medicines, tests, unknown, lowConfidenceLines };
 }
 
 export const searchPatientByMobile = async (
@@ -589,6 +481,8 @@ export const uploadPatientDocument = async (
       size: file.size,
       path: toStoredUploadPath(file.path, file.filename),
       fileData: await fs.promises.readFile(file.path),
+      // Clinic uploads require assistant/doctor verification before patient & lab/pharmacy preview.
+      patientPublishStatus: req.doctor?._id ? "PENDING_ASSISTANT" : "PUBLISHED",
     });
 
     // Try to extract text using OCR in the background of this request.
@@ -631,19 +525,126 @@ export const uploadPatientDocument = async (
       };
     }
 
+    let suggestedParse: ReturnType<typeof parsePrescriptionOcr> | undefined;
+    const ocrForSuggest = ((doc as any).ocrText ?? "").toString().trim();
+    if (ocrForSuggest) {
+      suggestedParse = parsePrescriptionOcr(ocrForSuggest, (doc as any).ocrConfidence);
+    }
+
     res.status(201).json({
       document: {
         id: doc._id.toString(),
         originalName: doc.originalName,
         mimeType: doc.mimeType,
         size: doc.size,
-        uploadedAt: doc.createdAt
+        uploadedAt: doc.createdAt,
+        patientPublishStatus: (doc as any).patientPublishStatus ?? "PUBLISHED",
       },
-      ocr: ocrPayload
+      ocr: ocrPayload,
+      suggestedParse,
     });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("uploadPatientDocument error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+function sanitizeVerifiedPayload(body: unknown): VerifiedExtractPayload {
+  const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const clip = (s: unknown, max: number): string | undefined => {
+    if (typeof s !== "string") return undefined;
+    const t = s.trim().slice(0, max);
+    return t || undefined;
+  };
+
+  const rawMeds = Array.isArray(b.medicines) ? b.medicines : [];
+  const medicines = rawMeds.slice(0, 50).flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const r = row as Record<string, unknown>;
+    const medicineName = clip(r.medicineName, 400) ?? "";
+    if (!medicineName) return [];
+    return [
+      {
+        medicineName,
+        dosage: clip(r.dosage, 200),
+        quantity: clip(r.quantity, 50),
+        notes: clip(r.notes, 500),
+      },
+    ];
+  });
+
+  const rawTests = Array.isArray(b.tests) ? b.tests : [];
+  const tests = rawTests.slice(0, 50).flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const r = row as Record<string, unknown>;
+    const testName = clip(r.testName, 400) ?? "";
+    if (!testName) return [];
+    return [{ testName, notes: clip(r.notes, 500) }];
+  });
+
+  const clinicalNotes = clip(b.clinicalNotes, 4000);
+  const importantNotes = clip(b.importantNotes, 4000);
+
+  return { medicines, tests, clinicalNotes, importantNotes };
+}
+
+export const verifyPatientDocumentForPatientProfile = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { patientId, documentId } = req.params;
+    const role = req.doctor?.role;
+    if (role !== "ASSISTANT" && role !== "DOCTOR") {
+      res.status(403).json({
+        message: "Only clinic staff can release a prescription to the patient profile",
+      });
+      return;
+    }
+
+    if (!documentId || !patientId) {
+      res.status(400).json({ message: "patientId and documentId are required" });
+      return;
+    }
+
+    const verified = sanitizeVerifiedPayload(req.body);
+
+    const doc = await PatientDocument.findOne({
+      _id: documentId,
+      patient: patientId,
+    });
+
+    if (!doc) {
+      res.status(404).json({ message: "Document not found for this patient" });
+      return;
+    }
+
+    if (!(doc as any).uploadedBy) {
+      res.status(400).json({
+        message:
+          "This document was uploaded by the patient and is already visible on their profile.",
+      });
+      return;
+    }
+
+    (doc as any).verifiedExtract = verified;
+    (doc as any).verifiedAt = new Date();
+    (doc as any).verifiedBy = req.doctor?._id;
+    (doc as any).patientPublishStatus = "PUBLISHED";
+    await doc.save();
+
+    res.status(200).json({
+      message:
+        "Verified data saved. Patient can view the file; lab/pharmacy secure preview uses your verified medicines and tests.",
+      document: {
+        id: doc._id.toString(),
+        patientPublishStatus: "PUBLISHED",
+      },
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("verifyPatientDocumentForPatientProfile error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -732,9 +733,20 @@ export const getPrescriptionSecureLink = async (
     const doc = await PatientDocument.findOne({
       _id: documentId,
       patient: patientId
-    }).select("_id patient").lean();
+    })
+      .select("_id patient patientPublishStatus")
+      .lean();
     if (!doc) {
       res.status(404).json({ message: "Document not found" });
+      return;
+    }
+
+    if ((doc as any).patientPublishStatus === "PENDING_ASSISTANT") {
+      res.status(403).json({
+        message:
+          "Assistant verification is still in progress. Secure preview is available after the document is released to the patient profile.",
+        code: "ASSISTANT_VERIFICATION_PENDING",
+      });
       return;
     }
 
@@ -812,7 +824,9 @@ export const getPrescriptionSecurePreview = async (
       _id: decoded.documentId,
       patient: decoded.patientId
     })
-      .select("_id originalName mimeType createdAt ocrText ocrConfidence")
+      .select(
+        "_id originalName mimeType createdAt ocrText ocrConfidence patientPublishStatus verifiedExtract"
+      )
       .lean();
 
     if (!doc) {
@@ -820,44 +834,113 @@ export const getPrescriptionSecurePreview = async (
       return;
     }
 
-    const rawText = ((doc as any).ocrText ?? "").toString().trim();
-    const previewText = rawText
-      ? rawText.slice(0, 6000)
-      : "Prescription preview is not available yet. OCR text not found.";
+    if ((doc as any).patientPublishStatus === "PENDING_ASSISTANT") {
+      res.status(403).json({
+        message:
+          "Assistant verification is still in progress. This prescription is not available for secure preview yet.",
+        code: "ASSISTANT_VERIFICATION_PENDING",
+      });
+      return;
+    }
 
-    const parsed = parsePrescriptionOcr(previewText, (doc as any).ocrConfidence);
     const isPharmacy = role === "PHARMACY";
     const isLab = role === "LAB_ASSISTANT" || role === "LAB_MANAGER";
 
-    // Role-based filtering for the "Raw OCR" section: only lines this role is allowed to see.
-    // (Previously we dropped opposite-role lines but kept UNKNOWN — patient/diagnosis leaked,
-    // especially when ocrConfidence is low and many lines land in lowConfidenceLines on prod.)
-    const roleFilteredPreviewText = previewText
-      .split(/\r?\n/)
-      .filter((line: string) => {
-        const lineType = detectLineType(line);
-        if (isLab) return lineType === "TEST";
-        if (isPharmacy) return lineType === "MEDICINE";
-        return true;
-      })
-      .join("\n")
-      .trim();
+    const ve = (doc as any).verifiedExtract as VerifiedExtractPayload | undefined;
+    const hasVerified =
+      !!ve &&
+      ((ve.medicines && ve.medicines.length > 0) ||
+        (ve.tests && ve.tests.length > 0) ||
+        !!(ve.clinicalNotes && ve.clinicalNotes.trim()) ||
+        !!(ve.importantNotes && ve.importantNotes.trim()));
 
-    const roleFilteredParsed = {
-      medicines: isPharmacy ? parsed.medicines : [],
-      tests: isLab ? parsed.tests : [],
-      unknown: []
+    let previewText: string;
+    let rawOcrText: string;
+    let roleFilteredPreviewText: string;
+    let roleFilteredParsed: {
+      medicines: Array<{ text: string; confidence: "HIGH" | "MEDIUM" | "LOW" }>;
+      tests: Array<{ text: string; confidence: "HIGH" | "MEDIUM" | "LOW" }>;
+      unknown: Array<{ text: string; confidence: "HIGH" | "MEDIUM" | "LOW" }>;
     };
+    let roleFilteredLowConfidenceLines: string[];
+    let ocrConfidenceOut: number | undefined;
 
-    // Low-confidence bucket must follow the same rule as Raw OCR (no UNKNOWN / PII for lab/pharmacy).
-    const roleFilteredLowConfidenceLines = parsed.lowConfidenceLines
-      .filter((line) => {
-        const lineType = detectLineType(line);
-        if (isLab) return lineType === "TEST";
-        if (isPharmacy) return lineType === "MEDICINE";
-        return true;
-      })
-      .slice(0, 20);
+    if (hasVerified && ve) {
+      const medLines = (ve.medicines || [])
+        .map((m) => formatVerifiedMedicineLine(m))
+        .filter((l) => l.trim().length > 0);
+      const testLines = (ve.tests || [])
+        .map((t) =>
+          [t.testName, t.notes].filter((x) => x && String(x).trim()).join(" · ")
+        )
+        .filter((l) => l.trim().length > 0);
+      const noteLines: string[] = [];
+      if (ve.clinicalNotes?.trim()) noteLines.push(`Clinical: ${ve.clinicalNotes.trim()}`);
+      if (ve.importantNotes?.trim()) noteLines.push(`Important: ${ve.importantNotes.trim()}`);
+      const joined = [...medLines, ...testLines, ...noteLines].join("\n").slice(0, 6000);
+      const rawOcr = ((doc as any).ocrText ?? "").toString().trim().slice(0, 6000);
+      previewText =
+        joined ||
+        rawOcr ||
+        "Prescription preview is not available yet. OCR text not found.";
+      rawOcrText = rawOcr || joined;
+      roleFilteredPreviewText =
+        (isLab
+          ? testLines.join("\n")
+          : isPharmacy
+            ? medLines.join("\n")
+            : joined) || previewText;
+      roleFilteredParsed = {
+        medicines: isPharmacy
+          ? (ve.medicines || []).map((m) => ({
+              text: formatVerifiedMedicineLine(m),
+              confidence: "HIGH" as const,
+            }))
+          : [],
+        tests: isLab
+          ? (ve.tests || []).map((t) => ({
+              text: [t.testName, t.notes].filter((x) => x && String(x).trim()).join(" · "),
+              confidence: "HIGH" as const,
+            }))
+          : [],
+        unknown: [],
+      };
+      roleFilteredLowConfidenceLines = [];
+      ocrConfidenceOut = 0.95;
+    } else {
+      const rawText = ((doc as any).ocrText ?? "").toString().trim();
+      previewText = rawText
+        ? rawText.slice(0, 6000)
+        : "Prescription preview is not available yet. OCR text not found.";
+      const parsed = parsePrescriptionOcr(previewText, (doc as any).ocrConfidence);
+      roleFilteredPreviewText = previewText
+        .split(/\r?\n/)
+        .filter((line: string) => {
+          const lineType = detectLineType(line);
+          if (isLab) return lineType === "TEST";
+          if (isPharmacy) return lineType === "MEDICINE";
+          return true;
+        })
+        .join("\n")
+        .trim();
+
+      roleFilteredParsed = {
+        medicines: isPharmacy ? parsed.medicines : [],
+        tests: isLab ? parsed.tests : [],
+        unknown: [],
+      };
+
+      roleFilteredLowConfidenceLines = parsed.lowConfidenceLines
+        .filter((line) => {
+          const lineType = detectLineType(line);
+          if (isLab) return lineType === "TEST";
+          if (isPharmacy) return lineType === "MEDICINE";
+          return true;
+        })
+        .slice(0, 20);
+      rawOcrText = previewText;
+      ocrConfidenceOut = (doc as any).ocrConfidence;
+    }
 
     res.status(200).json({
       document: {
@@ -867,14 +950,15 @@ export const getPrescriptionSecurePreview = async (
         uploadedAt: (doc as any).createdAt,
         // UI uses previewText for both parsed preview and "Raw OCR" display.
         previewText: roleFilteredPreviewText,
-        rawOcrText: previewText,
+        rawOcrText,
         parsed: roleFilteredParsed,
         lowConfidenceLines: roleFilteredLowConfidenceLines,
-        ocrConfidence: (doc as any).ocrConfidence,
+        ocrConfidence: ocrConfidenceOut,
         limitedView: true,
         scope: decoded.scope ?? "OCR_ONLY",
         downloadable: false,
-        roleView: isPharmacy ? "PHARMACY_MEDICINES_ONLY" : "LAB_TESTS_ONLY"
+        roleView: isPharmacy ? "PHARMACY_MEDICINES_ONLY" : "LAB_TESTS_ONLY",
+        source: hasVerified ? "VERIFIED_ASSISTANT" : "OCR_AUTO",
       }
     });
   } catch (error) {

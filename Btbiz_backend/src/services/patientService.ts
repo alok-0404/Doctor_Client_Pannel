@@ -277,19 +277,32 @@ export const getFullPatientHistory = async (patientId: string) => {
       receiptNumber: (d as any).receiptNumber,
       createdAt: (d as any).createdAt
     })),
-    documents: documents.map((d) => ({
-      id: d._id.toString(),
-      originalName: d.originalName,
-      mimeType: d.mimeType,
-      uploadedAt: d.createdAt,
-      ocrText: (d as any).ocrText,
-      ocrConfidence: (d as any).ocrConfidence,
-      source: (d as any).uploadedBy ? "staff" : "patient",
-      isFileAvailable:
-        !!(d as any).fileData ||
-        isRemoteUploadPath((d as any).path) ||
-        uploadFileExists(findExistingUploadFilePath((d as any).path)),
-    })),
+    documents: documents.map((d) => {
+      const rawPub = (d as any).patientPublishStatus as string | undefined;
+      const patientPublishStatus =
+        rawPub === "PENDING_ASSISTANT" || rawPub === "PUBLISHED"
+          ? rawPub
+          : "PUBLISHED";
+      const verifiedAtRaw = (d as any).verifiedAt as Date | string | undefined;
+      const verifiedAt =
+        verifiedAtRaw != null ? new Date(verifiedAtRaw as Date).toISOString() : undefined;
+      return {
+        id: d._id.toString(),
+        originalName: d.originalName,
+        mimeType: d.mimeType,
+        uploadedAt: d.createdAt,
+        ocrText: (d as any).ocrText,
+        ocrConfidence: (d as any).ocrConfidence,
+        source: (d as any).uploadedBy ? "staff" : "patient",
+        patientPublishStatus,
+        /** Set when clinic staff saved structured verify + release (assistant/doctor flow). */
+        verifiedAt,
+        isFileAvailable:
+          !!(d as any).fileData ||
+          isRemoteUploadPath((d as any).path) ||
+          uploadFileExists(findExistingUploadFilePath((d as any).path)),
+      };
+    }),
     medicineRequests: medicineRequests.map((m) => ({
       id: (m as any)._id.toString(),
       medicineName: (m as any).medicineName,

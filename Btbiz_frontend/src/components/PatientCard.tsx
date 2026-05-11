@@ -23,6 +23,8 @@ interface DocumentViewButtonProps {
   label: string
   /** Optional fallback text (e.g. OCR) to show if file cannot be opened */
   fallbackText?: string
+  /** When set, document tab shows top banner (structured verify was saved at clinic). */
+  assistantVerified?: boolean
 }
 
 const escapeHtml = (value: string): string =>
@@ -33,14 +35,22 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 
-const DocumentViewButton: FC<DocumentViewButtonProps> = ({ patientId, documentId, label, fallbackText }) => {
+const DocumentViewButton: FC<DocumentViewButtonProps> = ({
+  patientId,
+  documentId,
+  label,
+  fallbackText,
+  assistantVerified,
+}) => {
   const [loading, setLoading] = useState(false)
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (loading) return
     setLoading(true)
     try {
-      await patientService.openDocument(patientId, documentId)
+      await patientService.openDocument(patientId, documentId, {
+        assistantVerified: assistantVerified === true,
+      })
     } catch {
       if (fallbackText) {
         const html = `
@@ -119,6 +129,9 @@ export interface DocumentItem {
   ocrText?: string
   /** Optional source of document, e.g. 'WHATSAPP' when uploaded via bot */
   source?: string
+  patientPublishStatus?: 'PENDING_ASSISTANT' | 'PUBLISHED'
+  /** ISO time when assistant/doctor saved structured verify + release */
+  verifiedAt?: string
 }
 
 export interface PharmacyDispensationItem {
@@ -428,7 +441,9 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                         </p>
                       </li>
                     ))}
-                    {data.documents?.map((doc) => (
+                    {data.documents?.map((doc) => {
+                      const pendingVerify = doc.patientPublishStatus === 'PENDING_ASSISTANT'
+                      return (
                       <li
                         key={doc.id}
                         className="patient-list-item"
@@ -449,21 +464,30 @@ export const PatientCard: FC<PatientCardProps> = ({ data, patientId }) => {
                             {' · Uploaded prescription'}
                             {doc.source === 'patient' && ' · Uploaded by patient'}
                             {doc.source === 'WHATSAPP' && ' · WhatsApp'}
+                            {pendingVerify && ' · Assistant verification in progress'}
                           </span>
-                          {doc.ocrText && (
+                          {doc.ocrText && !pendingVerify && (
                             <p className="patient-list-secondary" style={{ marginTop: 4, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {doc.ocrText}
                             </p>
                           )}
                         </div>
-                        <DocumentViewButton
-                          patientId={patientId}
-                          documentId={doc.id}
-                          label="View"
-                          fallbackText={doc.ocrText}
-                        />
+                        {pendingVerify ? (
+                          <span className="patient-list-secondary" style={{ fontSize: 11, color: '#b45309', maxWidth: 140, textAlign: 'right' }}>
+                            Not released to patient yet
+                          </span>
+                        ) : (
+                          <DocumentViewButton
+                            patientId={patientId}
+                            documentId={doc.id}
+                            label="View"
+                            fallbackText={doc.ocrText}
+                            assistantVerified={Boolean(doc.verifiedAt)}
+                          />
+                        )}
                       </li>
-                    ))}
+                      )
+                    })}
                   </ul>
                 ) : (
                   <p className="patient-list-secondary" style={{ margin: 0 }}>

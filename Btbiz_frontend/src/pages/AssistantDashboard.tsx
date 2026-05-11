@@ -17,7 +17,20 @@ import {
   type AssistantFamilyOption,
   type AssistantPatientPrefill,
 } from '../services/api'
+import { toast } from 'react-toastify'
 import { parseAssistantReferralError } from '../utils/assistantErrors'
+
+const newVerifyRowId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+type VerifyMedicineRow = {
+  id: string
+  medicineName: string
+  dosage: string
+  quantity: string
+  notes: string
+}
+
+type VerifyTestRow = { id: string; testName: string; notes: string }
 
 type Step = 'search' | 'new_patient' | 'checkin'
 type AvailabilityStatus = 'available' | 'unavailable' | 'busy'
@@ -91,7 +104,20 @@ export const AssistantDashboard = () => {
   const [docUploadLoading, setDocUploadLoading] = useState(false)
   const [docUploadError, setDocUploadError] = useState<string | null>(null)
   const [docUploadSuccess, setDocUploadSuccess] = useState<string | null>(null)
+  /** Staff upload id waiting for “release to patient profile” after verification */
+  const [docPendingReleaseId, setDocPendingReleaseId] = useState<string | null>(null)
+  const [docVerifyLoading, setDocVerifyLoading] = useState(false)
   const [docOcrPreview, setDocOcrPreview] = useState<string | null>(null)
+
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false)
+  const [verifyMedicines, setVerifyMedicines] = useState<VerifyMedicineRow[]>([
+    { id: newVerifyRowId(), medicineName: '', dosage: '', quantity: '', notes: '' },
+  ])
+  const [verifyTests, setVerifyTests] = useState<VerifyTestRow[]>([
+    { id: newVerifyRowId(), testName: '', notes: '' },
+  ])
+  const [verifyClinicalNotes, setVerifyClinicalNotes] = useState('')
+  const [verifyImportantNotes, setVerifyImportantNotes] = useState('')
 
   const [saveLoading, setSaveLoading] = useState(false)
   const [referLoading, setReferLoading] = useState(false)
@@ -568,6 +594,7 @@ export const AssistantDashboard = () => {
       setPrefilledFromVisitAt(null)
       setPrefilledAssistantCheckInAt(null)
       setMobileSearch('')
+      setDocPendingReleaseId(null)
     } catch (err: unknown) {
       const parsed = parseAssistantReferralError(err)
       setFormError(parsed.message)
@@ -575,6 +602,32 @@ export const AssistantDashboard = () => {
     } finally {
       setReferLoading(false)
     }
+  }
+
+  const seedVerifyFormFromSuggestedParse = (parse?: {
+    medicines?: Array<{ text: string }>
+    tests?: Array<{ text: string }>
+  }) => {
+    const meds = (parse?.medicines ?? []).map((m) => ({
+      id: newVerifyRowId(),
+      medicineName: m.text,
+      dosage: '',
+      quantity: '',
+      notes: '',
+    }))
+    setVerifyMedicines(
+      meds.length > 0
+        ? meds
+        : [{ id: newVerifyRowId(), medicineName: '', dosage: '', quantity: '', notes: '' }]
+    )
+    const t = (parse?.tests ?? []).map((x) => ({
+      id: newVerifyRowId(),
+      testName: x.text,
+      notes: '',
+    }))
+    setVerifyTests(t.length > 0 ? t : [{ id: newVerifyRowId(), testName: '', notes: '' }])
+    setVerifyClinicalNotes('')
+    setVerifyImportantNotes('')
   }
 
   const handleUploadDocument = async () => {
@@ -589,13 +642,34 @@ export const AssistantDashboard = () => {
     setDocUploadLoading(true)
     try {
       const result = await patientService.uploadDocument(patientId, docFile)
+      const pub = result.document?.patientPublishStatus
+      if (pub === 'PENDING_ASSISTANT' && result.document?.id) {
+        setDocPendingReleaseId(result.document.id)
+        seedVerifyFormFromSuggestedParse(result.suggestedParse)
+        setVerifyModalOpen(true)
+      } else {
+        setDocPendingReleaseId(null)
+        setVerifyModalOpen(false)
+      }
       if (result.ocr && result.ocr.success && 'text' in result.ocr && result.ocr.text) {
         setDocOcrPreview(result.ocr.text)
-        setDocUploadSuccess('File uploaded. Text extracted below – please review and copy as needed.')
+        setDocUploadSuccess(
+          pub === 'PENDING_ASSISTANT'
+            ? 'File saved. The verification window is open — edit medicines / tests / notes, then save to release.'
+            : 'File uploaded. Text extracted below – please review and copy as needed.'
+        )
       } else if (result.ocr && !result.ocr.success) {
-        setDocUploadSuccess('File uploaded to patient record. (Text extraction failed, but document is saved.)')
+        setDocUploadSuccess(
+          pub === 'PENDING_ASSISTANT'
+            ? 'File saved (OCR failed). Use the verification window to enter medicines and tests manually, then save.'
+            : 'File uploaded to patient record. (Text extraction failed, but document is saved.)'
+        )
       } else {
-        setDocUploadSuccess('File uploaded and saved to patient record.')
+        setDocUploadSuccess(
+          pub === 'PENDING_ASSISTANT'
+            ? 'File saved. Complete the verification window to release to the patient profile.'
+            : 'File uploaded and saved to patient record.'
+        )
       }
       setDocFile(null)
     } catch (err: any) {
@@ -603,6 +677,74 @@ export const AssistantDashboard = () => {
     } finally {
       setDocUploadLoading(false)
     }
+  }
+
+  const handleVerifyModalSave = async () => {
+    if (!patientId || !docPendingReleaseId) return
+    const medicinesPayload = verifyMedicines
+      .map((r) => ({
+        medicineName: r.medicineName.trim(),
+        dosage: r.dosage.trim() || undefined,
+        quantity: r.quantity.trim() || undefined,
+        notes: r.notes.trim() || undefined,
+      }))
+      .filter((r) => r.medicineName.length > 0)
+    const testsPayload = verifyTests
+      .map((r) => ({
+        testName: r.testName.trim(),
+        notes: r.notes.trim() || undefined,
+      }))
+      .filter((r) => r.testName.length > 0)
+    const clinical = verifyClinicalNotes.trim()
+    const important = verifyImportantNotes.trim()
+    const hasAny =
+      medicinesPayload.length > 0 ||
+      testsPayload.length > 0 ||
+      clinical.length > 0 ||
+      important.length > 0
+    if (!hasAny) {
+      toast.error('Add at least one medicine, lab test, or clinical / important notes before saving.')
+      return
+    }
+    setDocVerifyLoading(true)
+    try {
+      await patientService.verifyDocumentForPatientProfile(patientId, docPendingReleaseId, {
+        medicines: medicinesPayload,
+        tests: testsPayload,
+        clinicalNotes: clinical || undefined,
+        importantNotes: important || undefined,
+      })
+      setDocPendingReleaseId(null)
+      setVerifyModalOpen(false)
+      setDocOcrPreview(null)
+      toast.success(
+        'Verified and released — patient can view this document; lab/pharmacy preview uses your structured data.'
+      )
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string } } }
+      toast.error(ax?.response?.data?.message ?? 'Could not verify document.')
+    } finally {
+      setDocVerifyLoading(false)
+    }
+  }
+
+  const addVerifyMedicineRow = () => {
+    setVerifyMedicines((rows) => [
+      ...rows,
+      { id: newVerifyRowId(), medicineName: '', dosage: '', quantity: '', notes: '' },
+    ])
+  }
+
+  const removeVerifyMedicineRow = (id: string) => {
+    setVerifyMedicines((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.id !== id)))
+  }
+
+  const addVerifyTestRow = () => {
+    setVerifyTests((rows) => [...rows, { id: newVerifyRowId(), testName: '', notes: '' }])
+  }
+
+  const removeVerifyTestRow = (id: string) => {
+    setVerifyTests((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.id !== id)))
   }
 
   const goBackToSearch = () => {
@@ -621,6 +763,9 @@ export const AssistantDashboard = () => {
     setDocFile(null)
     setDocUploadError(null)
     setDocUploadSuccess(null)
+    setDocPendingReleaseId(null)
+    setVerifyModalOpen(false)
+    seedVerifyFormFromSuggestedParse(undefined)
   }
 
   useEffect(() => {
@@ -681,12 +826,12 @@ export const AssistantDashboard = () => {
 
   // Auto-hide document upload success message after a few seconds
   useEffect(() => {
-    if (!docUploadSuccess) return
+    if (!docUploadSuccess || docPendingReleaseId) return
     const timeout = setTimeout(() => {
       setDocUploadSuccess(null)
     }, 4000)
     return () => clearTimeout(timeout)
-  }, [docUploadSuccess])
+  }, [docUploadSuccess, docPendingReleaseId])
 
   const isBotBookedAppointment = (a: DoctorAppointmentItem): boolean => {
     const source = String(a.source ?? '').toUpperCase()
@@ -1248,7 +1393,7 @@ export const AssistantDashboard = () => {
         )}
 
         {step === 'checkin' && patientId && (
-          <Card className="search-card assistant-workspace-card">
+          <Card className="search-card assistant-workspace-card assistant-checkin-card">
             <header className="search-header">
               <p className="dashboard-kicker">Check-in & refer to doctor</p>
               <h2 className="search-title">
@@ -1288,165 +1433,505 @@ export const AssistantDashboard = () => {
               )}
             </header>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                void handleUpdatePatient(e)
-              }}
-              className="search-form"
-              style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-            >
-              <p className="dashboard-kicker" style={{ marginTop: 8 }}>Patient information</p>
-              <TextField id="c-first-name" label="First name *" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-              <TextField id="c-last-name" label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-              <TextField id="c-mobile" type="tel" label="Mobile number *" value={mobileNumber} onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} />
-              <TextField id="c-address" label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
-              <TextField id="c-disease" label="Disease / reason for visit" value={diseaseReason} onChange={(e) => setDiseaseReason(e.target.value)} />
-              <div>
-                <label className="ui-textfield-label" htmlFor="c-history">Previous health history</label>
-                <textarea
-                  id="c-history"
-                  rows={2}
-                  className="ui-textfield-input"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={previousHealthHistory}
-                  onChange={(e) => setPreviousHealthHistory(e.target.value)}
-                />
+            <div className="assistant-checkin-grid">
+              <div className="assistant-checkin-col">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void handleUpdatePatient(e)
+                  }}
+                  className="search-form"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+                >
+                  <p className="dashboard-kicker" style={{ marginTop: 0 }}>Patient information</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                    <TextField id="c-first-name" label="First name *" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                    <TextField id="c-last-name" label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+                    <TextField id="c-mobile" type="tel" label="Mobile number *" value={mobileNumber} onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                    <TextField id="c-address" label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
+                    <TextField id="c-disease" label="Disease / reason for visit" value={diseaseReason} onChange={(e) => setDiseaseReason(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="ui-textfield-label" htmlFor="c-history">Previous health history</label>
+                    <textarea
+                      id="c-history"
+                      rows={3}
+                      className="ui-textfield-input"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={previousHealthHistory}
+                      onChange={(e) => setPreviousHealthHistory(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                    <TextField id="c-blood-group" label="Blood group" value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} />
+                    <TextField id="c-emergency-name" label="Emergency contact name" value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} />
+                    <TextField id="c-emergency-phone" type="tel" label="Emergency contact phone" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} />
+                  </div>
+                  <Button type="submit" disabled={saveLoading} style={{ alignSelf: 'flex-start' }}>
+                    {saveLoading ? 'Saving…' : 'Update patient details'}
+                  </Button>
+                </form>
               </div>
-              <TextField id="c-blood-group" label="Blood group" value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} />
-              <TextField id="c-emergency-name" label="Emergency contact name" value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} />
-              <Button type="submit" disabled={saveLoading} style={{ alignSelf: 'flex-start' }}>
-                {saveLoading ? 'Saving…' : 'Update patient details'}
-              </Button>
-            </form>
 
-            <form onSubmit={handleReferToDoctor} className="search-form" style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 24 }}>
-              <p className="dashboard-kicker">
-                {hasTodayVisit ? 'Upload documents for today\'s visit' : 'Mandatory vitals (before doctor)'}
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <TextField id="bp-sys" type="number" label="BP systolic (mmHg) *" value={bpSystolic} onChange={(e) => setBpSystolic(e.target.value)} placeholder="120" />
-                <TextField id="bp-dia" type="number" label="BP diastolic (mmHg) *" value={bpDiastolic} onChange={(e) => setBpDiastolic(e.target.value)} placeholder="80" />
-              </div>
-              <TextField id="sugar" type="number" label="Blood sugar fasting (mg/dL)" value={bloodSugar} onChange={(e) => setBloodSugar(e.target.value)} placeholder="e.g. 90" />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <TextField id="weight" type="number" label="Weight (kg)" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="e.g. 70" />
-                <TextField id="temp" type="number" label="Temperature (°C)" value={temperature} onChange={(e) => setTemperature(e.target.value)} placeholder="e.g. 37" />
-              </div>
-              <div>
-                <label className="ui-textfield-label" htmlFor="other-vitals">Other basic tests / notes</label>
-                <textarea
-                  id="other-vitals"
-                  rows={2}
-                  className="ui-textfield-input"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={otherVitalsNotes}
-                  onChange={(e) => setOtherVitalsNotes(e.target.value)}
-                  placeholder="e.g. Pulse, SpO2, any other readings"
-                />
-              </div>
-              <div>
-                <label className="ui-textfield-label" htmlFor="notes-doctor">Notes for doctor</label>
-                <textarea
-                  id="notes-doctor"
-                  rows={2}
-                  className="ui-textfield-input"
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={notesForDoctor}
-                  onChange={(e) => setNotesForDoctor(e.target.value)}
-                  placeholder="Brief note to refer patient to doctor"
-                />
-              </div>
-              <div>
-                <p className="dashboard-kicker">Upload report / document</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null
-                      setDocFile(f)
-                      setDocUploadError(null)
-                      setDocUploadSuccess(null)
-                      setDocOcrPreview(null)
-                    }}
-                  />
-                  {docFile && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDocFile(null)
-                        setDocUploadError(null)
-                        setDocUploadSuccess(null)
-                        setDocOcrPreview(null)
-                      }}
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        color: '#c62828',
-                        fontSize: 18,
-                        cursor: 'pointer',
-                        lineHeight: 1,
-                      }}
-                      aria-label="Clear selected file"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                {docUploadError && (
-                  <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
-                    {docUploadError}
+              <div className="assistant-checkin-col">
+                <form onSubmit={handleReferToDoctor} className="search-form" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <p className="dashboard-kicker" style={{ marginTop: 0 }}>
+                    {hasTodayVisit ? 'Upload documents for today\'s visit' : 'Mandatory vitals (before doctor)'}
                   </p>
-                )}
-                {docUploadSuccess && (
-                  <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
-                    {docUploadSuccess}
-                  </p>
-                )}
-                {docOcrPreview && (
-                  <div style={{ marginTop: 8 }}>
-                    <p className="dashboard-kicker">Extracted text (OCR)</p>
-                    <div
-                      style={{
-                        border: '1px solid #ddd',
-                        borderRadius: 4,
-                        padding: 8,
-                        maxHeight: 160,
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        backgroundColor: '#fafafa',
-                      }}
-                    >
-                      {docOcrPreview}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <TextField id="bp-sys" type="number" label="BP systolic (mmHg) *" value={bpSystolic} onChange={(e) => setBpSystolic(e.target.value)} placeholder="120" />
+                    <TextField id="bp-dia" type="number" label="BP diastolic (mmHg) *" value={bpDiastolic} onChange={(e) => setBpDiastolic(e.target.value)} placeholder="80" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                    <TextField id="sugar" type="number" label="Blood sugar fasting (mg/dL)" value={bloodSugar} onChange={(e) => setBloodSugar(e.target.value)} placeholder="e.g. 90" />
+                    <TextField id="weight" type="number" label="Weight (kg)" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="e.g. 70" />
+                    <TextField id="temp" type="number" label="Temperature (°C)" value={temperature} onChange={(e) => setTemperature(e.target.value)} placeholder="e.g. 37" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, alignItems: 'start' }}>
+                    <div>
+                      <label className="ui-textfield-label" htmlFor="other-vitals">Other basic tests / notes</label>
+                      <textarea
+                        id="other-vitals"
+                        rows={3}
+                        className="ui-textfield-input"
+                        style={{ width: '100%', boxSizing: 'border-box' }}
+                        value={otherVitalsNotes}
+                        onChange={(e) => setOtherVitalsNotes(e.target.value)}
+                        placeholder="e.g. Pulse, SpO2, any other readings"
+                      />
+                    </div>
+                    <div>
+                      <label className="ui-textfield-label" htmlFor="notes-doctor">Notes for doctor</label>
+                      <textarea
+                        id="notes-doctor"
+                        rows={3}
+                        className="ui-textfield-input"
+                        style={{ width: '100%', boxSizing: 'border-box' }}
+                        value={notesForDoctor}
+                        onChange={(e) => setNotesForDoctor(e.target.value)}
+                        placeholder="Brief note to refer patient to doctor"
+                      />
                     </div>
                   </div>
-                )}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!docFile || docUploadLoading}
-                  onClick={handleUploadDocument}
-                  style={{ marginTop: 8 }}
-                >
-                  {docUploadLoading ? 'Uploading…' : 'Upload to patient record'}
-                </Button>
+                  <div>
+                    <p className="dashboard-kicker">Upload report / document</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null
+                          setDocFile(f)
+                          setDocUploadError(null)
+                          setDocUploadSuccess(null)
+                          setDocOcrPreview(null)
+                          setDocPendingReleaseId(null)
+                        }}
+                      />
+                      {docFile && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDocFile(null)
+                            setDocUploadError(null)
+                            setDocUploadSuccess(null)
+                            setDocOcrPreview(null)
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: '#c62828',
+                            fontSize: 18,
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                          }}
+                          aria-label="Clear selected file"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    {docUploadError && (
+                      <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+                        {docUploadError}
+                      </p>
+                    )}
+                    {docUploadSuccess && (
+                      <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+                        {docUploadSuccess}
+                      </p>
+                    )}
+                    {docOcrPreview && (
+                      <div style={{ marginTop: 8 }}>
+                        <p className="dashboard-kicker">Extracted text (OCR)</p>
+                        <div
+                          style={{
+                            border: '1px solid #ddd',
+                            borderRadius: 4,
+                            padding: 8,
+                            maxHeight: 140,
+                            overflow: 'auto',
+                            whiteSpace: 'pre-wrap',
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            backgroundColor: '#fafafa',
+                          }}
+                        >
+                          {docOcrPreview}
+                        </div>
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!docFile || docUploadLoading}
+                      onClick={handleUploadDocument}
+                      style={{ marginTop: 8 }}
+                    >
+                      {docUploadLoading ? 'Uploading…' : 'Upload to patient record'}
+                    </Button>
+                    {docPendingReleaseId && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          padding: 12,
+                          borderRadius: 8,
+                          background: '#fffbeb',
+                          border: '1px solid #fcd34d',
+                        }}
+                      >
+                        <p className="text-sm" style={{ margin: '0 0 8px', color: '#92400e', fontWeight: 600 }}>
+                          Patient profile: verification in progress
+                        </p>
+                        <p className="text-sm" style={{ margin: '0 0 10px', color: '#78350f', lineHeight: 1.45 }}>
+                          This file stays hidden from the patient until you review medicines, lab tests, and notes in
+                          the verification window, then save structured data and release.
+                        </p>
+                        {!verifyModalOpen && (
+                          <Button type="button" onClick={() => setVerifyModalOpen(true)}>
+                            Open verification
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {renderFormError()}
+                  {formSuccess && <p className="text-sm" style={{ color: '#2e7d32' }}>{formSuccess}</p>}
+                  <div className="dialog-actions" style={{ marginTop: 8 }}>
+                    <Button type="button" variant="secondary" onClick={goBackToSearch}>Back to search</Button>
+                    <Button type="submit" disabled={referLoading}>
+                      {referLoading ? 'Referring…' : 'Refer to doctor'}
+                    </Button>
+                  </div>
+                </form>
               </div>
-              {renderFormError()}
-              {formSuccess && <p className="text-sm" style={{ color: '#2e7d32' }}>{formSuccess}</p>}
-              <div className="dialog-actions" style={{ marginTop: 8 }}>
-                <Button type="button" variant="secondary" onClick={goBackToSearch}>Back to search</Button>
-                <Button type="submit" disabled={referLoading}>
-                  {referLoading ? 'Referring…' : 'Refer to doctor'}
-                </Button>
-              </div>
-            </form>
+            </div>
           </Card>
         )}
         </div>
       </main>
+
+      {verifyModalOpen && docPendingReleaseId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="verify-prescription-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 2000,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(1100px, 96vw)',
+              maxHeight: 'min(92vh, 900px)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#fff',
+              borderRadius: 12,
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexShrink: 0,
+              }}
+            >
+              <h2 id="verify-prescription-title" className="text-lg" style={{ margin: 0, fontWeight: 700 }}>
+                Verify prescription & release to patient
+              </h2>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={docVerifyLoading}
+                onClick={() => setVerifyModalOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+            <div style={{ overflow: 'auto', padding: 20, flex: 1 }}>
+              <p className="text-sm" style={{ margin: '0 0 16px', color: '#475569', lineHeight: 1.5 }}>
+                OCR suggested rows below — edit each line, add or remove rows, then save. Lab and pharmacy secure
+                preview will use this structured data.
+              </p>
+
+              {docOcrPreview && (
+                <details style={{ marginBottom: 20, border: '1px solid #e2e8f0', borderRadius: 8, padding: 12 }}>
+                  <summary className="text-sm" style={{ cursor: 'pointer', fontWeight: 600, color: '#334155' }}>
+                    Raw OCR text (reference)
+                  </summary>
+                  <pre
+                    className="text-xs"
+                    style={{
+                      margin: '12px 0 0',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      maxHeight: 180,
+                      overflow: 'auto',
+                      color: '#64748b',
+                    }}
+                  >
+                    {docOcrPreview}
+                  </pre>
+                </details>
+              )}
+
+              <section style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <h3 className="text-sm" style={{ margin: 0, fontWeight: 700, color: '#0f172a' }}>
+                    Medicines
+                  </h3>
+                  <Button type="button" variant="secondary" onClick={addVerifyMedicineRow}>
+                    + Add row
+                  </Button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0' }}>Tablet / medicine</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', width: 120 }}>Dosage</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', width: 90 }}>Qty</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0' }}>Notes</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', width: 72 }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {verifyMedicines.map((row) => (
+                        <tr key={row.id}>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-med-name-${row.id}`}
+                              label=" "
+                              value={row.medicineName}
+                              onChange={(e) =>
+                                setVerifyMedicines((rows) =>
+                                  rows.map((r) =>
+                                    r.id === row.id ? { ...r, medicineName: e.target.value } : r
+                                  )
+                                )
+                              }
+                              placeholder="e.g. Paracetamol 500mg"
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-med-dose-${row.id}`}
+                              label=" "
+                              value={row.dosage}
+                              onChange={(e) =>
+                                setVerifyMedicines((rows) =>
+                                  rows.map((r) => (r.id === row.id ? { ...r, dosage: e.target.value } : r))
+                                )
+                              }
+                              placeholder="1-0-1"
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-med-qty-${row.id}`}
+                              label=" "
+                              value={row.quantity}
+                              onChange={(e) =>
+                                setVerifyMedicines((rows) =>
+                                  rows.map((r) => (r.id === row.id ? { ...r, quantity: e.target.value } : r))
+                                )
+                              }
+                              placeholder="10"
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-med-notes-${row.id}`}
+                              label=" "
+                              value={row.notes}
+                              onChange={(e) =>
+                                setVerifyMedicines((rows) =>
+                                  rows.map((r) => (r.id === row.id ? { ...r, notes: e.target.value } : r))
+                                )
+                              }
+                              placeholder="After food"
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <Button type="button" variant="secondary" onClick={() => removeVerifyMedicineRow(row.id)}>
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <h3 className="text-sm" style={{ margin: 0, fontWeight: 700, color: '#0f172a' }}>
+                    Lab tests
+                  </h3>
+                  <Button type="button" variant="secondary" onClick={addVerifyTestRow}>
+                    + Add row
+                  </Button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0' }}>Test name</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0' }}>Notes</th>
+                        <th style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', width: 72 }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {verifyTests.map((row) => (
+                        <tr key={row.id}>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-test-name-${row.id}`}
+                              label=" "
+                              value={row.testName}
+                              onChange={(e) =>
+                                setVerifyTests((rows) =>
+                                  rows.map((r) => (r.id === row.id ? { ...r, testName: e.target.value } : r))
+                                )
+                              }
+                              placeholder="e.g. CBC, LFT"
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <TextField
+                              id={`verify-test-notes-${row.id}`}
+                              label=" "
+                              value={row.notes}
+                              onChange={(e) =>
+                                setVerifyTests((rows) =>
+                                  rows.map((r) => (r.id === row.id ? { ...r, notes: e.target.value } : r))
+                                )
+                              }
+                              placeholder="Fasting, etc."
+                            />
+                          </td>
+                          <td style={{ padding: 6, borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                            <Button type="button" variant="secondary" onClick={() => removeVerifyTestRow(row.id)}>
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section style={{ marginBottom: 8 }}>
+                <h3 className="text-sm" style={{ margin: '0 0 10px', fontWeight: 700, color: '#0f172a' }}>
+                  Extra notes
+                </h3>
+                <label htmlFor="verify-clinical-notes" className="text-sm" style={{ display: 'block', marginBottom: 6, color: '#475569' }}>
+                  Clinical notes
+                </label>
+                <textarea
+                  id="verify-clinical-notes"
+                  value={verifyClinicalNotes}
+                  onChange={(e) => setVerifyClinicalNotes(e.target.value)}
+                  placeholder="Diagnosis context, follow-up, etc."
+                  rows={4}
+                  className="text-sm"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                    minHeight: 88,
+                  }}
+                />
+                <label
+                  htmlFor="verify-important-notes"
+                  className="text-sm"
+                  style={{ display: 'block', margin: '14px 0 6px', color: '#475569' }}
+                >
+                  Important / allergy / cautions
+                </label>
+                <textarea
+                  id="verify-important-notes"
+                  value={verifyImportantNotes}
+                  onChange={(e) => setVerifyImportantNotes(e.target.value)}
+                  placeholder="Allergies, contraindications…"
+                  rows={3}
+                  className="text-sm"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                    minHeight: 72,
+                  }}
+                />
+              </section>
+            </div>
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                flexShrink: 0,
+                background: '#f8fafc',
+              }}
+            >
+              <Button type="button" variant="secondary" disabled={docVerifyLoading} onClick={() => setVerifyModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={docVerifyLoading} onClick={() => void handleVerifyModalSave()}>
+                {docVerifyLoading ? 'Saving…' : 'Save structured data & release'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

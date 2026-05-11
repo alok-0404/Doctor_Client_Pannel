@@ -730,7 +730,11 @@ export const MedicineDashboard = () => {
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => void patientService.openDocument(patient.id, history.documents[0].id)}
+                        onClick={() =>
+                          void patientService.openDocument(patient.id, history.documents[0].id, {
+                            assistantVerified: Boolean(history.documents[0].verifiedAt),
+                          })
+                        }
                       >
                         View prescription (secure)
                       </Button>

@@ -18,6 +18,20 @@ export interface IPatientDocument extends Document {
    * Optional confidence score (0-1) from OCR engine.
    */
   ocrConfidence?: number;
+  /**
+   * Staff uploads stay hidden from the patient app / lab-pharmacy secure preview
+   * until clinic marks the document verified for release (`PUBLISHED`).
+   */
+  patientPublishStatus?: "PENDING_ASSISTANT" | "PUBLISHED";
+  /** After assistant verification — drives lab/pharmacy secure preview when present */
+  verifiedExtract?: {
+    medicines: Array<{ medicineName: string; dosage?: string; quantity?: string; notes?: string }>;
+    tests: Array<{ testName: string; notes?: string }>;
+    clinicalNotes?: string;
+    importantNotes?: string;
+  };
+  verifiedAt?: Date;
+  verifiedBy?: Types.ObjectId;
   createdAt: Date;
 }
 
@@ -40,7 +54,15 @@ const PatientDocumentSchema = new Schema<IPatientDocument>(
     path: { type: String, required: true },
     fileData: { type: Buffer },
     ocrText: { type: String },
-    ocrConfidence: { type: Number }
+    ocrConfidence: { type: Number },
+    patientPublishStatus: {
+      type: String,
+      enum: ["PENDING_ASSISTANT", "PUBLISHED"],
+      default: "PUBLISHED"
+    },
+    verifiedExtract: { type: Schema.Types.Mixed },
+    verifiedAt: { type: Date },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: "Doctor" }
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

@@ -664,6 +664,41 @@ body {
   color: var(--med-text-muted);
 }
 
+/* Check-in & refer: wider card + two columns to cut vertical scroll */
+.assistant-workspace-card.assistant-checkin-card {
+  max-width: min(1120px, 100%);
+}
+
+.assistant-checkin-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 24px 28px;
+  align-items: start;
+  margin-top: 4px;
+}
+
+.assistant-checkin-col {
+  min-width: 0;
+}
+
+.assistant-checkin-grid .assistant-checkin-col:last-child {
+  border-left: 1px solid var(--med-border);
+  padding-left: 24px;
+}
+
+@media (max-width: 960px) {
+  .assistant-checkin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-checkin-grid .assistant-checkin-col:last-child {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--med-border);
+    padding-top: 20px;
+  }
+}
+
 .search-card {
   width: 100%;
   max-width: 520px;

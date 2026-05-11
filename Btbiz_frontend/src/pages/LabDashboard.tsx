@@ -80,7 +80,13 @@ function getRateCheckForLabRequest(history: FullPatientHistory, r: LabOrderReque
     if (dt.price == null || Number(dt.price) <= 0) {
       return {
         ok: false,
-        message: `Enter a rate for "${dt.testName}" in the Lab tests table and click Save rates before marking paid.`,
+        message: `Rate (₹) missing: enter the rate for "${dt.testName}" in the Lab tests table, click Save rates, then use Mark paid.`,
+      }
+    }
+    if (!dt.hasReport) {
+      return {
+        ok: false,
+        message: `Report file missing: upload a report (PDF / JPG / PNG) for "${dt.testName}" in the Report column before marking paid.`,
       }
     }
     total += Number(dt.price)
@@ -601,7 +607,13 @@ export const LabDashboard = () => {
       const h = await patientService.getFullHistory(r.patientId)
       const check = getRateCheckForLabRequest(h, r)
       if (!check.ok) {
-        toast.error(check.message)
+        toast.error(
+          <div>
+            <strong style={{ display: 'block', marginBottom: 6, fontWeight: 700 }}>Mark paid blocked</strong>
+            <span style={{ fontWeight: 400 }}>{check.message}</span>
+          </div>,
+          { autoClose: 6500, closeOnClick: true }
+        )
         return
       }
       setConfirmState({
@@ -838,7 +850,11 @@ export const LabDashboard = () => {
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => void patientService.openDocument(patient.id, history.documents[0].id)}
+                        onClick={() =>
+                          void patientService.openDocument(patient.id, history.documents[0].id, {
+                            assistantVerified: Boolean(history.documents[0].verifiedAt),
+                          })
+                        }
                       >
                         View prescription (secure)
                       </Button>
@@ -1043,7 +1059,7 @@ export const LabDashboard = () => {
                             {savingManualRates ? 'Saving rates…' : 'Save rates'}
                           </Button>
                           <span style={{ fontSize: 12, color: '#64748b' }}>
-                            Enter each test rate in the table, then click Save rates before Mark paid.
+                            For each test: enter rate (₹) and upload the report file, then Save rates — Mark paid is blocked until both are done.
                           </span>
                         </div>
                       )}

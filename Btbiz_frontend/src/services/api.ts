@@ -38,6 +38,111 @@ patientApi.interceptors.request.use((config) => {
   return config
 })
 
+function escapeHtmlLite(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Top banner + iframe so PDF/image sits “inside” the same tab as the verified strip. */
+function renderDocumentTabWithAssistantVerifiedBanner(
+  win: Window,
+  frameSrc: string,
+  title: string
+): void {
+  const safeTitle = escapeHtmlLite(title)
+  const safeSrc = escapeHtmlLite(frameSrc)
+  win.document.open()
+  win.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${safeTitle}</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .doc-shell { display: flex; flex-direction: column; height: 100%; background: #0f172a; }
+    .doc-banner {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      background: linear-gradient(90deg, #065f46, #047857);
+      color: #ecfdf5;
+      font: 600 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    }
+    .doc-frame-wrap { flex: 1; min-height: 0; background: #fff; }
+    iframe { border: 0; width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <div class="doc-shell">
+    <div class="doc-banner" role="status">
+      <span aria-hidden="true">✓</span>
+      <span>Verified by assistant — structured medicines / lab tests were checked at the clinic before this file was released.</span>
+    </div>
+    <div class="doc-frame-wrap">
+      <iframe title="Document" src="${safeSrc}"></iframe>
+    </div>
+  </div>
+</body>
+</html>`)
+  win.document.close()
+}
+
+/**
+ * When the green “verified” shell uses an <iframe>, embedding the API file URL directly fails if the
+ * API sends `X-Frame-Options: SAMEORIGIN` (typical with Helmet) while the SPA runs on another origin
+ * (e.g. Vite :5173 vs API :3000). We fetch the file with CORS, then register the blob URL on the
+ * **blob:** URL on the SPA origin so the iframe (inherited same origin) can load it.
+ */
+async function openVerifiedAssistantDocumentShell(
+  win: Window,
+  source: string | Blob,
+  title: string
+): Promise<void> {
+  let blob: Blob
+  if (source instanceof Blob) {
+    blob = source
+  } else {
+    try {
+      const r = await fetch(source, { mode: 'cors', credentials: 'omit' })
+      if (!r.ok) {
+        toast.error('Could not load document preview.')
+        win.location.href = source
+        return
+      }
+      blob = await r.blob()
+    } catch {
+      toast.error('Could not load document preview.')
+      win.location.href = source
+      return
+    }
+  }
+  const ct = (blob.type || '').toLowerCase()
+  if (ct.includes('application/json') || ct.includes('text/json')) {
+    try {
+      const j = JSON.parse(await blob.text()) as { message?: string }
+      toast.error(j.message ?? 'Could not open document.')
+    } catch {
+      toast.error('Could not open document.')
+    }
+    return
+  }
+  const objectUrl = URL.createObjectURL(blob)
+  renderDocumentTabWithAssistantVerifiedBanner(win, objectUrl, title)
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      /* ignore */
+    }
+  }, 120_000)
+}
+
 function openBlobInBrowser(
   blob: Blob,
   preferredWindow?: Window | null
@@ -616,6 +721,10 @@ export interface FullPatientHistory {
     mimeType: string
     uploadedAt: string
     source?: 'patient' | 'staff'
+    /** Staff uploads stay PENDING until assistant/doctor releases to patient + lab/pharmacy preview */
+    patientPublishStatus?: 'PENDING_ASSISTANT' | 'PUBLISHED'
+    /** ISO timestamp when clinic saved structured verify + release (staff upload flow). */
+    verifiedAt?: string
     isFileAvailable?: boolean
   }>
   medicineRequests?: Array<{
@@ -723,7 +832,12 @@ export const patientPortalService = {
     })
     return ((res.data as any)?.providers ?? []) as ServiceProviderOption[]
   },
-  async openDocument(documentId: string, patientId?: string): Promise<void> {
+  async openDocument(
+    documentId: string,
+    patientId?: string,
+    options?: { assistantVerified?: boolean }
+  ): Promise<void> {
+    const showAssistantVerifiedBanner = options?.assistantVerified === true
     // Open tab in user-click context first, otherwise popup blockers may block blob preview.
     const previewWin = window.open('', '_blank')
     if (previewWin) {
@@ -744,7 +858,9 @@ export const patientPortalService = {
         })
         const tokenizedUrl = (linkRes.data as { url?: string })?.url
         if (tokenizedUrl) {
-          if (previewWin) {
+          if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
+            await openVerifiedAssistantDocumentShell(previewWin, tokenizedUrl, 'Document')
+          } else if (previewWin) {
             previewWin.location.href = tokenizedUrl
           } else {
             window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
@@ -756,7 +872,11 @@ export const patientPortalService = {
       // Fallback: try authenticated blob route when short-link route is unavailable.
       const fileRes = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
       const blob = fileRes.data as Blob
-      openBlobInBrowser(blob, previewWin)
+      if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
+        await openVerifiedAssistantDocumentShell(previewWin, blob, 'Document')
+      } else {
+        openBlobInBrowser(blob, previewWin)
+      }
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
       let msg = 'Could not open document. Please try again.'
@@ -948,7 +1068,12 @@ export const patientService = {
     openBlobInBrowser(blob)
   },
 
-  async openDocument(patientId: string, documentId: string): Promise<void> {
+  async openDocument(
+    patientId: string,
+    documentId: string,
+    options?: { assistantVerified?: boolean }
+  ): Promise<void> {
+    const showAssistantVerifiedBanner = options?.assistantVerified === true
     // Open preview window immediately in user-gesture context to avoid popup blockers.
     const previewWin = window.open('', '_blank')
     if (previewWin) {
@@ -1009,6 +1134,7 @@ export const patientService = {
             scope: string
             roleView?: string
             lowConfidenceLines?: string[]
+            source?: 'VERIFIED_ASSISTANT' | 'OCR_AUTO'
             parsed?: {
               medicines?: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
               tests?: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
@@ -1016,6 +1142,11 @@ export const patientService = {
             }
           }
         }
+
+        const assistantVerifiedStrip =
+          payload.document.source === 'VERIFIED_ASSISTANT'
+            ? `<div style="margin:0 0 14px;padding:11px 14px;border-radius:10px;background:linear-gradient(90deg,#065f46,#047857);color:#ecfdf5;font-weight:600;font-size:13px;line-height:1.45;">✓ Verified by assistant — this preview uses structured data saved at the clinic (not raw OCR alone).</div>`
+            : ''
 
         const uploaded = payload.document.uploadedAt
           ? new Date(payload.document.uploadedAt).toLocaleString('en-IN')
@@ -1047,6 +1178,7 @@ export const patientService = {
               <meta charset="utf-8" />
             </head>
             <body style="margin:0;padding:16px;background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+              ${assistantVerifiedStrip}
               <h2 style="margin:0 0 8px;">Secure prescription preview</h2>
               <p style="margin:0 0 4px;font-size:13px;color:#475569;"><strong>File:</strong> ${escapeHtml(payload.document.originalName || 'Prescription')}</p>
               <p style="margin:0 0 12px;font-size:13px;color:#475569;"><strong>Uploaded:</strong> ${escapeHtml(uploaded)} · <strong>Scope:</strong> ${escapeHtml(payload.document.scope || 'OCR_ONLY')}</p>
@@ -1112,7 +1244,9 @@ export const patientService = {
         })
         const tokenizedUrl = (linkRes.data as { url?: string })?.url
         if (tokenizedUrl) {
-          if (previewWin) {
+          if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
+            await openVerifiedAssistantDocumentShell(previewWin, tokenizedUrl, 'Document')
+          } else if (previewWin) {
             previewWin.location.href = tokenizedUrl
           } else {
             window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
@@ -1137,14 +1271,17 @@ export const patientService = {
         }
       )
       const blob = res.data as Blob
-      const url = URL.createObjectURL(blob)
-      if (previewWin) {
-        previewWin.location.href = url
+      if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
+        await openVerifiedAssistantDocumentShell(previewWin, blob, 'Document')
       } else {
-        window.open(url, '_blank', 'noopener,noreferrer')
+        const url = URL.createObjectURL(blob)
+        if (previewWin) {
+          previewWin.location.href = url
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer')
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
       }
-      // Keep blob URL alive longer; short revoke can render blank tab for PDFs/images.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (err: any) {
       const forbidden = err?.response?.status === 403
       if (!forbidden) {
@@ -1188,6 +1325,19 @@ export const patientService = {
     await api.post(`/patients/${patientId}/visit/${visitId}/refer`, payload)
   },
 
+  async verifyDocumentForPatientProfile(
+    patientId: string,
+    documentId: string,
+    payload: {
+      medicines: Array<{ medicineName: string; dosage?: string; quantity?: string; notes?: string }>
+      tests: Array<{ testName: string; notes?: string }>
+      clinicalNotes?: string
+      importantNotes?: string
+    }
+  ): Promise<void> {
+    await api.patch(`/patients/${patientId}/documents/${documentId}/verify-for-patient`, payload)
+  },
+
   async uploadDocument(
     patientId: string,
     file: File
@@ -1198,10 +1348,17 @@ export const patientService = {
       mimeType: string
       size: number
       uploadedAt: string
+      patientPublishStatus?: 'PENDING_ASSISTANT' | 'PUBLISHED'
     }
     ocr?:
       | { success: true; text: string; confidence?: number }
       | { success: false; error?: string }
+    suggestedParse?: {
+      medicines: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+      tests: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+      unknown: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+      lowConfidenceLines: string[]
+    }
   }> {
     const formData = new FormData()
     formData.append('file', file)

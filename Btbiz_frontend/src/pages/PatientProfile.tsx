@@ -1568,7 +1568,9 @@ export const PatientProfile = () => {
                 documents.length > 3 ? 'patient-profile-doc-list-scroll' : ''
               }`}
             >
-              {documents.map((d) => (
+              {documents.map((d) => {
+                const pendingVerify = d.patientPublishStatus === 'PENDING_ASSISTANT'
+                return (
                 <li key={d.id} className="patient-profile-card patient-profile-doc-row">
                   <span>{d.originalName}</span>
                   <span className="patient-profile-muted">
@@ -1576,16 +1578,37 @@ export const PatientProfile = () => {
                     {d.source === 'patient' && ' (uploaded by me)'}
                     {d.isFileAvailable === false && ' (file unavailable on this server)'}
                   </span>
-                  <button
-                    type="button"
-                    className="patient-profile-link-btn"
-                    disabled={d.isFileAvailable === false}
-                    onClick={() => patientPortalService.openDocument(d.id, patient.id)}
-                  >
-                    {d.isFileAvailable === false ? 'Unavailable' : 'View'}
-                  </button>
+                  {pendingVerify ? (
+                    <span
+                      className="patient-profile-muted"
+                      style={{
+                        fontSize: 12,
+                        color: '#b45309',
+                        fontWeight: 600,
+                        textAlign: 'right',
+                        maxWidth: 220,
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      Assistant verification in progress — you can open this after your clinic releases it.
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="patient-profile-link-btn"
+                      disabled={d.isFileAvailable === false}
+                      onClick={() =>
+                        patientPortalService.openDocument(d.id, patient.id, {
+                          assistantVerified: Boolean(d.verifiedAt),
+                        })
+                      }
+                    >
+                      {d.isFileAvailable === false ? 'Unavailable' : 'View'}
+                    </button>
+                  )}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </section>
