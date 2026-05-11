@@ -81,6 +81,7 @@ export const MedicineDashboard = () => {
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
   const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
+  const authWarningShownRef = useRef(false)
   const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const loadPatientProfile = async (p: PatientSummary) => {
@@ -144,7 +145,7 @@ export const MedicineDashboard = () => {
         const mrp = parseFloat(r.mrp)
         const discount = parseFloat(r.discount) || 0
         const quantity = parseInt(r.quantity, 10) || 1
-        if (!r.medicineName.trim() || Number.isNaN(mrp) || mrp < 0) return null
+        if (!r.medicineName.trim() || Number.isNaN(mrp) || mrp <= 0) return null
         return {
           medicineName: r.medicineName.trim(),
           mrp,
@@ -155,16 +156,42 @@ export const MedicineDashboard = () => {
       .filter(Boolean) as Array<{ medicineName: string; mrp: number; discount?: number; quantity?: number }>
   }
 
+  /** Rows with a medicine name must have MRP > 0 before save bill or mark paid. */
+  const getMedicinePriceValidationMessage = (): string | null => {
+    for (const r of rows) {
+      const name = r.medicineName.trim()
+      if (!name) continue
+      const mrp = parseFloat(r.mrp)
+      if (Number.isNaN(mrp) || mrp <= 0) {
+        return 'Please insert rate / price (MRP) for each medicine — blank or ₹0 is not allowed.'
+      }
+    }
+    return null
+  }
+
   const items = getItems()
   const subtotal = items.reduce((s, it) => s + it.mrp * (it.quantity ?? 1), 0)
   const totalDiscount = items.reduce((s, it) => s + (it.discount ?? 0), 0)
   const totalAmount = Math.max(0, subtotal - totalDiscount)
 
   const currentBillFromHistory = history?.pharmacyDispensations?.find((d) => d.id === currentDispensationId)
+  const isCurrentBillPaid = currentBillFromHistory?.paymentStatus === 'PAID'
 
   const handleCreateDispensation = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!patient?.id || items.length === 0) return
+    if (!patient?.id) return
+    const priceMsg = getMedicinePriceValidationMessage()
+    if (priceMsg) {
+      setCreateError(priceMsg)
+      toast.error(priceMsg)
+      return
+    }
+    if (items.length === 0) {
+      const msg = 'Add at least one medicine with name and MRP (₹) greater than 0.'
+      setCreateError(msg)
+      toast.error(msg)
+      return
+    }
     setCreateError(null)
     setCreateLoading(true)
     try {
@@ -186,6 +213,22 @@ export const MedicineDashboard = () => {
 
   const handleMarkPayment = async () => {
     if (!currentDispensationId) return
+    if (isCurrentBillPaid) {
+      toast.info('Payment already recorded for this bill.')
+      return
+    }
+    const bill = currentBillFromHistory
+    if (bill?.items?.length) {
+      const bad = bill.items.find(
+        (it) => typeof it.mrp !== 'number' || !Number.isFinite(it.mrp) || it.mrp <= 0
+      )
+      if (bad) {
+        const msg =
+          'Please insert rate / price (MRP) for every medicine on this bill before marking paid — blank or ₹0 is not allowed.'
+        toast.error(msg)
+        return
+      }
+    }
     let amount = paymentAmount.trim() ? parseFloat(paymentAmount) : NaN
     if (Number.isNaN(amount) || amount <= 0) {
       amount = totalAmount
@@ -245,6 +288,11 @@ export const MedicineDashboard = () => {
   }
 
   const loadIncomingRequests = async (silent = false) => {
+    if (authStorage.getRole() !== 'PHARMACY' || !authStorage.getToken()) {
+      setIncomingRequests([])
+      if (!silent) setRequestsLoading(false)
+      return
+    }
     if (!silent) setRequestsLoading(true)
     try {
       const list = await orderService.getMedicineRequests()
@@ -263,6 +311,20 @@ export const MedicineDashboard = () => {
         const nextKey = JSON.stringify(next)
         return prevKey === nextKey ? prev : next
       })
+      authWarningShownRef.current = false
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number } }
+      if (e?.response?.status === 401) {
+        setIncomingRequests([])
+        if (!authWarningShownRef.current) {
+          toast.error('Pharmacy session expired or unauthorized. Please login again as Pharmacy.')
+          authWarningShownRef.current = true
+        }
+        return
+      }
+      if (!silent) {
+        toast.error('Could not load medicine requests. Please try again.')
+      }
     } finally {
       if (!silent) setRequestsLoading(false)
     }
@@ -688,7 +750,8 @@ export const MedicineDashboard = () => {
                 <Card className="dashboard-overview-card">
                   <p className="dashboard-kicker">Add medicines</p>
                   <p className="dashboard-body" style={{ marginBottom: 12 }}>
-                    Enter medicine name, MRP, discount (₹) and quantity. Amount = (MRP × Qty) − Discount per row.
+                    Enter medicine name, <strong>MRP (₹) required</strong> (must be greater than 0), discount (₹) and quantity.
+                    Amount = (MRP × Qty) − Discount per row. You cannot save the bill or mark paid without a valid price per line.
                   </p>
                   <div
                     style={{
@@ -875,9 +938,10 @@ export const MedicineDashboard = () => {
                         value={paymentAmount}
                         onChange={(e) => setPaymentAmount(e.target.value)}
                         placeholder="0"
+                        disabled={isCurrentBillPaid || paymentLoading}
                       />
-                      <Button type="button" onClick={handleMarkPayment} disabled={paymentLoading}>
-                        {paymentLoading ? 'Saving…' : 'Mark as paid'}
+                      <Button type="button" onClick={handleMarkPayment} disabled={paymentLoading || isCurrentBillPaid}>
+                        {paymentLoading ? 'Saving…' : isCurrentBillPaid ? 'Paid' : 'Mark as paid'}
                       </Button>
                       <Button type="button" variant="secondary" onClick={handleShowReceipt}>
                         View / Download receipt

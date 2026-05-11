@@ -91,10 +91,6 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       return;
     }
     const { requestId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(requestId)) {
-      res.status(400).json({ message: "Invalid request id" });
-      return;
-    }
     const body = req.body as {
       status?: "PENDING" | "ACCEPTED" | "COMPLETED" | "CANCELLED";
       paymentStatus?: "PENDING" | "PAID";
@@ -143,6 +139,10 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
 
     if (mongoose.Types.ObjectId.isValid(requestId)) {
       const existing = await PatientMedicineRequest.findById(requestId).lean();
+      if (!existing) {
+        res.status(404).json({ message: "Medicine request not found" });
+        return;
+      }
       if (body.paymentStatus === "PAID" && existing && (existing as any).paymentStatus !== "PAID") {
         update.paidAt = new Date();
         if (!(existing as any).receiptNumber) {
@@ -156,6 +156,10 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
     }
 
     // grouped request id (requestGroupId): update all medicine rows in that batch together
+    if (!String(requestId || "").trim()) {
+      res.status(400).json({ message: "Invalid request id" });
+      return;
+    }
     const groupRows = await PatientMedicineRequest.find({ requestGroupId: requestId })
       .select("_id paymentStatus")
       .lean();

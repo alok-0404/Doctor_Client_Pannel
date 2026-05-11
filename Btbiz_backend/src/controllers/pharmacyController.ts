@@ -39,6 +39,22 @@ export const createDispensation = async (req: Request, res: Response): Promise<v
       return;
     }
 
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const name = typeof it.medicineName === "string" ? it.medicineName.trim() : "";
+      const mrp = typeof it.mrp === "number" ? it.mrp : NaN;
+      if (!name) {
+        res.status(400).json({ message: "Each medicine must have a name" });
+        return;
+      }
+      if (!Number.isFinite(mrp) || mrp <= 0) {
+        res.status(400).json({
+          message: "Please insert rate / price (MRP) for each medicine — blank or ₹0 is not allowed."
+        });
+        return;
+      }
+    }
+
     const patient = await Patient.findById(body.patientId);
     if (!patient) {
       res.status(404).json({ message: "Patient not found" });
@@ -109,6 +125,18 @@ export const recordPayment = async (req: Request, res: Response): Promise<void> 
     const doc = await PharmacyDispensation.findById(id).lean();
     if (!doc) {
       res.status(404).json({ message: "Dispensation not found" });
+      return;
+    }
+
+    const lineItems = ((doc as any).items ?? []) as Array<{ mrp?: number }>;
+    const invalidPrice = lineItems.some(
+      (it) => typeof it.mrp !== "number" || !Number.isFinite(it.mrp) || it.mrp <= 0
+    );
+    if (invalidPrice || lineItems.length === 0) {
+      res.status(400).json({
+        message:
+          "Please insert rate / price (MRP) for every medicine on this bill before marking paid — blank or ₹0 is not allowed."
+      });
       return;
     }
 
