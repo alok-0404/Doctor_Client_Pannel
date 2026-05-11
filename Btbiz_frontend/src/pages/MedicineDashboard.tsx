@@ -41,6 +41,18 @@ function patientSummaryFromHistory(p: FullPatientHistory['patient']): PatientSum
   }
 }
 
+function patientIdsMatch(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false
+  return String(a).trim() === String(b).trim()
+}
+
+/** +91… numbers must use the last 10 digits for search, not the first 10 (which included country code). */
+function normalizeMobileDigitsForSearch(raw: string): string {
+  const d = raw.replace(/\D/g, '')
+  if (d.length >= 10) return d.slice(-10)
+  return d
+}
+
 export const MedicineDashboard = () => {
   const name = authStorage.getName() ?? 'Medicine'
 
@@ -67,6 +79,8 @@ export const MedicineDashboard = () => {
   const [incomingRequests, setIncomingRequests] = useState<PharmacyOrderRequest[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
+  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
+  const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
   const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const loadPatientProfile = async (p: PatientSummary) => {
@@ -85,7 +99,7 @@ export const MedicineDashboard = () => {
     setSelectedPatientId('')
     setCurrentDispensationId(null)
     setActiveRequestId(null)
-    const digits = mobileSearch.replace(/\D/g, '')
+    const digits = normalizeMobileDigitsForSearch(mobileSearch)
     if (digits.length < 10) {
       setSearchError('Enter a valid 10-digit mobile number.')
       return
@@ -196,7 +210,7 @@ export const MedicineDashboard = () => {
           totalAmount: receipt.totalAmount,
           paidAmount: receipt.paidAmount,
         })
-        await loadIncomingRequests()
+        await loadIncomingRequests(true)
       }
       if (patient?.id) {
         const h = await patientService.getFullHistory(patient.id)
@@ -230,19 +244,44 @@ export const MedicineDashboard = () => {
     setActiveRequestId(null)
   }
 
-  const loadIncomingRequests = async () => {
-    setRequestsLoading(true)
+  const loadIncomingRequests = async (silent = false) => {
+    if (!silent) setRequestsLoading(true)
     try {
       const list = await orderService.getMedicineRequests()
-      setIncomingRequests(list.filter((r) => r.paymentStatus !== 'PAID'))
+      const seenIds = new Set<string>()
+      const next = list.filter(
+        (request) =>
+          request.status !== 'COMPLETED' &&
+          request.status !== 'CANCELLED' &&
+          request.paymentStatus !== 'PAID' &&
+          !seenIds.has(request.id) &&
+          (seenIds.add(request.id), true) &&
+          !hiddenRequestIdsRef.current.has(request.id)
+      )
+      setIncomingRequests((prev) => {
+        const prevKey = JSON.stringify(prev)
+        const nextKey = JSON.stringify(next)
+        return prevKey === nextKey ? prev : next
+      })
     } finally {
-      setRequestsLoading(false)
+      if (!silent) setRequestsLoading(false)
     }
   }
 
   useEffect(() => {
     void loadIncomingRequests()
   }, [])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadIncomingRequests(true)
+    }, 10000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (patient?.id) void loadIncomingRequests()
+  }, [patient?.id])
 
   const prefillRowsFromOrderRequest = (r: PharmacyOrderRequest) => {
     const sourceItems =
@@ -284,7 +323,7 @@ export const MedicineDashboard = () => {
     setReceiptData(null)
     setShowReceipt(false)
 
-    const digits = r.patientMobile.replace(/\D/g, '').slice(0, 10)
+    const digits = normalizeMobileDigitsForSearch(r.patientMobile)
     setMobileSearch(digits)
     setSearchLoading(true)
 
@@ -334,11 +373,17 @@ export const MedicineDashboard = () => {
   }
 
   const handleAcceptIncomingRequest = async (r: PharmacyOrderRequest) => {
+    const previousRequests = incomingRequests
+    setIncomingRequests((prev) =>
+      prev.map((request) => (request.id === r.id ? { ...request, status: 'ACCEPTED' } : request))
+    )
     try {
       await orderService.updateMedicineRequest(r.id, { status: 'ACCEPTED' })
       await openPatientAndPrefillFromRequest(r)
-      await loadIncomingRequests()
+      await loadIncomingRequests(true)
+      toast.success('Accepted. Medicine lines prefilled — enter MRP/discount and save bill.', { autoClose: 2800 })
     } catch {
+      setIncomingRequests(previousRequests)
       toast.error('Could not accept request. Please try again.')
     }
   }
@@ -347,17 +392,159 @@ export const MedicineDashboard = () => {
     r: PharmacyOrderRequest,
     patch: Partial<{ status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'; paymentStatus: 'PENDING' | 'PAID' }>
   ) => {
-    await orderService.updateMedicineRequest(r.id, patch)
-    await loadIncomingRequests()
-    if (patient?.id === r.patientId) {
-      try {
-        const h = await patientService.getFullHistory(patient.id)
-        setHistory(h)
-      } catch {
-        /* ignore */
+    const shouldHideImmediately = patch.status === 'COMPLETED' || patch.status === 'CANCELLED'
+    const previousRequests = incomingRequests
+
+    if (shouldHideImmediately) {
+      hiddenRequestIdsRef.current.add(r.id)
+      setIncomingRequests((prev) => prev.filter((request) => request.id !== r.id))
+    } else {
+      setIncomingRequests((prev) =>
+        prev.map((request) =>
+          request.id === r.id
+            ? {
+                ...request,
+                ...(patch.status ? { status: patch.status } : {}),
+                ...(patch.paymentStatus ? { paymentStatus: patch.paymentStatus } : {}),
+              }
+            : request
+        )
+      )
+    }
+
+    try {
+      await orderService.updateMedicineRequest(r.id, patch)
+      if (r.patientId) {
+        try {
+          const h = await patientService.getFullHistory(r.patientId)
+          if (patient && patientIdsMatch(patient.id, r.patientId)) {
+            setHistory(h)
+          }
+        } catch {
+          /* ignore */
+        }
       }
+      if (patch.paymentStatus === 'PAID') {
+        hiddenRequestIdsRef.current.add(r.id)
+        setIncomingRequests((prev) => prev.filter((request) => request.id !== r.id))
+      }
+      await loadIncomingRequests(true)
+    } catch {
+      if (shouldHideImmediately) {
+        hiddenRequestIdsRef.current.delete(r.id)
+      }
+      setIncomingRequests(previousRequests)
+      toast.error('Could not update request. Please try again.')
     }
   }
+
+  const handleMarkPaidIncomingRequest = async (r: PharmacyOrderRequest) => {
+    if (r.paymentStatus === 'PAID') return
+    setConfirmState({
+      message:
+        'Mark this medicine order as paid on the request record? Use “Mark as paid” under Payment after saving a bill if you need a receipt.',
+      onConfirm: () => void handleQuickUpdateRequest(r, { paymentStatus: 'PAID' }),
+    })
+  }
+
+  const getDateBucket = (isoDate: string): 'today' | 'yesterday' | 'older' => {
+    const requestDate = new Date(isoDate)
+    if (Number.isNaN(requestDate.getTime())) return 'older'
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startOfYesterday = new Date(startOfToday)
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+
+    if (requestDate >= startOfToday) return 'today'
+    if (requestDate >= startOfYesterday) return 'yesterday'
+    return 'older'
+  }
+
+  const todayRequests = incomingRequests.filter((request) => getDateBucket(request.createdAt) === 'today')
+  const yesterdayRequests = incomingRequests.filter((request) => getDateBucket(request.createdAt) === 'yesterday')
+  const olderRequests = incomingRequests.filter((request) => getDateBucket(request.createdAt) === 'older')
+
+  const renderPharmacyRequestCard = (r: PharmacyOrderRequest) => (
+    <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
+      <div style={{ margin: '4px 0', fontSize: 13 }}>
+        {(r.medicines && r.medicines.length > 0
+          ? r.medicines
+          : [{ medicineName: r.medicineName, dosage: r.dosage, quantity: r.quantity }]
+        ).map((m, idx) => (
+          <p key={`${r.id}-${idx}`} style={{ margin: idx === 0 ? '0 0 2px' : '0 0 2px' }}>
+            {m.medicineName}
+            {m.dosage ? ` · ${m.dosage}` : ''}
+            {m.quantity ? ` · Qty ${m.quantity}` : ''}
+          </p>
+        ))}
+      </div>
+      <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+        {r.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
+        {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
+      </p>
+      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+        Request time: {new Date(r.createdAt).toLocaleString('en-IN')}
+      </p>
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingRequest(r)}>
+          Accept
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            setConfirmState({
+              message: 'Cancel this request? It will be removed from the list.',
+              onConfirm: () => void handleQuickUpdateRequest(r, { status: 'CANCELLED' }),
+            })
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            setConfirmState({
+              message: 'Mark this order as ready (completed)? It will be removed from the incoming list.',
+              onConfirm: () => void handleQuickUpdateRequest(r, { status: 'COMPLETED' }),
+            })
+          }}
+        >
+          Ready
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={r.paymentStatus === 'PAID'}
+          onClick={() => void handleMarkPaidIncomingRequest(r)}
+        >
+          Mark paid
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderPharmacyRequestSection = (
+    title: string,
+    requests: PharmacyOrderRequest[],
+    emptyLabel: string
+  ) => (
+    <div>
+      <p style={{ margin: '6px 0 8px', fontSize: 12, fontWeight: 700, letterSpacing: 0.5, color: '#475569' }}>
+        {title}
+      </p>
+      {requests.length === 0 ? (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#94a3b8' }}>{emptyLabel}</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {requests.map((request) => renderPharmacyRequestCard(request))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="app-shell">
@@ -388,44 +575,15 @@ export const MedicineDashboard = () => {
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 10,
+                  gap: 16,
                   maxHeight: incomingRequests.length > 5 ? 420 : undefined,
                   overflowY: incomingRequests.length > 5 ? 'auto' : undefined,
                   paddingRight: incomingRequests.length > 5 ? 6 : undefined,
                 }}
               >
-                {incomingRequests.map((r) => (
-                  <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
-                    <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
-                    <div style={{ margin: '4px 0', fontSize: 13 }}>
-                      {(r.medicines && r.medicines.length > 0
-                        ? r.medicines
-                        : [{ medicineName: r.medicineName, dosage: r.dosage, quantity: r.quantity }]
-                      ).map((m, idx) => (
-                        <p key={`${r.id}-${idx}`} style={{ margin: idx === 0 ? '0 0 2px' : '0 0 2px' }}>
-                          {m.medicineName}
-                          {m.dosage ? ` · ${m.dosage}` : ''}
-                          {m.quantity ? ` · Qty ${m.quantity}` : ''}
-                        </p>
-                      ))}
-                    </div>
-                    <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
-                      {r.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
-                      {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
-                    </p>
-                    <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingRequest(r)}>
-                        Accept
-                      </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r, { status: 'COMPLETED' })}>
-                        Ready
-                      </Button>
-                      <Button type="button" variant="secondary" onClick={() => void handleQuickUpdateRequest(r, { paymentStatus: 'PAID' })}>
-                        Mark paid
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                {renderPharmacyRequestSection('TODAY', todayRequests, 'No requests today.')}
+                {renderPharmacyRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
+                {renderPharmacyRequestSection('OLDER', olderRequests, 'No older requests.')}
               </div>
             )}
               </Card>
@@ -443,9 +601,10 @@ export const MedicineDashboard = () => {
                 id="med-mobile-search"
                 label="Mobile number"
                 value={mobileSearch}
-                onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 15))}
                 placeholder="10-digit number"
                 type="tel"
+                maxLength={15}
               />
               <div style={{ alignSelf: 'flex-end' }}>
                 <Button type="submit" disabled={searchLoading}>
@@ -821,6 +980,54 @@ export const MedicineDashboard = () => {
             <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
               <Button type="button" onClick={() => window.print()}>Print / Save as PDF</Button>
               <Button type="button" variant="secondary" onClick={() => setShowReceipt(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmState && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: 16,
+          }}
+          onClick={() => setConfirmState(null)}
+        >
+          <div
+            style={{
+              width: 'min(480px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              border: '1px solid #dbeafe',
+              boxShadow: '0 22px 45px rgba(15, 23, 42, 0.25)',
+              padding: 20,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="dashboard-kicker" style={{ marginBottom: 8 }}>Please confirm</p>
+            <p style={{ margin: 0, color: '#334155', lineHeight: 1.5 }}>{confirmState.message}</p>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Button type="button" variant="secondary" onClick={() => setConfirmState(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const action = confirmState.onConfirm
+                  setConfirmState(null)
+                  action()
+                }}
+              >
+                Confirm
+              </Button>
             </div>
           </div>
         </div>
