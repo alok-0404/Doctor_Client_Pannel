@@ -47,6 +47,27 @@ function escapeHtmlLite(value: string): string {
 }
 
 const VERIFIED_DOC_BLOB_MSG = 'btbiz-verified-doc-blob-v1'
+const VERIFIED_DOC_BLOB_READY_MSG = 'btbiz-verified-doc-blob-ready-v1'
+
+function waitForVerifiedDocShellReady(win: Window, timeoutMs = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== win) return
+      if (event.origin !== window.location.origin) return
+      if (!event.data || event.data.type !== VERIFIED_DOC_BLOB_READY_MSG) return
+      done = true
+      window.removeEventListener('message', onMessage)
+      resolve(true)
+    }
+    window.addEventListener('message', onMessage)
+    setTimeout(() => {
+      if (done) return
+      window.removeEventListener('message', onMessage)
+      resolve(false)
+    }, timeoutMs)
+  })
+}
 
 /**
  * Shell HTML in the preview window; blob bytes arrive via postMessage from the opener so
@@ -93,6 +114,7 @@ function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: 
   <script>
 (function () {
   var MSG = ${JSON.stringify(VERIFIED_DOC_BLOB_MSG)};
+  var READY = ${JSON.stringify(VERIFIED_DOC_BLOB_READY_MSG)};
   function onMsg(e) {
     if (e.origin !== '${safeOrigin}') return;
     if (!e.data || e.data.type !== MSG) return;
@@ -111,6 +133,11 @@ function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: 
     }, 120000);
   }
   window.addEventListener('message', onMsg);
+  try {
+    if (window.opener) {
+      window.opener.postMessage({ type: READY }, '${safeOrigin}');
+    }
+  } catch (e) {}
 })();
   <\/script>
 </body>
@@ -161,6 +188,7 @@ async function openVerifiedAssistantDocumentShell(
   const mimeType = blob.type || 'application/octet-stream'
   const buffer = await blob.arrayBuffer()
   writeVerifiedAssistantDocumentShellForBlobDelivery(win, title)
+  const ready = await waitForVerifiedDocShellReady(win)
 
   const payload = { type: VERIFIED_DOC_BLOB_MSG, mimeType, buffer }
   // Popup is at about:blank (opaque origin), so targetOrigin must be '*'.
