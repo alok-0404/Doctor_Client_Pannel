@@ -8,6 +8,7 @@ import { Button } from '../components/ui/Button'
 import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   API_BASE_URL,
+  api,
   authService,
   patientService,
   appointmentService,
@@ -118,6 +119,13 @@ export const AssistantDashboard = () => {
   ])
   const [verifyClinicalNotes, setVerifyClinicalNotes] = useState('')
   const [verifyImportantNotes, setVerifyImportantNotes] = useState('')
+
+  /** Original prescription preview inside verify modal (blob URL — revoked on close). */
+  const [verifyPreviewUrl, setVerifyPreviewUrl] = useState<string | null>(null)
+  const [verifyPreviewMime, setVerifyPreviewMime] = useState<string | null>(null)
+  const [verifyPreviewLoading, setVerifyPreviewLoading] = useState(false)
+  const [verifyPreviewError, setVerifyPreviewError] = useState<string | null>(null)
+  const verifyPreviewUrlRef = useRef<string | null>(null)
 
   const [saveLoading, setSaveLoading] = useState(false)
   const [referLoading, setReferLoading] = useState(false)
@@ -746,6 +754,83 @@ export const AssistantDashboard = () => {
   const removeVerifyTestRow = (id: string) => {
     setVerifyTests((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.id !== id)))
   }
+
+  const handleViewOriginalPrescriptionInNewTab = () => {
+    if (!patientId || !docPendingReleaseId) return
+    void patientService.openDocument(patientId, docPendingReleaseId, { assistantVerified: false })
+  }
+
+  useEffect(() => {
+    if (!verifyModalOpen || !patientId || !docPendingReleaseId) {
+      return
+    }
+    let cancelled = false
+    if (verifyPreviewUrlRef.current) {
+      URL.revokeObjectURL(verifyPreviewUrlRef.current)
+      verifyPreviewUrlRef.current = null
+    }
+    setVerifyPreviewUrl(null)
+    setVerifyPreviewMime(null)
+    setVerifyPreviewError(null)
+    setVerifyPreviewLoading(true)
+
+    void (async () => {
+      try {
+        const res = await api.get(`/patients/${patientId}/documents/${docPendingReleaseId}/file`, {
+          responseType: 'blob',
+          params: { _ts: Date.now() },
+          headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+        })
+        const blob = res.data as Blob
+        const headerRaw = String(res.headers['content-type'] ?? (res.headers as { 'Content-Type'?: string })['Content-Type'] ?? '')
+        const headerCt = headerRaw.split(';')[0].trim().toLowerCase()
+        const mimeRaw = (blob.type || '').toLowerCase()
+        const mime =
+          mimeRaw && mimeRaw !== 'application/octet-stream'
+            ? mimeRaw
+            : headerCt || 'application/octet-stream'
+
+        if (mimeRaw.includes('json') || headerRaw.toLowerCase().includes('application/json')) {
+          const text = await blob.text()
+          try {
+            const j = JSON.parse(text) as { message?: string }
+            if (!cancelled) setVerifyPreviewError(j.message ?? 'Could not load preview.')
+          } catch {
+            if (!cancelled) setVerifyPreviewError('Could not load preview.')
+          }
+          return
+        }
+
+        const objectUrl = URL.createObjectURL(blob)
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl)
+          return
+        }
+        verifyPreviewUrlRef.current = objectUrl
+        setVerifyPreviewMime(mime)
+        setVerifyPreviewUrl(objectUrl)
+      } catch (err: unknown) {
+        const ax = err as { response?: { data?: { message?: string } } }
+        if (!cancelled) {
+          setVerifyPreviewError(ax?.response?.data?.message ?? 'Could not load document preview.')
+        }
+      } finally {
+        if (!cancelled) setVerifyPreviewLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (verifyPreviewUrlRef.current) {
+        URL.revokeObjectURL(verifyPreviewUrlRef.current)
+        verifyPreviewUrlRef.current = null
+      }
+      setVerifyPreviewUrl(null)
+      setVerifyPreviewMime(null)
+      setVerifyPreviewError(null)
+      setVerifyPreviewLoading(false)
+    }
+  }, [verifyModalOpen, patientId, docPendingReleaseId])
 
   const goBackToSearch = () => {
     setStep('search')
@@ -1651,7 +1736,7 @@ export const AssistantDashboard = () => {
         >
           <div
             style={{
-              width: 'min(1100px, 96vw)',
+              width: 'min(1180px, 98vw)',
               maxHeight: 'min(92vh, 900px)',
               overflow: 'hidden',
               display: 'flex',
@@ -1684,7 +1769,84 @@ export const AssistantDashboard = () => {
                 Close
               </Button>
             </div>
-            <div style={{ overflow: 'auto', padding: 20, flex: 1 }}>
+            <div style={{ overflow: 'auto', padding: 20, flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+                <aside style={{ flex: '1 1 300px', maxWidth: '100%', alignSelf: 'flex-start' }}>
+                  <div
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 10,
+                      padding: 12,
+                      background: '#f8fafc',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        marginBottom: 10,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <p className="text-sm" style={{ margin: 0, fontWeight: 700, color: '#0f172a' }}>
+                        Original prescription
+                      </p>
+                      <Button type="button" variant="secondary" onClick={handleViewOriginalPrescriptionInNewTab}>
+                        View (new tab)
+                      </Button>
+                    </div>
+                    {verifyPreviewLoading && (
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: '28px 8px' }}>
+                        <DnaLoader />
+                      </div>
+                    )}
+                    {verifyPreviewError && (
+                      <p className="text-sm" style={{ color: '#b91c1c', margin: '0 0 8px', lineHeight: 1.45 }}>
+                        {verifyPreviewError}
+                      </p>
+                    )}
+                    {verifyPreviewUrl && verifyPreviewMime?.startsWith('image/') && (
+                      <img
+                        src={verifyPreviewUrl}
+                        alt="Uploaded prescription"
+                        style={{
+                          width: '100%',
+                          maxHeight: 'min(60vh, 520px)',
+                          objectFit: 'contain',
+                          borderRadius: 6,
+                          background: '#fff',
+                          display: 'block',
+                        }}
+                      />
+                    )}
+                    {verifyPreviewUrl && verifyPreviewMime?.includes('pdf') && (
+                      <embed
+                        src={verifyPreviewUrl}
+                        type="application/pdf"
+                        title="Uploaded prescription"
+                        style={{
+                          width: '100%',
+                          height: 'min(60vh, 520px)',
+                          borderRadius: 6,
+                          background: '#fff',
+                          display: 'block',
+                        }}
+                      />
+                    )}
+                    {verifyPreviewUrl &&
+                      verifyPreviewMime &&
+                      !verifyPreviewMime.startsWith('image/') &&
+                      !verifyPreviewMime.includes('pdf') && (
+                        <p className="text-sm" style={{ color: '#64748b', margin: 0, lineHeight: 1.5 }}>
+                          Inline preview is not available for this file type. Use &quot;View (new tab)&quot; to open the
+                          file.
+                        </p>
+                      )}
+                  </div>
+                </aside>
+                <div style={{ flex: '2 1 380px', minWidth: 0 }}>
               <p className="text-sm" style={{ margin: '0 0 16px', color: '#475569', lineHeight: 1.5 }}>
                 OCR suggested rows below — edit each line, add or remove rows, then save. Lab and pharmacy secure
                 preview will use this structured data.
@@ -1910,6 +2072,8 @@ export const AssistantDashboard = () => {
                   }}
                 />
               </section>
+                </div>
+              </div>
             </div>
             <div
               style={{
