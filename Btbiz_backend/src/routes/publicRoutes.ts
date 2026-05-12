@@ -18,6 +18,7 @@ import { FamilyMember } from "../models/FamilyMember";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { env } from "../config/env";
+import { getPublicBaseUrl } from "../config/publicBaseUrl";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
 import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
@@ -950,8 +951,8 @@ router.get("/patient/diagnostic-tests/link", async (req, res) => {
       { expiresIn: "24h" as any }
     );
 
-    const host = `${req.protocol}://${req.get("host")}`;
-    const reportUrl = `${host}/public/patient/diagnostic-tests/${token}/report/file`;
+    const base = getPublicBaseUrl(req);
+    const reportUrl = `${base}/public/patient/diagnostic-tests/${token}/report/file`;
     res.status(200).json({ reportUrl, token });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -1045,8 +1046,8 @@ router.get("/patient/documents/link", async (req, res) => {
       env.jwt.secret,
       { expiresIn: "24h" as any }
     );
-    const host = `${req.protocol}://${req.get("host")}`;
-    const url = `${host}/public/patient/documents/${token}/file`;
+    const base = getPublicBaseUrl(req);
+    const url = `${base}/public/patient/documents/${token}/file`;
     res.status(200).json({ url, token });
   } catch (error) {
     // eslint-disable-next-line no-console

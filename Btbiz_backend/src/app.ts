@@ -17,6 +17,9 @@ import orderRoutes from "./routes/orderRoutes";
 
 const app = express();
 
+// So req.protocol / host match the browser (TLS offloading, Replit, reverse proxies).
+app.set("trust proxy", 1);
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
