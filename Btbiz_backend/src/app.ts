@@ -49,16 +49,29 @@ app.use((req, res, next) => {
   next();
 });
 
+const isProd = process.env.NODE_ENV === "production";
+
 app.use(
   helmet({
     contentSecurityPolicy: {
+      // Helmet defaults merge with ours; `object-src 'none'` etc. can still block blob previews.
+      useDefaults: false,
       directives: {
         defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        fontSrc: ["'self'", "data:", "https:"],
+        formAction: ["'self'"],
+        // Allow Replit / IDE webview embedding; tighten to your own domains if needed.
+        frameAncestors: null,
+        imgSrc: ["'self'", "data:", "blob:", "https://images.pexels.com"],
+        /** `<embed src="blob:...">` verified document preview (see Btbiz_frontend api.ts). */
+        objectSrc: ["'self'", "blob:", "data:"],
+        frameSrc: ["'self'", "blob:", "data:"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://images.pexels.com"],
-        connectSrc: ["'self'", "wss:", "ws:"],
-        fontSrc: ["'self'", "data:"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+        connectSrc: ["'self'", "blob:", "data:", "wss:", "ws:"],
+        ...(isProd ? { upgradeInsecureRequests: [] } : {}),
       },
     },
   })

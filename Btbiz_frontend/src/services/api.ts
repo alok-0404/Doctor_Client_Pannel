@@ -76,7 +76,8 @@ function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: 
       box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     }
     .doc-frame-wrap { flex: 1; min-height: 0; background: #fff; position: relative; }
-    iframe { border: 0; width: 100%; height: 100%; display: block; }
+    /* embed uses object-src in CSP; iframe uses frame-src — embed avoids "Framing blob" when frame-src is missing upstream. */
+    embed#btbiz-doc-frame { border: 0; width: 100%; height: 100%; display: block; }
   </style>
 </head>
 <body>
@@ -86,7 +87,7 @@ function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: 
       <span>Verified by assistant — structured medicines / lab tests were checked at the clinic before this file was released.</span>
     </div>
     <div class="doc-frame-wrap">
-      <iframe id="btbiz-doc-frame" title="Document" src="about:blank"></iframe>
+      <embed id="btbiz-doc-frame" title="Document" type="application/pdf" />
     </div>
   </div>
   <script>
@@ -101,7 +102,10 @@ function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: 
     var b = new Blob([buf], { type: t });
     var u = URL.createObjectURL(b);
     var fr = document.getElementById('btbiz-doc-frame');
-    if (fr) fr.src = u;
+    if (fr) {
+      fr.type = t;
+      fr.src = u;
+    }
     setTimeout(function () {
       try { URL.revokeObjectURL(u); } catch (e) {}
     }, 120000);
