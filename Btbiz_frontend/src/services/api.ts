@@ -163,11 +163,17 @@ async function openVerifiedAssistantDocumentShell(
   writeVerifiedAssistantDocumentShellForBlobDelivery(win, title)
 
   const payload = { type: VERIFIED_DOC_BLOB_MSG, mimeType, buffer }
-  try {
-    win.postMessage(payload, window.location.origin, [buffer])
-  } catch {
-    win.postMessage({ ...payload, buffer: buffer.slice(0) }, window.location.origin)
+  // Popup is at about:blank (opaque origin), so targetOrigin must be '*'.
+  // The receiver still validates e.origin against the parent origin.
+  const send = () => {
+    try {
+      win.postMessage(payload, '*', [buffer])
+    } catch {
+      win.postMessage({ ...payload, buffer: buffer.slice(0) }, '*')
+    }
   }
+  // Give the popup a tick to install its 'message' listener before we post.
+  setTimeout(send, 50)
 }
 
 function openBlobInBrowser(
