@@ -11,6 +11,7 @@ channel = "stable-25_05"
 PORT = "3000"
 JWT_SECRET = "dev_jwt_secret_change_me_in_production"
 JWT_EXPIRES_IN = "1h"
+VITE_API_BASE_URL = "https://doctor-client-pannel.replit.app"
 
 [workflows]
 runButton = "Project"
