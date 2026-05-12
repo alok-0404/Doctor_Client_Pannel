@@ -191,17 +191,18 @@ async function openVerifiedAssistantDocumentShell(
   const ready = await waitForVerifiedDocShellReady(win)
 
   const payload = { type: VERIFIED_DOC_BLOB_MSG, mimeType, buffer }
-  // Popup is at about:blank (opaque origin), so targetOrigin must be '*'.
-  // The receiver still validates e.origin against the parent origin.
-  const send = () => {
+  if (ready) {
+    // Popup is at about:blank (opaque origin), so targetOrigin must be '*'.
+    // The receiver still validates e.origin against the parent origin.
     try {
       win.postMessage(payload, '*', [buffer])
     } catch {
       win.postMessage({ ...payload, buffer: buffer.slice(0) }, '*')
     }
+    return
   }
-  // Give the popup a tick to install its 'message' listener before we post.
-  setTimeout(send, 50)
+  // If READY handshake was missed, open blob directly so user still sees the file.
+  openBlobInBrowser(blob, win)
 }
 
 function openBlobInBrowser(
