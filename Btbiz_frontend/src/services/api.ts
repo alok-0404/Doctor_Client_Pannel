@@ -46,14 +46,15 @@ function escapeHtmlLite(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-/** Top banner + iframe so PDF/image sits “inside” the same tab as the verified strip. */
-function renderDocumentTabWithAssistantVerifiedBanner(
-  win: Window,
-  frameSrc: string,
-  title: string
-): void {
+const VERIFIED_DOC_BLOB_MSG = 'btbiz-verified-doc-blob-v1'
+
+/**
+ * Shell HTML in the preview window; blob bytes arrive via postMessage from the opener so
+ * URL.createObjectURL runs in this window (Chrome will not load an opener-created blob: URL in our iframe).
+ */
+function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: string): void {
   const safeTitle = escapeHtmlLite(title)
-  const safeSrc = escapeHtmlLite(frameSrc)
+  const safeOrigin = escapeHtmlLite(window.location.origin)
   win.document.open()
   win.document.write(`<!DOCTYPE html>
 <html lang="en">
@@ -74,7 +75,7 @@ function renderDocumentTabWithAssistantVerifiedBanner(
       gap: 8px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     }
-    .doc-frame-wrap { flex: 1; min-height: 0; background: #fff; }
+    .doc-frame-wrap { flex: 1; min-height: 0; background: #fff; position: relative; }
     iframe { border: 0; width: 100%; height: 100%; display: block; }
   </style>
 </head>
@@ -85,9 +86,29 @@ function renderDocumentTabWithAssistantVerifiedBanner(
       <span>Verified by assistant — structured medicines / lab tests were checked at the clinic before this file was released.</span>
     </div>
     <div class="doc-frame-wrap">
-      <iframe title="Document" src="${safeSrc}"></iframe>
+      <iframe id="btbiz-doc-frame" title="Document" src="about:blank"></iframe>
     </div>
   </div>
+  <script>
+(function () {
+  var MSG = ${JSON.stringify(VERIFIED_DOC_BLOB_MSG)};
+  function onMsg(e) {
+    if (e.origin !== '${safeOrigin}') return;
+    if (!e.data || e.data.type !== MSG) return;
+    window.removeEventListener('message', onMsg);
+    var buf = e.data.buffer;
+    var t = e.data.mimeType || 'application/octet-stream';
+    var b = new Blob([buf], { type: t });
+    var u = URL.createObjectURL(b);
+    var fr = document.getElementById('btbiz-doc-frame');
+    if (fr) fr.src = u;
+    setTimeout(function () {
+      try { URL.revokeObjectURL(u); } catch (e) {}
+    }, 120000);
+  }
+  window.addEventListener('message', onMsg);
+})();
+  <\/script>
 </body>
 </html>`)
   win.document.close()
@@ -96,8 +117,8 @@ function renderDocumentTabWithAssistantVerifiedBanner(
 /**
  * When the green “verified” shell uses an <iframe>, embedding the API file URL directly fails if the
  * API sends `X-Frame-Options: SAMEORIGIN` (typical with Helmet) while the SPA runs on another origin
- * (e.g. Vite :5173 vs API :3000). We fetch the file with CORS, then register the blob URL on the
- * **blob:** URL on the SPA origin so the iframe (inherited same origin) can load it.
+ * (e.g. Vite :5173 vs API :3000). We fetch the file with CORS, then deliver the blob into the preview
+ * window so blob: URLs are created there (Chrome blocks an opener-created blob URL inside the popup iframe).
  */
 async function openVerifiedAssistantDocumentShell(
   win: Window,
@@ -132,15 +153,17 @@ async function openVerifiedAssistantDocumentShell(
     }
     return
   }
-  const objectUrl = URL.createObjectURL(blob)
-  renderDocumentTabWithAssistantVerifiedBanner(win, objectUrl, title)
-  setTimeout(() => {
-    try {
-      URL.revokeObjectURL(objectUrl)
-    } catch {
-      /* ignore */
-    }
-  }, 120_000)
+
+  const mimeType = blob.type || 'application/octet-stream'
+  const buffer = await blob.arrayBuffer()
+  writeVerifiedAssistantDocumentShellForBlobDelivery(win, title)
+
+  const payload = { type: VERIFIED_DOC_BLOB_MSG, mimeType, buffer }
+  try {
+    win.postMessage(payload, window.location.origin, [buffer])
+  } catch {
+    win.postMessage({ ...payload, buffer: buffer.slice(0) }, window.location.origin)
+  }
 }
 
 function openBlobInBrowser(
