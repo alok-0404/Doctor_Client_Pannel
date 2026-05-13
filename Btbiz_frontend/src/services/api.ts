@@ -5,6 +5,18 @@ import { patientStorage } from '../utils/patientStorage'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
+/** Origin for Socket.IO: API host when `VITE_API_BASE_URL` is set; otherwise same page origin (Vite must proxy `/socket.io`). */
+export function getApiOriginForSockets(): string {
+  if (API_BASE_URL) {
+    try {
+      return new URL(API_BASE_URL, window.location.origin).origin
+    } catch {
+      return window.location.origin
+    }
+  }
+  return window.location.origin
+}
+
 if (import.meta.env.PROD && !API_BASE_URL) {
   // eslint-disable-next-line no-console
   console.warn(
@@ -38,170 +50,12 @@ patientApi.interceptors.request.use((config) => {
   return config
 })
 
-function escapeHtmlLite(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+/** Shown when opening a clinic-verified document (in-tab banner was unreliable under strict CSP). */
+const ASSISTANT_VERIFIED_DOCUMENT_TOAST =
+  'Verified by assistant — structured medicines / lab tests were checked at the clinic before this file was released.'
 
-const VERIFIED_DOC_BLOB_MSG = 'btbiz-verified-doc-blob-v1'
-const VERIFIED_DOC_BLOB_READY_MSG = 'btbiz-verified-doc-blob-ready-v1'
-
-function waitForVerifiedDocShellReady(win: Window, timeoutMs = 1500): Promise<boolean> {
-  return new Promise((resolve) => {
-    let done = false
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== win) return
-      if (event.origin !== window.location.origin) return
-      if (!event.data || event.data.type !== VERIFIED_DOC_BLOB_READY_MSG) return
-      done = true
-      window.removeEventListener('message', onMessage)
-      resolve(true)
-    }
-    window.addEventListener('message', onMessage)
-    setTimeout(() => {
-      if (done) return
-      window.removeEventListener('message', onMessage)
-      resolve(false)
-    }, timeoutMs)
-  })
-}
-
-/**
- * Shell HTML in the preview window; blob bytes arrive via postMessage from the opener so
- * URL.createObjectURL runs in this window (Chrome will not load an opener-created blob: URL in our iframe).
- */
-function writeVerifiedAssistantDocumentShellForBlobDelivery(win: Window, title: string): void {
-  const safeTitle = escapeHtmlLite(title)
-  const safeOrigin = escapeHtmlLite(window.location.origin)
-  win.document.open()
-  win.document.write(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>${safeTitle}</title>
-  <style>
-    html, body { height: 100%; margin: 0; }
-    .doc-shell { display: flex; flex-direction: column; height: 100%; background: #0f172a; }
-    .doc-banner {
-      flex-shrink: 0;
-      padding: 10px 14px;
-      background: linear-gradient(90deg, #065f46, #047857);
-      color: #ecfdf5;
-      font: 600 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-    }
-    .doc-frame-wrap { flex: 1; min-height: 0; background: #fff; position: relative; }
-    /* embed uses object-src in CSP; iframe uses frame-src — embed avoids "Framing blob" when frame-src is missing upstream. */
-    embed#btbiz-doc-frame { border: 0; width: 100%; height: 100%; display: block; }
-  </style>
-</head>
-<body>
-  <div class="doc-shell">
-    <div class="doc-banner" role="status">
-      <span aria-hidden="true">✓</span>
-      <span>Verified by assistant — structured medicines / lab tests were checked at the clinic before this file was released.</span>
-    </div>
-    <div class="doc-frame-wrap">
-      <embed id="btbiz-doc-frame" title="Document" type="application/pdf" />
-    </div>
-  </div>
-  <script>
-(function () {
-  var MSG = ${JSON.stringify(VERIFIED_DOC_BLOB_MSG)};
-  var READY = ${JSON.stringify(VERIFIED_DOC_BLOB_READY_MSG)};
-  function onMsg(e) {
-    if (e.origin !== '${safeOrigin}') return;
-    if (!e.data || e.data.type !== MSG) return;
-    window.removeEventListener('message', onMsg);
-    var buf = e.data.buffer;
-    var t = e.data.mimeType || 'application/octet-stream';
-    var b = new Blob([buf], { type: t });
-    var u = URL.createObjectURL(b);
-    var fr = document.getElementById('btbiz-doc-frame');
-    if (fr) {
-      fr.type = t;
-      fr.src = u;
-    }
-    setTimeout(function () {
-      try { URL.revokeObjectURL(u); } catch (e) {}
-    }, 120000);
-  }
-  window.addEventListener('message', onMsg);
-  try {
-    if (window.opener) {
-      window.opener.postMessage({ type: READY }, '${safeOrigin}');
-    }
-  } catch (e) {}
-})();
-  <\/script>
-</body>
-</html>`)
-  win.document.close()
-}
-
-/**
- * When the green “verified” shell uses an <iframe>, embedding the API file URL directly fails if the
- * API sends `X-Frame-Options: SAMEORIGIN` (typical with Helmet) while the SPA runs on another origin
- * (e.g. Vite :5173 vs API :3000). We fetch the file with CORS, then deliver the blob into the preview
- * window so blob: URLs are created there (Chrome blocks an opener-created blob URL inside the popup iframe).
- */
-async function openVerifiedAssistantDocumentShell(
-  win: Window,
-  source: string | Blob,
-  title: string
-): Promise<void> {
-  let blob: Blob
-  if (source instanceof Blob) {
-    blob = source
-  } else {
-    try {
-      const r = await fetch(source, { mode: 'cors', credentials: 'omit' })
-      if (!r.ok) {
-        toast.error('Could not load document preview.')
-        win.location.href = source
-        return
-      }
-      blob = await r.blob()
-    } catch {
-      toast.error('Could not load document preview.')
-      win.location.href = source
-      return
-    }
-  }
-  const ct = (blob.type || '').toLowerCase()
-  if (ct.includes('application/json') || ct.includes('text/json')) {
-    try {
-      const j = JSON.parse(await blob.text()) as { message?: string }
-      toast.error(j.message ?? 'Could not open document.')
-    } catch {
-      toast.error('Could not open document.')
-    }
-    return
-  }
-
-  const mimeType = blob.type || 'application/octet-stream'
-  const buffer = await blob.arrayBuffer()
-  writeVerifiedAssistantDocumentShellForBlobDelivery(win, title)
-  const ready = await waitForVerifiedDocShellReady(win)
-
-  const payload = { type: VERIFIED_DOC_BLOB_MSG, mimeType, buffer }
-  // Popup is at about:blank (opaque origin), so targetOrigin must be '*'.
-  // The receiver still validates e.origin against the parent origin.
-  const send = () => {
-    try {
-      win.postMessage(payload, '*', [buffer])
-    } catch {
-      win.postMessage({ ...payload, buffer: buffer.slice(0) }, '*')
-    }
-  }
-  // Give the popup a tick to install its 'message' listener before we post.
-  setTimeout(send, 50)
+function notifyAssistantVerifiedDocumentOpening(): void {
+  toast.success(ASSISTANT_VERIFIED_DOCUMENT_TOAST, { autoClose: 9000 })
 }
 
 function openBlobInBrowser(
@@ -919,9 +773,8 @@ export const patientPortalService = {
         })
         const tokenizedUrl = (linkRes.data as { url?: string })?.url
         if (tokenizedUrl) {
-          if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
-            await openVerifiedAssistantDocumentShell(previewWin, tokenizedUrl, 'Document')
-          } else if (previewWin) {
+          if (showAssistantVerifiedBanner) notifyAssistantVerifiedDocumentOpening()
+          if (previewWin && !previewWin.closed) {
             previewWin.location.href = tokenizedUrl
           } else {
             window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
@@ -933,11 +786,8 @@ export const patientPortalService = {
       // Fallback: try authenticated blob route when short-link route is unavailable.
       const fileRes = await patientApi.get(`/public/patient/documents/${documentId}/file`, { responseType: 'blob' })
       const blob = fileRes.data as Blob
-      if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
-        await openVerifiedAssistantDocumentShell(previewWin, blob, 'Document')
-      } else {
-        openBlobInBrowser(blob, previewWin)
-      }
+      if (showAssistantVerifiedBanner) notifyAssistantVerifiedDocumentOpening()
+      openBlobInBrowser(blob, previewWin)
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: Blob | { message?: string } } }
       let msg = 'Could not open document. Please try again.'
@@ -1019,7 +869,33 @@ export const patientPortalService = {
   },
 }
 
+export interface AssistantPendingDocumentItem {
+  documentId: string
+  patientId: string
+  patientFirstName: string
+  patientLastName?: string
+  patientName: string
+  mobileNumber: string
+  originalName: string
+  mimeType: string
+  uploadedAt: string
+  patientPublishStatus: 'PENDING_ASSISTANT'
+  ocrText?: string
+  suggestedParse?: {
+    medicines: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+    tests: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+    unknown: Array<{ text: string; confidence: 'HIGH' | 'MEDIUM' | 'LOW' }>
+    lowConfidenceLines: string[]
+  }
+}
+
 export const patientService = {
+  async listAssistantPendingDocuments(order: 'asc' | 'desc' = 'asc'): Promise<AssistantPendingDocumentItem[]> {
+    const res = await api.get('/patients/assistant/pending-documents', { params: { order } })
+    const data = res.data as { items?: AssistantPendingDocumentItem[] }
+    return data.items ?? []
+  },
+
   async searchByMobileOptions(mobile: string): Promise<PatientSummary[]> {
     try {
       const res = await api.get('/patients/search', { params: { mobile } })
@@ -1305,9 +1181,8 @@ export const patientService = {
         })
         const tokenizedUrl = (linkRes.data as { url?: string })?.url
         if (tokenizedUrl) {
-          if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
-            await openVerifiedAssistantDocumentShell(previewWin, tokenizedUrl, 'Document')
-          } else if (previewWin) {
+          if (showAssistantVerifiedBanner) notifyAssistantVerifiedDocumentOpening()
+          if (previewWin && !previewWin.closed) {
             previewWin.location.href = tokenizedUrl
           } else {
             window.open(tokenizedUrl, '_blank', 'noopener,noreferrer')
@@ -1332,17 +1207,14 @@ export const patientService = {
         }
       )
       const blob = res.data as Blob
-      if (previewWin && !previewWin.closed && showAssistantVerifiedBanner) {
-        await openVerifiedAssistantDocumentShell(previewWin, blob, 'Document')
+      if (showAssistantVerifiedBanner) notifyAssistantVerifiedDocumentOpening()
+      const url = URL.createObjectURL(blob)
+      if (previewWin && !previewWin.closed) {
+        previewWin.location.href = url
       } else {
-        const url = URL.createObjectURL(blob)
-        if (previewWin) {
-          previewWin.location.href = url
-        } else {
-          window.open(url, '_blank', 'noopener,noreferrer')
-        }
-        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        window.open(url, '_blank', 'noopener,noreferrer')
       }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (err: any) {
       const forbidden = err?.response?.status === 403
       if (!forbidden) {

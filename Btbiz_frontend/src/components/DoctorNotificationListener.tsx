@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
-import { API_BASE_URL, authService, notificationService } from '../services/api'
+import { authService, getApiOriginForSockets, notificationService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 
 export const DoctorNotificationListener = () => {
@@ -16,17 +16,6 @@ export const DoctorNotificationListener = () => {
   const role = authStorage.getRole()
   const isDoctor = role === 'DOCTOR'
 
-  const getSocketOrigin = (): string => {
-    const fallback = window.location.origin
-    if (!API_BASE_URL) return fallback
-    try {
-      const parsed = new URL(API_BASE_URL, window.location.origin)
-      return parsed.origin
-    } catch {
-      return fallback
-    }
-  }
-
   useEffect(() => {
     if (!isDoctor) return
 
@@ -39,7 +28,7 @@ export const DoctorNotificationListener = () => {
         const doctorId = doctor?.id
         if (!doctorId || !mounted) return
 
-        const socketUrl = getSocketOrigin()
+        const socketUrl = getApiOriginForSockets()
         socket = io(socketUrl, {
           query: { doctorId },
           transports: ['websocket', 'polling']

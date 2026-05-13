@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { io } from 'socket.io-client'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
@@ -8,6 +8,7 @@ import { Button } from '../components/ui/Button'
 import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   API_BASE_URL,
+  getApiOriginForSockets,
   api,
   authService,
   patientService,
@@ -17,6 +18,7 @@ import {
   type AssistantCheckedInItem,
   type AssistantFamilyOption,
   type AssistantPatientPrefill,
+  type AssistantPendingDocumentItem,
 } from '../services/api'
 import { toast } from 'react-toastify'
 import { parseAssistantReferralError } from '../utils/assistantErrors'
@@ -41,6 +43,32 @@ const normalizeMobileForBackend = (raw: string): string => {
   if (!digits) return ''
   const last10 = digits.slice(-10)
   return `+91${last10}`
+}
+
+/** Dev: same tab uses Vite proxy for `/public/*`; absolute backend URLs can break binary blob XHR. */
+function previewPublicFileUrlForInlineDisplay(rawUrl: string): string {
+  if (!import.meta.env.DEV || API_BASE_URL) return rawUrl
+  try {
+    const u = new URL(rawUrl)
+    if (u.pathname.startsWith('/public/')) {
+      return `${window.location.origin}${u.pathname}${u.search}${u.hash}`
+    }
+  } catch {
+    /* ignore */
+  }
+  return rawUrl
+}
+
+function isLikelyImageMime(mime: string | null | undefined, fileName?: string | null): boolean {
+  const m = (mime || '').toLowerCase()
+  if (m.startsWith('image/')) return true
+  return /\.(jpe?g|png|gif|webp|bmp|svg)(\?|$)/i.test(String(fileName || ''))
+}
+
+function isLikelyPdfMime(mime: string | null | undefined, fileName?: string | null): boolean {
+  const m = (mime || '').toLowerCase()
+  if (m.includes('pdf')) return true
+  return String(fileName || '').toLowerCase().endsWith('.pdf')
 }
 
 export const AssistantDashboard = () => {
@@ -120,7 +148,16 @@ export const AssistantDashboard = () => {
   const [verifyClinicalNotes, setVerifyClinicalNotes] = useState('')
   const [verifyImportantNotes, setVerifyImportantNotes] = useState('')
 
-  /** Original prescription preview inside verify modal (blob URL — revoked on close). */
+  const [pendingDocs, setPendingDocs] = useState<AssistantPendingDocumentItem[]>([])
+  const [pendingDocsLoading, setPendingDocsLoading] = useState(false)
+  const [pendingDocsError, setPendingDocsError] = useState<string | null>(null)
+  const [pendingDocsSort, setPendingDocsSort] = useState<'asc' | 'desc'>('asc')
+
+  /** Mime + name for the document open in the verify modal (queue row or fresh upload). */
+  const [verifyDocMeta, setVerifyDocMeta] = useState<{ mimeType: string; originalName: string } | null>(null)
+  /** Signed `/public/.../file` URL for inline preview (same bytes as “View (new tab)”). */
+  const [verifyPreviewPublicUrl, setVerifyPreviewPublicUrl] = useState<string | null>(null)
+  /** Fallback: blob from authenticated `/patients/.../file` when public link is unavailable. */
   const [verifyPreviewUrl, setVerifyPreviewUrl] = useState<string | null>(null)
   const [verifyPreviewMime, setVerifyPreviewMime] = useState<string | null>(null)
   const [verifyPreviewLoading, setVerifyPreviewLoading] = useState(false)
@@ -638,6 +675,46 @@ export const AssistantDashboard = () => {
     setVerifyImportantNotes('')
   }
 
+  const verifyPreviewFileNameHint = useMemo(() => {
+    if (!docPendingReleaseId || !patientId) return verifyDocMeta?.originalName ?? null
+    return (
+      verifyDocMeta?.originalName ??
+      pendingDocs.find((d) => d.documentId === docPendingReleaseId && d.patientId === patientId)?.originalName ??
+      null
+    )
+  }, [verifyDocMeta, pendingDocs, docPendingReleaseId, patientId])
+
+  const loadPendingAssistantDocuments = useCallback(async () => {
+    setPendingDocsLoading(true)
+    setPendingDocsError(null)
+    try {
+      const items = await patientService.listAssistantPendingDocuments(pendingDocsSort)
+      setPendingDocs(items)
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string } } }
+      setPendingDocsError(ax?.response?.data?.message ?? 'Could not load pending prescriptions.')
+      setPendingDocs([])
+    } finally {
+      setPendingDocsLoading(false)
+    }
+  }, [pendingDocsSort])
+
+  const openVerifyFromPendingQueue = (row: AssistantPendingDocumentItem) => {
+    setStep('checkin')
+    setPatient({
+      id: row.patientId,
+      firstName: row.patientFirstName,
+      lastName: row.patientLastName,
+      mobileNumber: row.mobileNumber,
+    })
+    setPatientId(row.patientId)
+    setVerifyDocMeta({ mimeType: row.mimeType, originalName: row.originalName })
+    setDocPendingReleaseId(row.documentId)
+    setDocOcrPreview(row.ocrText ?? null)
+    seedVerifyFormFromSuggestedParse(row.suggestedParse)
+    setVerifyModalOpen(true)
+  }
+
   const handleUploadDocument = async () => {
     if (!patientId) return
     setDocUploadError(null)
@@ -652,10 +729,15 @@ export const AssistantDashboard = () => {
       const result = await patientService.uploadDocument(patientId, docFile)
       const pub = result.document?.patientPublishStatus
       if (pub === 'PENDING_ASSISTANT' && result.document?.id) {
+        setVerifyDocMeta({
+          mimeType: result.document.mimeType || docFile.type || 'application/octet-stream',
+          originalName: result.document.originalName || docFile.name,
+        })
         setDocPendingReleaseId(result.document.id)
         seedVerifyFormFromSuggestedParse(result.suggestedParse)
         setVerifyModalOpen(true)
       } else {
+        setVerifyDocMeta(null)
         setDocPendingReleaseId(null)
         setVerifyModalOpen(false)
       }
@@ -680,6 +762,7 @@ export const AssistantDashboard = () => {
         )
       }
       setDocFile(null)
+      void loadPendingAssistantDocuments()
     } catch (err: any) {
       setDocUploadError(err?.response?.data?.message ?? 'Could not upload file.')
     } finally {
@@ -723,11 +806,13 @@ export const AssistantDashboard = () => {
         importantNotes: important || undefined,
       })
       setDocPendingReleaseId(null)
+      setVerifyDocMeta(null)
       setVerifyModalOpen(false)
       setDocOcrPreview(null)
       toast.success(
         'Verified and released — patient can view this document; lab/pharmacy preview uses your structured data.'
       )
+      void loadPendingAssistantDocuments()
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string } } }
       toast.error(ax?.response?.data?.message ?? 'Could not verify document.')
@@ -770,12 +855,42 @@ export const AssistantDashboard = () => {
       verifyPreviewUrlRef.current = null
     }
     setVerifyPreviewUrl(null)
+    setVerifyPreviewPublicUrl(null)
     setVerifyPreviewMime(null)
     setVerifyPreviewError(null)
     setVerifyPreviewLoading(true)
 
+    const rowMeta =
+      verifyDocMeta ??
+      pendingDocs.find((d) => d.documentId === docPendingReleaseId && d.patientId === patientId) ??
+      null
+    const hintName = rowMeta?.originalName
+    const hintMime = rowMeta?.mimeType?.toLowerCase().trim()
+
     void (async () => {
       try {
+        try {
+          const linkRes = await api.get('/public/patient/documents/link', {
+            params: { patientId, documentId: docPendingReleaseId },
+          })
+          const rawUrl = (linkRes.data as { url?: string })?.url
+          if (typeof rawUrl === 'string' && rawUrl.length > 0) {
+            const displayUrl = previewPublicFileUrlForInlineDisplay(rawUrl)
+            const mimeGuess =
+              (hintMime && hintMime.length > 0 ? hintMime : null) ||
+              (isLikelyPdfMime(undefined, hintName) ? 'application/pdf' : null) ||
+              (isLikelyImageMime(undefined, hintName) ? 'image/jpeg' : null)
+            if (!cancelled) {
+              setVerifyPreviewPublicUrl(displayUrl)
+              setVerifyPreviewMime(mimeGuess)
+            }
+            if (!cancelled) setVerifyPreviewLoading(false)
+            return
+          }
+        } catch {
+          /* fall through to authenticated blob fetch */
+        }
+
         const res = await api.get(`/patients/${patientId}/documents/${docPendingReleaseId}/file`, {
           responseType: 'blob',
           params: { _ts: Date.now() },
@@ -788,7 +903,11 @@ export const AssistantDashboard = () => {
         const mime =
           mimeRaw && mimeRaw !== 'application/octet-stream'
             ? mimeRaw
-            : headerCt || 'application/octet-stream'
+            : (headerCt && headerCt !== 'application/octet-stream' ? headerCt : null) ||
+                hintMime ||
+                (isLikelyPdfMime(undefined, hintName) ? 'application/pdf' : null) ||
+                (isLikelyImageMime(undefined, hintName) ? 'image/jpeg' : null) ||
+                'application/octet-stream'
 
         if (mimeRaw.includes('json') || headerRaw.toLowerCase().includes('application/json')) {
           const text = await blob.text()
@@ -826,11 +945,12 @@ export const AssistantDashboard = () => {
         verifyPreviewUrlRef.current = null
       }
       setVerifyPreviewUrl(null)
+      setVerifyPreviewPublicUrl(null)
       setVerifyPreviewMime(null)
       setVerifyPreviewError(null)
       setVerifyPreviewLoading(false)
     }
-  }, [verifyModalOpen, patientId, docPendingReleaseId])
+  }, [verifyModalOpen, patientId, docPendingReleaseId, pendingDocs, verifyDocMeta])
 
   const goBackToSearch = () => {
     setStep('search')
@@ -849,6 +969,7 @@ export const AssistantDashboard = () => {
     setDocUploadError(null)
     setDocUploadSuccess(null)
     setDocPendingReleaseId(null)
+    setVerifyDocMeta(null)
     setVerifyModalOpen(false)
     seedVerifyFormFromSuggestedParse(undefined)
   }
@@ -856,6 +977,10 @@ export const AssistantDashboard = () => {
   useEffect(() => {
     void loadProfile()
   }, [])
+
+  useEffect(() => {
+    void loadPendingAssistantDocuments()
+  }, [loadPendingAssistantDocuments])
 
   // Load today's + upcoming appointments for assistant view.
   useEffect(() => {
@@ -886,7 +1011,7 @@ export const AssistantDashboard = () => {
         const { doctor } = await authService.getProfile()
         const userId = doctor?.id
         if (!userId || !mounted) return
-        const socketUrl = API_BASE_URL || window.location.origin
+        const socketUrl = getApiOriginForSockets()
         socket = io(socketUrl, {
           query: { doctorId: userId },
           transports: ['websocket', 'polling']
@@ -937,6 +1062,117 @@ export const AssistantDashboard = () => {
       <Header clinicName="Check‑in desk" doctorName={name} />
       <main className="search-main" style={{ padding: 24, maxWidth: '100%', width: '100%' }}>
         <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Card className="dashboard-overview-card">
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: pendingDocsLoading || pendingDocs.length > 0 || pendingDocsError ? 14 : 0,
+            }}
+          >
+            <div style={{ flex: '1 1 240px' }}>
+              <p className="dashboard-kicker">
+                Prescriptions waiting for release
+                {pendingDocs.length > 0 ? ` (${pendingDocs.length})` : ''}
+              </p>
+              <p className="dashboard-body" style={{ marginTop: 4, fontSize: 13, color: '#627d98', lineHeight: 1.45 }}>
+                Staff uploads stay hidden from the patient until you verify structured medicines / tests and release.
+                Open any row to continue — oldest uploads are listed first by default.
+              </p>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <label htmlFor="pending-docs-sort" className="text-sm" style={{ color: '#475569' }}>
+                Sort by upload
+              </label>
+              <select
+                id="pending-docs-sort"
+                value={pendingDocsSort}
+                onChange={(e) => setPendingDocsSort(e.target.value as 'asc' | 'desc')}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 13,
+                  background: '#fff',
+                }}
+              >
+                <option value="asc">Oldest first</option>
+                <option value="desc">Newest first</option>
+              </select>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={pendingDocsLoading}
+                onClick={() => void loadPendingAssistantDocuments()}
+              >
+                {pendingDocsLoading ? 'Loading…' : 'Refresh'}
+              </Button>
+            </div>
+          </div>
+          {pendingDocsError && (
+            <p className="text-sm" style={{ color: '#b91c1c', margin: '0 0 10px' }}>
+              {pendingDocsError}
+            </p>
+          )}
+          {pendingDocsLoading && pendingDocs.length === 0 && !pendingDocsError && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
+              <DnaLoader />
+            </div>
+          )}
+          {!pendingDocsLoading && pendingDocs.length === 0 && !pendingDocsError && (
+            <p className="text-sm" style={{ margin: 0, color: '#64748b' }}>
+              No prescriptions waiting for release right now.
+            </p>
+          )}
+          {pendingDocs.length > 0 && (
+            <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', background: '#f8fafc', color: '#64748b' }}>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Patient</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Mobile</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>File</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Uploaded</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0', width: 140 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingDocs.map((row) => (
+                    <tr key={row.documentId}>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                        {row.patientName}
+                      </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                        {row.mobileNumber}
+                      </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                        {row.originalName}
+                      </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                        {new Date(row.uploadedAt).toLocaleString('en-IN', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                        <span style={{ color: '#92400e', fontWeight: 600 }}>Pending assistant</span>
+                      </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                        <Button type="button" variant="secondary" onClick={() => openVerifyFromPendingQueue(row)}>
+                          Open verify
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
         {referredToDoctorName && (
           <div style={{ marginBottom: 0 }}>
           <Card className="dashboard-overview-card assistant-availability-card">
@@ -1613,6 +1849,7 @@ export const AssistantDashboard = () => {
                           setDocUploadSuccess(null)
                           setDocOcrPreview(null)
                           setDocPendingReleaseId(null)
+                          setVerifyDocMeta(null)
                         }}
                       />
                       {docFile && (
@@ -1764,7 +2001,10 @@ export const AssistantDashboard = () => {
                 type="button"
                 variant="secondary"
                 disabled={docVerifyLoading}
-                onClick={() => setVerifyModalOpen(false)}
+                onClick={() => {
+                  setVerifyDocMeta(null)
+                  setVerifyModalOpen(false)
+                }}
               >
                 Close
               </Button>
@@ -1807,7 +2047,21 @@ export const AssistantDashboard = () => {
                         {verifyPreviewError}
                       </p>
                     )}
-                    {verifyPreviewUrl && verifyPreviewMime?.startsWith('image/') && (
+                    {verifyPreviewPublicUrl && isLikelyImageMime(verifyPreviewMime, verifyPreviewFileNameHint) && (
+                      <img
+                        src={verifyPreviewPublicUrl}
+                        alt="Uploaded prescription"
+                        style={{
+                          width: '100%',
+                          maxHeight: 'min(60vh, 520px)',
+                          objectFit: 'contain',
+                          borderRadius: 6,
+                          background: '#fff',
+                          display: 'block',
+                        }}
+                      />
+                    )}
+                    {!verifyPreviewPublicUrl && verifyPreviewUrl && verifyPreviewMime?.startsWith('image/') && (
                       <img
                         src={verifyPreviewUrl}
                         alt="Uploaded prescription"
@@ -1821,7 +2075,21 @@ export const AssistantDashboard = () => {
                         }}
                       />
                     )}
-                    {verifyPreviewUrl && verifyPreviewMime?.includes('pdf') && (
+                    {verifyPreviewPublicUrl && isLikelyPdfMime(verifyPreviewMime, verifyPreviewFileNameHint) && (
+                      <embed
+                        src={verifyPreviewPublicUrl}
+                        type="application/pdf"
+                        title="Uploaded prescription"
+                        style={{
+                          width: '100%',
+                          height: 'min(60vh, 520px)',
+                          borderRadius: 6,
+                          background: '#fff',
+                          display: 'block',
+                        }}
+                      />
+                    )}
+                    {!verifyPreviewPublicUrl && verifyPreviewUrl && verifyPreviewMime?.includes('pdf') && (
                       <embed
                         src={verifyPreviewUrl}
                         type="application/pdf"
@@ -1835,10 +2103,11 @@ export const AssistantDashboard = () => {
                         }}
                       />
                     )}
-                    {verifyPreviewUrl &&
-                      verifyPreviewMime &&
-                      !verifyPreviewMime.startsWith('image/') &&
-                      !verifyPreviewMime.includes('pdf') && (
+                    {!verifyPreviewLoading &&
+                      !verifyPreviewError &&
+                      (verifyPreviewPublicUrl || verifyPreviewUrl) &&
+                      !isLikelyImageMime(verifyPreviewMime, verifyPreviewFileNameHint) &&
+                      !isLikelyPdfMime(verifyPreviewMime, verifyPreviewFileNameHint) && (
                         <p className="text-sm" style={{ color: '#64748b', margin: 0, lineHeight: 1.5 }}>
                           Inline preview is not available for this file type. Use &quot;View (new tab)&quot; to open the
                           file.
@@ -2086,7 +2355,15 @@ export const AssistantDashboard = () => {
                 background: '#f8fafc',
               }}
             >
-              <Button type="button" variant="secondary" disabled={docVerifyLoading} onClick={() => setVerifyModalOpen(false)}>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={docVerifyLoading}
+                onClick={() => {
+                  setVerifyDocMeta(null)
+                  setVerifyModalOpen(false)
+                }}
+              >
                 Cancel
               </Button>
               <Button type="button" disabled={docVerifyLoading} onClick={() => void handleVerifyModalSave()}>

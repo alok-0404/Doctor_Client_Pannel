@@ -20,7 +20,8 @@ import {
   updatePatient,
   uploadDiagnosticTestReport,
   uploadPatientDocument,
-  verifyPatientDocumentForPatientProfile
+  verifyPatientDocumentForPatientProfile,
+  listPendingAssistantDocuments
 } from "../controllers/patientController";
 import { getUploadsRootDir } from "../utils/uploadPath";
 
@@ -37,6 +38,9 @@ router.use(authenticateDoctor);
 
 // GET /patients/search?mobile=
 router.get("/search", searchPatientByMobile);
+
+// GET /patients/assistant/pending-documents?order=asc|desc — must stay above /:patientId routes
+router.get("/assistant/pending-documents", listPendingAssistantDocuments);
 
 // Secure prescription preview — POST preferred (JWT in body avoids long-URL / proxy issues on Replit).
 // GET /patients/documents/secure-preview/:token kept for backward compatibility.

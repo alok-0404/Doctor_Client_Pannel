@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import fs from "fs";
+import mongoose from "mongoose";
 
 import { Doctor } from "../models/Doctor";
 import { DoctorNotification } from "../models/DoctorNotification";
@@ -588,6 +589,91 @@ function sanitizeVerifiedPayload(body: unknown): VerifiedExtractPayload {
 
   return { medicines, tests, clinicalNotes, importantNotes };
 }
+
+/** Staff uploads awaiting assistant verify + release (clinic-scoped: linked doctor's patients + staff uploads). */
+export const listPendingAssistantDocuments = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.doctor || req.doctor.role !== "ASSISTANT") {
+      res.status(403).json({ message: "Only assistants can use this endpoint" });
+      return;
+    }
+
+    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+    const parentDoctorId = (assistantDoc as { createdByDoctorId?: unknown } | null)?.createdByDoctorId;
+    if (!parentDoctorId) {
+      res.status(200).json({ items: [] });
+      return;
+    }
+
+    const orderParam = String(req.query.order ?? "").toLowerCase();
+    const sortDir = orderParam === "desc" ? -1 : 1;
+
+    const parentOid = new mongoose.Types.ObjectId(String(parentDoctorId));
+    const assistantOid = new mongoose.Types.ObjectId(String(req.doctor._id));
+
+    const [patientIdsFromStaffPending, patientIdsFromVisits] = await Promise.all([
+      PatientDocument.distinct("patient", {
+        patientPublishStatus: "PENDING_ASSISTANT",
+        uploadedBy: { $in: [assistantOid, parentOid] },
+      }),
+      Visit.distinct("patient", { doctor: parentOid }),
+    ]);
+
+    const patientIdSet = new Set<string>([
+      ...patientIdsFromStaffPending.map((id) => String(id)),
+      ...patientIdsFromVisits.map((id) => String(id)),
+    ]);
+
+    if (patientIdSet.size === 0) {
+      res.status(200).json({ items: [] });
+      return;
+    }
+
+    const patientObjectIds = [...patientIdSet].map((id) => new mongoose.Types.ObjectId(id));
+
+    const docs = await PatientDocument.find({
+      patientPublishStatus: "PENDING_ASSISTANT",
+      patient: { $in: patientObjectIds },
+    })
+      .sort({ createdAt: sortDir })
+      .populate("patient", "firstName lastName mobileNumber")
+      .lean();
+
+    const items = (docs as any[]).flatMap((d) => {
+      const patient = d.patient as
+        | { _id?: unknown; firstName?: string; lastName?: string; mobileNumber?: string }
+        | null
+        | undefined;
+      if (!patient || !patient._id) return [];
+
+      const ocrText = String(d.ocrText ?? "").trim();
+      const suggestedParse = ocrText ? parsePrescriptionOcr(ocrText, d.ocrConfidence) : undefined;
+
+      return [
+        {
+          documentId: String(d._id),
+          patientId: String(patient._id),
+          patientFirstName: String(patient.firstName ?? ""),
+          patientLastName: patient.lastName ? String(patient.lastName) : undefined,
+          patientName: [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() || "Patient",
+          mobileNumber: String(patient.mobileNumber ?? ""),
+          originalName: d.originalName,
+          mimeType: d.mimeType,
+          uploadedAt: d.createdAt,
+          patientPublishStatus: "PENDING_ASSISTANT" as const,
+          ocrText: ocrText || undefined,
+          suggestedParse,
+        },
+      ];
+    });
+
+    res.status(200).json({ items });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("listPendingAssistantDocuments error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 export const verifyPatientDocumentForPatientProfile = async (
   req: Request,
