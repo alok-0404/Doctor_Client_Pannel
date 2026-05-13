@@ -58,6 +58,8 @@ function notifyAssistantVerifiedDocumentOpening(): void {
   toast.success(ASSISTANT_VERIFIED_DOCUMENT_TOAST, { autoClose: 9000 })
 }
 
+
+
 function openBlobInBrowser(
   blob: Blob,
   preferredWindow?: Window | null
