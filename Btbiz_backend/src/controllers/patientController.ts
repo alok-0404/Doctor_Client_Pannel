@@ -17,6 +17,7 @@ import {
   toStoredUploadPath,
   uploadFileExists,
 } from "../utils/uploadPath";
+import { extractPdfTextForOcr } from "../utils/extractPdfTextForOcr";
 import {
   detectLineType,
   formatVerifiedMedicineLine,
@@ -457,15 +458,21 @@ export const uploadPatientDocument = async (
     }
 
     const fileMimetype: string | undefined = typeof file.mimetype === "string" ? file.mimetype : undefined;
-    // OCR is only useful for images; PDFs/other docs can cause heavy processing/timeouts.
-    const shouldRunOcr = !!fileMimetype && fileMimetype.startsWith("image/");
+    const origLower = String(file.originalname ?? "").toLowerCase();
+    const looksPdfByName = origLower.endsWith(".pdf");
+    const shouldRunImageOcr = !!fileMimetype && fileMimetype.startsWith("image/");
+    const shouldRunPdfPipeline =
+      fileMimetype?.toLowerCase() === "application/pdf" ||
+      (looksPdfByName && !!fileMimetype && !fileMimetype.startsWith("image/")) ||
+      (looksPdfByName && !fileMimetype);
     // eslint-disable-next-line no-console
     console.log("uploadPatientDocument:", {
       patientId,
       originalName: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-      shouldRunOcr,
+      shouldRunImageOcr,
+      shouldRunPdfPipeline,
     });
 
     const patient = await Patient.findById(patientId).select("_id");
@@ -494,12 +501,7 @@ export const uploadPatientDocument = async (
       | undefined;
 
     try {
-      if (!shouldRunOcr) {
-        ocrPayload = {
-          success: false,
-          error: "OCR skipped for non-image file",
-        };
-      } else {
+      if (shouldRunImageOcr) {
         const ocrResult = await ocrService.extractTextFromImage(file.path);
         if (ocrResult.success && ocrResult.text) {
           doc.ocrText = ocrResult.text;
@@ -516,6 +518,28 @@ export const uploadPatientDocument = async (
             error: ocrResult.error,
           };
         }
+      } else if (shouldRunPdfPipeline) {
+        const pdfOcr = await extractPdfTextForOcr(file.path, (p) => ocrService.extractTextFromImage(p));
+        if (pdfOcr.success && pdfOcr.text) {
+          doc.ocrText = pdfOcr.text;
+          doc.ocrConfidence = pdfOcr.confidence;
+          await doc.save();
+          ocrPayload = {
+            success: true,
+            text: pdfOcr.text,
+            confidence: pdfOcr.confidence,
+          };
+        } else {
+          ocrPayload = {
+            success: false,
+            error: pdfOcr.error ?? "Could not extract text from PDF",
+          };
+        }
+      } else {
+        ocrPayload = {
+          success: false,
+          error: "OCR skipped for non-image file",
+        };
       }
     } catch (ocrError: any) {
       // eslint-disable-next-line no-console
