@@ -1128,16 +1128,89 @@ export const AssistantDashboard = () => {
             </p>
           )}
           {pendingDocs.length > 0 && (
-            <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+            <div
+              style={{
+                overflowX: 'auto',
+                overflowY: pendingDocs.length > 5 ? 'auto' : undefined,
+                maxHeight: pendingDocs.length > 5 ? 320 : undefined,
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+              }}
+            >
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
                 <thead>
-                  <tr style={{ textAlign: 'left', background: '#f8fafc', color: '#64748b' }}>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Patient</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Mobile</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>File</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Uploaded</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0', width: 140 }} />
+                  <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    >
+                      Patient
+                    </th>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    >
+                      Mobile
+                    </th>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    >
+                      File
+                    </th>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    >
+                      Uploaded
+                    </th>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    >
+                      Status
+                    </th>
+                    <th
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #e2e8f0',
+                        width: 140,
+                        background: '#f8fafc',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                      }}
+                    />
                   </tr>
                 </thead>
                 <tbody>

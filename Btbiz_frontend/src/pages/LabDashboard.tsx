@@ -583,17 +583,22 @@ export const LabDashboard = () => {
           /* ignore */
         }
       }
-      if (patch.status === 'COMPLETED' || patch.status === 'CANCELLED') {
+      if (patch.status === 'COMPLETED') {
         setShowReceipt(false)
         setReceiptData(null)
         window.location.reload()
+      } else if (patch.status === 'CANCELLED') {
+        hiddenRequestIdsRef.current.delete(r.id)
+        toast.success('Request cancelled.', { autoClose: 2500 })
       }
-    } catch {
+    } catch (err: unknown) {
       if (shouldHideImmediately) {
         hiddenRequestIdsRef.current.delete(r.id)
       }
       setIncomingTestRequests(previousRequests)
-      toast.error('Could not update request. Please try again.')
+      const e = err as { response?: { data?: { message?: string } } }
+      const msg = e?.response?.data?.message?.trim()
+      toast.error(msg || 'Could not update request. Please try again.')
     }
   }
 

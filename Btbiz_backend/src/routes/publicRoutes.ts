@@ -1480,10 +1480,14 @@ router.post("/patient/medicines", async (req, res) => {
         ? "ONLINE"
         : (body.paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE");
 
+    const requestGroupId =
+      normalizedItems.length > 1 ? new mongoose.Types.ObjectId().toString() : undefined;
+
     const created = await Promise.all(
       normalizedItems.map((m) =>
         PatientMedicineRequest.create({
           patient: patient!._id,
+          requestGroupId,
           medicineName: m.medicineName,
           quantity: parseQty(m.quantity),
           dosage: m.dosage?.trim?.() || undefined,
@@ -1506,6 +1510,7 @@ router.post("/patient/medicines", async (req, res) => {
     res.status(201).json({
       requestId: created[0]?._id?.toString?.() ?? "",
       requestIds: created.map((r) => r._id.toString()),
+      requestGroupId,
       createdCount: created.length,
     });
   } catch (error) {

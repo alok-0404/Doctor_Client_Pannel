@@ -6,6 +6,24 @@ import { Doctor } from "../models/Doctor";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 
+type OrderRequestStatus = "PENDING" | "ACCEPTED" | "COMPLETED" | "CANCELLED";
+
+/** Lab/pharmacy list groups multiple DB rows; status must reflect the whole batch. */
+function aggregateGroupedOrderStatus(statuses: OrderRequestStatus[]): OrderRequestStatus {
+  if (!statuses.length) return "PENDING";
+  if (statuses.every((s) => s === "CANCELLED")) return "CANCELLED";
+  if (statuses.every((s) => s === "COMPLETED")) return "COMPLETED";
+  const active = statuses.filter((s) => s !== "CANCELLED" && s !== "COMPLETED");
+  if (active.some((s) => s === "ACCEPTED")) return "ACCEPTED";
+  if (active.some((s) => s === "PENDING")) return "PENDING";
+  return active[0] ?? "PENDING";
+}
+
+function aggregateGroupedPaymentStatus(statuses: Array<"PENDING" | "PAID">): "PENDING" | "PAID" {
+  if (statuses.length > 0 && statuses.every((s) => s === "PAID")) return "PAID";
+  return "PENDING";
+}
+
 const router = Router();
 
 router.use(authenticateDoctor);
@@ -49,6 +67,8 @@ router.get("/medicine-requests", async (req, res) => {
           paymentMode: r.paymentMode,
           paymentStatus: r.paymentStatus,
           status: r.status,
+          rowStatuses: [r.status as OrderRequestStatus],
+          rowPaymentStatuses: [r.paymentStatus as "PENDING" | "PAID"],
           expectedFulfillmentMinutes: r.expectedFulfillmentMinutes,
           fulfilledAt: r.fulfilledAt,
           receiptNumber: r.receiptNumber,
@@ -68,13 +88,20 @@ router.get("/medicine-requests", async (req, res) => {
             notes: r.notes,
           });
         }
+        g.rowStatuses.push(r.status as OrderRequestStatus);
+        g.rowPaymentStatuses.push(r.paymentStatus as "PENDING" | "PAID");
+        g.status = aggregateGroupedOrderStatus(g.rowStatuses);
+        g.paymentStatus = aggregateGroupedPaymentStatus(g.rowPaymentStatuses);
       }
     }
 
-    const mapped = Array.from(grouped.values()).map((g) => ({
-      ...g,
-      medicineName: g.medicineNames.join(", "),
-    }));
+    const mapped = Array.from(grouped.values()).map((g) => {
+      const { rowStatuses: _rs, rowPaymentStatuses: _rp, ...rest } = g;
+      return {
+        ...rest,
+        medicineName: g.medicineNames.join(", "),
+      };
+    });
 
     res.status(200).json({ requests: mapped });
   } catch (error) {
@@ -139,20 +166,25 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
 
     if (mongoose.Types.ObjectId.isValid(requestId)) {
       const existing = await PatientMedicineRequest.findById(requestId).lean();
-      if (!existing) {
-        res.status(404).json({ message: "Medicine request not found" });
+      if (existing) {
+        if (body.paymentStatus === "PAID" && (existing as any).paymentStatus !== "PAID") {
+          update.paidAt = new Date();
+          if (!(existing as any).receiptNumber) {
+            const suffix = requestId.toString().slice(-6).toUpperCase();
+            update.receiptNumber = `MED-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+          }
+        }
+        const groupId = (existing as any).requestGroupId
+          ? String((existing as any).requestGroupId).trim()
+          : "";
+        if (groupId) {
+          await PatientMedicineRequest.updateMany({ requestGroupId: groupId }, { $set: update });
+        } else {
+          await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
+        }
+        res.status(200).json({ message: "Medicine request updated" });
         return;
       }
-      if (body.paymentStatus === "PAID" && existing && (existing as any).paymentStatus !== "PAID") {
-        update.paidAt = new Date();
-        if (!(existing as any).receiptNumber) {
-          const suffix = requestId.toString().slice(-6).toUpperCase();
-          update.receiptNumber = `MED-${suffix}-${Date.now().toString(36).toUpperCase()}`;
-        }
-      }
-      await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
-      res.status(200).json({ message: "Medicine request updated" });
-      return;
     }
 
     // grouped request id (requestGroupId): update all medicine rows in that batch together
@@ -177,7 +209,14 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       }
     }
 
-    await PatientMedicineRequest.updateMany({ requestGroupId: requestId }, { $set: update });
+    const medGroupResult = await PatientMedicineRequest.updateMany(
+      { requestGroupId: requestId },
+      { $set: update }
+    );
+    if (medGroupResult.matchedCount === 0) {
+      res.status(404).json({ message: "Medicine request not found" });
+      return;
+    }
     res.status(200).json({ message: "Medicine request group updated" });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -231,6 +270,8 @@ router.get("/test-requests", async (req, res) => {
           paymentMode: r.paymentMode,
           paymentStatus: r.paymentStatus,
           status: r.status,
+          rowStatuses: [r.status as OrderRequestStatus],
+          rowPaymentStatuses: [r.paymentStatus as "PENDING" | "PAID"],
           preferredDateTime: r.preferredDateTime,
           expectedFulfillmentMinutes: r.expectedFulfillmentMinutes,
           fulfilledAt: r.fulfilledAt,
@@ -243,13 +284,20 @@ router.get("/test-requests", async (req, res) => {
       } else {
         const g = grouped.get(key);
         if (testName && !g.testNames.includes(testName)) g.testNames.push(testName);
+        g.rowStatuses.push(r.status as OrderRequestStatus);
+        g.rowPaymentStatuses.push(r.paymentStatus as "PENDING" | "PAID");
+        g.status = aggregateGroupedOrderStatus(g.rowStatuses);
+        g.paymentStatus = aggregateGroupedPaymentStatus(g.rowPaymentStatuses);
       }
     }
 
-    const mapped = Array.from(grouped.values()).map((g) => ({
-      ...g,
-      testName: g.testNames.join(", "),
-    }));
+    const mapped = Array.from(grouped.values()).map((g) => {
+      const { rowStatuses: _rs, rowPaymentStatuses: _rp, ...rest } = g;
+      return {
+        ...rest,
+        testName: g.testNames.join(", "),
+      };
+    });
 
     res.status(200).json({ requests: mapped });
   } catch (error) {
@@ -287,36 +335,57 @@ router.patch("/test-requests/:requestId", async (req, res) => {
       return;
     }
 
-    if (mongoose.Types.ObjectId.isValid(requestId)) {
-      const existing = await PatientTestRequest.findById(requestId).lean();
-      if (body.paymentStatus === "PAID" && existing && (existing as any).paymentStatus !== "PAID") {
-        update.paidAt = new Date();
-        if (!(existing as any).receiptNumber) {
-          const suffix = requestId.toString().slice(-6).toUpperCase();
-          update.receiptNumber = `LAB-${suffix}-${Date.now().toString(36).toUpperCase()}`;
-        }
-      }
-      await PatientTestRequest.findByIdAndUpdate(requestId, { $set: update });
-      res.status(200).json({ message: "Test request updated" });
-      return;
-    }
-
-    // grouped request id (e.g. grp_xxx): update all test rows in that batch together
-    const groupRows = await PatientTestRequest.find({ requestGroupId: requestId }).select("_id paymentStatus").lean();
-    if (!groupRows.length) {
-      res.status(404).json({ message: "Test request group not found" });
-      return;
-    }
-
-    if (body.paymentStatus === "PAID") {
-      const anyNotPaid = groupRows.some((r: any) => r.paymentStatus !== "PAID");
+    const applyPaidFieldsForLabGroup = (groupKey: string, rows: Array<{ paymentStatus?: string }>) => {
+      if (body.paymentStatus !== "PAID") return;
+      const anyNotPaid = rows.some((r) => r.paymentStatus !== "PAID");
       if (anyNotPaid) {
         update.paidAt = new Date();
-        const suffix = requestId.replace(/^grp_/, "").slice(-6).toUpperCase();
+        const suffix = groupKey.replace(/^grp_/, "").slice(-6).toUpperCase();
         update.receiptNumber = `LAB-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+      }
+    };
+
+    if (mongoose.Types.ObjectId.isValid(requestId)) {
+      const existing = await PatientTestRequest.findById(requestId).lean();
+      if (existing) {
+        const groupId = (existing as any).requestGroupId
+          ? String((existing as any).requestGroupId).trim()
+          : "";
+        if (groupId) {
+          const groupRows = await PatientTestRequest.find({ requestGroupId: groupId })
+            .select("_id paymentStatus")
+            .lean();
+          applyPaidFieldsForLabGroup(groupId, groupRows as any[]);
+          const result = await PatientTestRequest.updateMany({ requestGroupId: groupId }, { $set: update });
+          if (result.matchedCount === 0) {
+            res.status(404).json({ message: "Test request group not found" });
+            return;
+          }
+        } else {
+          if (body.paymentStatus === "PAID" && (existing as any).paymentStatus !== "PAID") {
+            update.paidAt = new Date();
+            if (!(existing as any).receiptNumber) {
+              const suffix = requestId.toString().slice(-6).toUpperCase();
+              update.receiptNumber = `LAB-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+            }
+          }
+          await PatientTestRequest.findByIdAndUpdate(requestId, { $set: update });
+        }
+        res.status(200).json({ message: "Test request updated" });
+        return;
       }
     }
 
+    // Panel id is often requestGroupId (ObjectId string from bot/portal), not a document _id.
+    const groupRows = await PatientTestRequest.find({ requestGroupId: requestId })
+      .select("_id paymentStatus")
+      .lean();
+    if (!groupRows.length) {
+      res.status(404).json({ message: "Test request not found" });
+      return;
+    }
+
+    applyPaidFieldsForLabGroup(requestId, groupRows as any[]);
     await PatientTestRequest.updateMany({ requestGroupId: requestId }, { $set: update });
     res.status(200).json({ message: "Test request group updated" });
   } catch (error) {

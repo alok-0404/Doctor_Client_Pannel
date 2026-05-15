@@ -491,12 +491,18 @@ export const MedicineDashboard = () => {
         setIncomingRequests((prev) => prev.filter((request) => request.id !== r.id))
       }
       await loadIncomingRequests(true)
-    } catch {
+      if (patch.status === 'CANCELLED') {
+        hiddenRequestIdsRef.current.delete(r.id)
+        toast.success('Request cancelled.', { autoClose: 2500 })
+      }
+    } catch (err: unknown) {
       if (shouldHideImmediately) {
         hiddenRequestIdsRef.current.delete(r.id)
       }
       setIncomingRequests(previousRequests)
-      toast.error('Could not update request. Please try again.')
+      const e = err as { response?: { data?: { message?: string } } }
+      const msg = e?.response?.data?.message?.trim()
+      toast.error(msg || 'Could not update request. Please try again.')
     }
   }
 
