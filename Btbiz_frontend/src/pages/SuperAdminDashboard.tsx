@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 
 import { Header } from '../components/Header'
 import { Card } from '../components/ui/Card'
+import { DnaLoader } from '../components/ui/DnaLoader'
 import { authStorage } from '../utils/authStorage'
 import { authService, type SuperAdminListItem, type SuperAdminOverview } from '../services/api'
 
@@ -147,7 +148,11 @@ export const SuperAdminDashboard = () => {
             <p className="dashboard-body">Click any card to open details. Interface intentionally minimal to avoid confusion.</p>
           </Card>
 
-          {loading && <p className="dashboard-body" style={{ marginTop: 12 }}>Loading data…</p>}
+          {loading && (
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
+              <DnaLoader label="Loading data…" />
+            </div>
+          )}
           {error && <p className="dashboard-body" style={{ marginTop: 12, color: '#b91c1c' }}>{error}</p>}
 
           {!loading && !error && (

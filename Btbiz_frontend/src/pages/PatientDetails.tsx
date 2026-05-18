@@ -167,7 +167,7 @@ export const PatientDetails = () => {
       <div className="app-shell">
         <Header doctorName={doctorName} />
         <main className="details-main" style={{ padding: 24 }}>
-          <DnaLoader label="Loading patient profile..." size={52} />
+          <DnaLoader label="Loading patient profile..." size={36} />
         </main>
       </div>
     )

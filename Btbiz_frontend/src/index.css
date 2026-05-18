@@ -38,3 +38,18 @@
     color: #26a69a;
   }
 }
+
+@keyframes btbiz-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btbiz-spinner {
+  border-radius: 50%;
+  border-style: solid;
+  border-color: #e2e8f0;
+  border-top-color: #1e40af;
+  animation: btbiz-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}

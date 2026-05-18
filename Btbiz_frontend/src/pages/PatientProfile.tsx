@@ -303,6 +303,10 @@ export const PatientProfile = () => {
           window.location.replace('/patient-login')
           return
         }
+        if (e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message ?? '')) {
+          setError('Request timed out. Check your connection and try again.')
+          return
+        }
         if (!e?.response && (e?.code === 'ERR_NETWORK' || e?.message === 'Network Error')) {
           setError(
             'Server not reachable. Open a terminal in Btbiz_backend and run: npm run start (port 4000), then refresh this page.'
@@ -401,7 +405,7 @@ export const PatientProfile = () => {
     return (
       <div className="patient-profile">
         <div className="patient-profile-loading">
-          <DnaLoader label="Loading your profile..." size={56} />
+          <DnaLoader label="Loading your profile..." size={40} />
         </div>
         <style>{patientProfileStyles}</style>
       </div>

@@ -25,8 +25,12 @@ if (import.meta.env.PROD && !API_BASE_URL) {
   )
 }
 
+/** Fail fast instead of hanging on a stuck network / cold backend. */
+const API_TIMEOUT_MS = 20_000
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT_MS,
 })
 
 api.interceptors.request.use((config) => {
@@ -40,6 +44,7 @@ api.interceptors.request.use((config) => {
 /** API instance for patient portal – uses patient JWT */
 export const patientApi = axios.create({
   baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT_MS,
 })
 
 patientApi.interceptors.request.use((config) => {
