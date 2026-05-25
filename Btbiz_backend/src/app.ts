@@ -35,6 +35,19 @@ function isOriginAllowed(origin: string | undefined): boolean {
   return false;
 }
 
+/** GET /super-admin in the browser is the React route; API lives under /super-admin/overview, etc. */
+function isSuperAdminSpaPageRequest(req: express.Request): boolean {
+  if (req.method !== "GET") return false;
+  const subPath = req.path === "" ? "/" : req.path;
+  if (subPath !== "/") return false;
+
+  const accept = req.get("Accept") ?? "";
+  if (accept.includes("text/html")) return true;
+  if (req.get("Sec-Fetch-Dest") === "document") return true;
+
+  return false;
+}
+
 // Set CORS header early so it's on every response (including 500/errors)
 app.use((req, res, next) => {
   const origin = req.get("Origin");
@@ -104,7 +117,13 @@ app.use("/public", publicRoutes);
 app.use("/appointments", appointmentRoutes);
 app.use("/pharmacy", pharmacyRoutes);
 app.use("/orders", orderRoutes);
-app.use("/super-admin", superAdminRoutes);
+// Vite dev proxies /super-admin API but bypasses HTML to index.html; mirror that in production.
+app.use("/super-admin", (req, res, next) => {
+  if (isSuperAdminSpaPageRequest(req)) {
+    return next();
+  }
+  return superAdminRoutes(req, res, next);
+});
 
 if (process.env.NODE_ENV === "production") {
   const frontendDist = path.join(__dirname, "../../Btbiz_frontend/dist");
