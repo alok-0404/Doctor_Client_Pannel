@@ -3,6 +3,8 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 export type DoctorRole = "DOCTOR" | "ASSISTANT" | "LAB_ASSISTANT" | "LAB_MANAGER" | "PHARMACY";
 export type AvailabilityStatus = "available" | "unavailable" | "busy";
 
+export type TenantType = "CLINIC" | "PHARMACY" | "LAB";
+
 export interface IDoctor extends Document {
   name: string;
   email: string;
@@ -10,6 +12,9 @@ export interface IDoctor extends Document {
   passwordHash: string;
   role: DoctorRole;
   status: boolean;
+  /** Platform tenant this user belongs to (clinic / pharmacy / lab) */
+  tenantId?: string;
+  tenantType?: TenantType;
   /** Clinic/hospital location for distance calculation on booking */
   clinicLatitude?: number;
   clinicLongitude?: number;
@@ -44,6 +49,11 @@ const DoctorSchema = new Schema<IDoctor>(
       type: Boolean,
       default: false,
       required: true
+    },
+    tenantId: { type: String, index: true },
+    tenantType: {
+      type: String,
+      enum: ["CLINIC", "PHARMACY", "LAB"],
     },
     clinicLatitude: { type: Number },
     clinicLongitude: { type: Number },

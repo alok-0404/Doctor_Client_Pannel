@@ -13,6 +13,10 @@ import { PatientTestRequest } from "../models/PatientTestRequest";
 import { Patient } from "../models/Patient";
 import { Doctor } from "../models/Doctor";
 import { authenticatePatient } from "../middleware/authMiddleware";
+import {
+  isProviderSelectableForPatient,
+  listPatientSelectableProviders,
+} from "../services/patientProviderService";
 import ocrService from "../ocrService";
 import { getFullPatientHistory } from "../services/patientService";
 import {
@@ -28,6 +32,7 @@ import {
 
 const router = Router();
 const uploadDir = getUploadsRootDir();
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -264,7 +269,7 @@ router.get("/profile", authenticatePatient, async (req: Request, res: Response):
 });
 
 // GET /public/patient/providers?kind=pharmacy|lab&lat=&lng=
-// Returns available tied-up providers for patient selection.
+// Returns all active pharmacies/labs for patient selection (Super Admin tenants + self-signup).
 router.get(
   "/providers",
   authenticatePatient,
@@ -284,17 +289,9 @@ router.get(
         !Number.isNaN(lat) &&
         !Number.isNaN(lng);
 
-      const roles = kind === "pharmacy" ? ["PHARMACY"] : ["LAB_MANAGER"];
+      const providers = await listPatientSelectableProviders(kind);
 
-      const providers = await Doctor.find({
-        role: { $in: roles },
-        status: true,
-        createdByDoctorId: { $exists: true, $ne: null },
-      })
-        .select("_id name role clinicLatitude clinicLongitude clinicAddress")
-        .lean();
-
-      const mapped = providers.map((p: any) => {
+      const mapped = providers.map((p) => {
         const providerLat =
           typeof p.clinicLatitude === "number" ? p.clinicLatitude : undefined;
         const providerLng =
@@ -512,11 +509,8 @@ router.post(
           res.status(400).json({ message: "Invalid preferredProviderId" });
           return;
         }
-        const provider = await Doctor.findById(preferredProviderId)
-          .select("role status createdByDoctorId")
-          .lean();
-        const isTieUp = !!(provider as any)?.createdByDoctorId;
-        if (!provider || provider.role !== "PHARMACY" || provider.status !== true || !isTieUp) {
+        const ok = await isProviderSelectableForPatient(preferredProviderId, "pharmacy");
+        if (!ok) {
           res.status(400).json({ message: "Selected pharmacy is not available" });
           return;
         }
@@ -680,12 +674,8 @@ router.post(
           res.status(400).json({ message: "Invalid preferredProviderId" });
           return;
         }
-        const provider = await Doctor.findById(preferredProviderId)
-          .select("role status createdByDoctorId")
-          .lean();
-        const isLabRole = provider?.role === "LAB_MANAGER";
-        const isTieUp = !!(provider as any)?.createdByDoctorId;
-        if (!provider || !isLabRole || provider.status !== true || !isTieUp) {
+        const ok = await isProviderSelectableForPatient(preferredProviderId, "lab");
+        if (!ok) {
           res.status(400).json({ message: "Selected lab is not available" });
           return;
         }

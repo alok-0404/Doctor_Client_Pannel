@@ -77,3 +77,25 @@
 .medigraph-toastify-toast .Toastify__close-button:hover {
   color: #0f172a;
 }
+
+/* Center confirm dialogs (delete, etc.) */
+.medigraph-toastify-confirm.Toastify__toast {
+  min-width: 280px;
+  padding: 16px 18px !important;
+}
+
+.medigraph-toastify-confirm .medigraph-toast-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.medigraph-toastify-confirm .medigraph-toast-confirm-message {
+  margin: 0 0 14px;
+  font-weight: 600;
+  font-size: 15px;
+  color: #0f172a;
+  text-align: center;
+}

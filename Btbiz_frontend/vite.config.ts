@@ -24,7 +24,16 @@ export default defineConfig(({ mode }) => {
         '/orders': toApi,
         '/pharmacy': toApi,
         '/notifications': toApi,
-        '/super-admin': toApi,
+        // API only — browser page /super-admin must stay on Vite (React route).
+        '/super-admin': {
+          ...toApi,
+          bypass(req) {
+            const accept = req.headers.accept ?? ''
+            if (req.method === 'GET' && accept.includes('text/html')) {
+              return '/index.html'
+            }
+          },
+        },
         '/socket.io': { target: apiTarget, changeOrigin: true, ws: true },
       },
     },

@@ -157,6 +157,47 @@ export interface SuperAdminOverview {
   }
 }
 
+export type SuperAdminTenantType = 'PHARMACY' | 'LAB' | 'CLINIC'
+
+export interface SuperAdminTenant {
+  id: string
+  tenantType: SuperAdminTenantType
+  name: string
+  slug: string
+  status: string
+  phone?: string
+  ownerUserId?: string
+  ownerEmail?: string
+  ownerName?: string
+  createdAt: string
+}
+
+export interface CreateSuperAdminTenantPayload {
+  tenantType: 'PHARMACY' | 'LAB'
+  name: string
+  slug?: string
+  email: string
+  password: string
+  phone: string
+}
+
+export interface UpdateSuperAdminTenantPayload {
+  name?: string
+  slug?: string
+  email?: string
+  password?: string
+  phone?: string
+  status?: 'ACTIVE' | 'SUSPENDED' | 'TRIAL'
+}
+
+export interface UpdateSuperAdminLegacyPartnerPayload {
+  name?: string
+  email?: string
+  password?: string
+  phone?: string
+  status?: boolean
+}
+
 export const authService = {
   async login(payload: DoctorLoginPayload): Promise<DoctorLoginResponse> {
     const res = await api.post('/auth/doctor/login', payload)
@@ -310,6 +351,50 @@ export const authService = {
   async getSuperAdminOverview(): Promise<SuperAdminOverview> {
     const res = await api.get('/super-admin/overview')
     return res.data as SuperAdminOverview
+  },
+
+  async getSuperAdminTenants(type?: SuperAdminTenantType): Promise<SuperAdminTenant[]> {
+    const res = await api.get('/super-admin/tenants', {
+      params: type ? { type } : undefined,
+    })
+    return (res.data as { tenants: SuperAdminTenant[] }).tenants
+  },
+
+  async createSuperAdminTenant(
+    payload: CreateSuperAdminTenantPayload
+  ): Promise<{ tenant: SuperAdminTenant; owner: { id: string; email: string; role: string } }> {
+    const res = await api.post('/super-admin/tenants', payload)
+    return res.data
+  },
+
+  async updateSuperAdminTenantStatus(
+    tenantId: string,
+    status: 'ACTIVE' | 'SUSPENDED' | 'TRIAL'
+  ): Promise<void> {
+    await api.patch(`/super-admin/tenants/${tenantId}/status`, { status })
+  },
+
+  async updateSuperAdminTenant(
+    tenantId: string,
+    payload: UpdateSuperAdminTenantPayload
+  ): Promise<SuperAdminTenant> {
+    const res = await api.patch(`/super-admin/tenants/${tenantId}`, payload)
+    return (res.data as { tenant: SuperAdminTenant }).tenant
+  },
+
+  async deleteSuperAdminTenant(tenantId: string): Promise<void> {
+    await api.delete(`/super-admin/tenants/${tenantId}`)
+  },
+
+  async updateSuperAdminLegacyPartner(
+    doctorId: string,
+    payload: UpdateSuperAdminLegacyPartnerPayload
+  ): Promise<void> {
+    await api.patch(`/super-admin/partners/${doctorId}`, payload)
+  },
+
+  async deleteSuperAdminLegacyPartner(doctorId: string): Promise<void> {
+    await api.delete(`/super-admin/partners/${doctorId}`)
   },
 }
 
