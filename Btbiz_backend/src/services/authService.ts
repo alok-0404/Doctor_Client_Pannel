@@ -24,7 +24,7 @@ export interface StartResetPayload {
 
 export interface CompleteResetPayload {
   phone: string;
-  otp: string;
+  otp?: string;
   newPassword: string;
 }
 
@@ -84,7 +84,8 @@ export const registerDoctor = async (
     phone: normalizedPhone,
     passwordHash,
     role: "DOCTOR",
-    status: false
+    status: false,
+    approvalStatus: "PENDING"
   });
 
   const token = generateDoctorToken(doctor);
@@ -103,26 +104,39 @@ export const registerDoctor = async (
 export const loginDoctor = async (
   payload: LoginPayload
 ): Promise<AuthTokenResponse> => {
-  const { email, password } = payload;
+  const email = payload.email.trim().toLowerCase();
+  const password = payload.password;
 
-  const doctor = await Doctor.findOne({ email });
-  if (!doctor) {
+  // Bypass tenant plugin — login must work regardless of stale JWT / tenant context.
+  const raw = await Doctor.collection.findOne({ email });
+  if (!raw?.passwordHash) {
     // eslint-disable-next-line no-console
     console.error("loginDoctor: doctor not found for email", email);
     throw new Error("INVALID_CREDENTIALS");
   }
 
-  const isPasswordValid = await bcrypt.compare(password, doctor.passwordHash);
+  const doctor = Doctor.hydrate(raw) as IDoctor;
+
+  const isPasswordValid = await bcrypt.compare(password, raw.passwordHash as string);
   if (!isPasswordValid) {
     // eslint-disable-next-line no-console
     console.error("loginDoctor: invalid password for email", email);
     throw new Error("INVALID_CREDENTIALS");
   }
 
-  // Mark doctor as logged in
+  if (doctor.role === "DOCTOR" && doctor.approvalStatus !== "APPROVED") {
+    throw new Error(
+      doctor.approvalStatus === "REJECTED" ? "ACCOUNT_REJECTED" : "ACCOUNT_PENDING_APPROVAL"
+    );
+  }
+
+  // Mark doctor as logged in (direct update — avoid tenant-scoped save side effects)
   if (!doctor.status) {
+    await Doctor.collection.updateOne(
+      { _id: doctor._id },
+      { $set: { status: true } }
+    );
     doctor.status = true;
-    await doctor.save();
   }
 
   const token = generateDoctorToken(doctor);
@@ -233,10 +247,16 @@ export const registerPharmacy = async (
 };
 
 export const generateDoctorToken = (doctor: IDoctor): string => {
-  const payload = {
+  const payload: Record<string, string> = {
     doctorId: doctor._id.toString(),
-    role: doctor.role as DoctorRole
+    role: doctor.role as DoctorRole,
   };
+  if (doctor.tenantId?.trim()) {
+    payload.tenantId = doctor.tenantId.trim();
+  }
+  if (doctor.tenantType) {
+    payload.tenantType = doctor.tenantType;
+  }
 
   return jwt.sign(payload, env.jwt.secret, {
     expiresIn: env.jwt.expiresIn as "1h" | "7d" | "24h"
@@ -254,7 +274,8 @@ export const startDoctorPasswordReset = async (
     return;
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Temporary OTP bypass mode until SMS/Email OTP provider is integrated.
+  const otp = "123456";
   const otpHash = await bcrypt.hash(otp, 10);
   const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
@@ -262,13 +283,17 @@ export const startDoctorPasswordReset = async (
   doctor.resetOtpExpiresAt = expires;
   await doctor.save();
 
-  await sendOtpToWhatsapp(normalizedPhone, otp);
+  try {
+    await sendOtpToWhatsapp(normalizedPhone, otp);
+  } catch {
+    // OTP infra is not fully integrated yet; keep forgot-password usable.
+  }
 };
 
 export const completeDoctorPasswordReset = async (
   payload: CompleteResetPayload
 ): Promise<void> => {
-  const { otp, newPassword } = payload;
+  const { newPassword } = payload;
   const normalizedPhone = normalizeIndianPhone(payload.phone);
 
   const doctor = await Doctor.findOne({ phone: normalizedPhone });
@@ -281,9 +306,13 @@ export const completeDoctorPasswordReset = async (
     throw new Error("INVALID_OR_EXPIRED_OTP");
   }
 
-  const matches = await bcrypt.compare(otp, doctor.resetOtpHash);
-  if (!matches) {
-    throw new Error("INVALID_OR_EXPIRED_OTP");
+  const providedOtp = payload.otp?.trim() ?? "";
+  const isBypassOtp = providedOtp === "" || providedOtp === "123456";
+  if (!isBypassOtp) {
+    const matches = await bcrypt.compare(providedOtp, doctor.resetOtpHash);
+    if (!matches) {
+      throw new Error("INVALID_OR_EXPIRED_OTP");
+    }
   }
 
   const saltRounds = 10;
@@ -406,5 +435,19 @@ export const listLabAssistants = async (
     })
   );
   return withCreator;
+};
+
+export const deleteLabAssistant = async (
+  labAssistantId: string,
+  createdByDoctorId: string
+): Promise<void> => {
+  const deleted = await Doctor.findOneAndDelete({
+    _id: new mongoose.Types.ObjectId(labAssistantId),
+    role: "LAB_ASSISTANT",
+    createdByDoctorId: new mongoose.Types.ObjectId(createdByDoctorId)
+  }).lean();
+  if (!deleted) {
+    throw new Error("LAB_ASSISTANT_NOT_FOUND");
+  }
 };
 

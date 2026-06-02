@@ -14,6 +14,7 @@ import {
   createAssistantAccount,
   listAssistants,
   createLabAssistantAccount,
+  deleteLabAssistantAccount,
   listLabAssistants,
   updateDoctorAvailability,
   updateDoctorAppointmentLimits,
@@ -62,6 +63,13 @@ router.post(
   "/lab-assistant",
   authenticateDoctor,
   createLabAssistantAccount
+);
+
+// DELETE /auth/lab-assistant/:assistantId (lab-manager only) - delete lab assistant created by manager
+router.delete(
+  "/lab-assistant/:assistantId",
+  authenticateDoctor,
+  deleteLabAssistantAccount
 );
 
 // GET /auth/lab-assistants (doctor-only) - list lab assistants created by this doctor

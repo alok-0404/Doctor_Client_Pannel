@@ -1,9 +1,12 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export type DoctorRole = "DOCTOR" | "ASSISTANT" | "LAB_ASSISTANT" | "LAB_MANAGER" | "PHARMACY";
 export type AvailabilityStatus = "available" | "unavailable" | "busy";
 
 export type TenantType = "CLINIC" | "PHARMACY" | "LAB";
+export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export interface IDoctor extends Document {
   name: string;
@@ -25,6 +28,7 @@ export interface IDoctor extends Document {
   unavailableUntil?: Date;
   resetOtpHash?: string;
   resetOtpExpiresAt?: Date;
+  approvalStatus?: ApprovalStatus;
   /** Max portal/online bookings per calendar day (IST); unset or ≤0 = unlimited */
   dailyOnlineAppointmentLimit?: number;
   /** Max walk-in / clinic-registered visits per calendar day (IST); unset or ≤0 = unlimited */
@@ -75,11 +79,21 @@ const DoctorSchema = new Schema<IDoctor>(
     resetOtpExpiresAt: {
       type: Date
     },
+    approvalStatus: {
+      type: String,
+      enum: ["PENDING", "APPROVED", "REJECTED"],
+      default: "APPROVED",
+      required: true
+    },
     dailyOnlineAppointmentLimit: { type: Number, min: 0 },
     dailyWalkInAppointmentLimit: { type: Number, min: 0 }
   },
   { timestamps: true }
 );
+
+DoctorSchema.plugin(tenantPlugin);
+DoctorSchema.index({ tenantId: 1, role: 1 });
+DoctorSchema.index({ tenantId: 1, email: 1 });
 
 export const Doctor = mongoose.model<IDoctor>("Doctor", DoctorSchema);
 

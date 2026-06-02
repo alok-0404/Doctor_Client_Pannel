@@ -1,5 +1,14 @@
 import { Link } from 'react-router-dom'
 
+type LandingRole = {
+  title: string
+  description: string
+  path: string
+  cta: string
+  registerPath: string | null
+  registerHint?: string
+}
+
 const socialLinks = [
   { name: 'Facebook', href: 'https://facebook.com', icon: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953h-1.513c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z' },
   { name: 'Instagram', href: 'https://instagram.com', icon: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.14 2.811 1.025 2.811 2.865v6.319c0 1.84-.967 2.81-2.81 2.81H2.81C.967 14.219 0 13.25 0 11.41V5.091C0 3.25.967 2.282 2.81 2.282h6.319c.537 0 1.021.005 1.507.022V2.163zM12 0C8.741 0 8.333.014 7.053.072 2.695.272 2.258.667 2.258 2.157v6.686c0 1.49.764 2.258 2.258 2.258h6.686c1.494 0 2.258-.768 2.258-2.258V2.157C18.258.668 17.837.272 13.947.072 12.667.014 12.259 0 12 0zm0 5.838a3.162 3.162 0 100 6.324 3.162 3.162 0 000-6.324zM12 9a3 3 0 110 6 3 3 0 010-6zm4.5 1.5a.75.75 0 110 1.5.75.75 0 010-1.5z' },
@@ -7,11 +16,33 @@ const socialLinks = [
   { name: 'Twitter', href: 'https://twitter.com', icon: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z' },
 ]
 
-const roles = [
-  { title: 'Doctor', description: 'Manage patients, prescriptions and view diagnostic reports.', path: '/login', cta: 'Login as Doctor', registerPath: '/register' },
-  { title: 'Lab Manager', description: 'Register your lab, then add and manage lab assistants.', path: '/login', cta: 'Login as Lab Manager', registerPath: '/register-lab-manager' },
+const roles: LandingRole[] = [
+  {
+    title: 'Doctor',
+    description: 'Manage patients, prescriptions and view diagnostic reports.',
+    path: '/login',
+    cta: 'Login as Doctor',
+    registerPath: '/register',
+    registerHint: 'Self-registration requires Super Admin approval before account activation.',
+  },
+  {
+    title: 'Lab Manager',
+    description:
+      'Run your lab: patient search, tests, and orders.',
+    path: '/login',
+    cta: 'Login as Lab Manager',
+    registerPath: '/register-lab-manager',
+    
+  },
   { title: 'Assistant / Lab', description: 'Check-in patients, upload documents, or record lab tests.', path: '/login', cta: 'Login as Assistant / Lab', registerPath: null },
-  { title: 'Medicine', description: 'Dispense medicines to patients. Search by mobile, and generate receipt.', path: '/login', cta: 'Login as Medicine', registerPath: '/register-medicine' },
+  {
+    title: 'Pharmacy',
+    description:
+      'Dispense medicines, search patients by mobile, and manage orders.',
+    path: '/login',
+    cta: 'Login as Medicine',
+    registerPath: '/register-medicine',
+  },
   { title: 'Super Admin', description: 'Platform-level dashboard for users and system overview.', path: '/login?role=super-admin', cta: 'Login as Super Admin', registerPath: null },
 ]
 
@@ -40,9 +71,14 @@ export const Landing = () => {
                     {r.cta}
                   </Link>
                   {r.registerPath && (
-                    <Link to={r.registerPath} className="landing-register-link">
-                      Register
-                    </Link>
+                    <>
+                      <Link to={r.registerPath} className="landing-register-link">
+                        Register (self-signup)
+                      </Link>
+                      {r.registerHint && (
+                        <p className="landing-role-register-hint">{r.registerHint}</p>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -147,6 +183,12 @@ export const Landing = () => {
         }
         .landing-register-link:hover {
           color: #26a69a;
+        }
+        .landing-role-register-hint {
+          font-size: 0.75rem;
+          color: #829ab1;
+          margin: 0;
+          line-height: 1.35;
         }
         .landing-footer {
           padding: 24px 24px 32px;

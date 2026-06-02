@@ -380,11 +380,41 @@ body {
   justify-content: center;
 }
 
-.login-brand {
+.login-brand-row {
   margin-bottom: 20px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.login-home-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: var(--med-blue-dark);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.login-home-button:hover {
+  background: #f8fafc;
+  border-color: var(--med-blue-dark);
+  color: #0b3a85;
 }
 
 .login-logo-pill {

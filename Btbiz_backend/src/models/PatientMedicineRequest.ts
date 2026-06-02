@@ -25,6 +25,10 @@ export interface IPatientMedicineRequest {
   totalDiscount?: number;
   totalAmount?: number;
   paidAmount?: number;
+  /** Pharmacy-marked substitute medicine details (no patient approval flow). */
+  isSubstitute?: boolean;
+  substituteMedicineName?: string;
+  substituteNotes?: string;
   createdAt: Date;
 }
 
@@ -79,6 +83,9 @@ const PatientMedicineRequestSchema = new Schema<IPatientMedicineRequest>(
     totalDiscount: { type: Number },
     totalAmount: { type: Number },
     paidAmount: { type: Number },
+    isSubstitute: { type: Boolean, default: false },
+    substituteMedicineName: { type: String },
+    substituteNotes: { type: String },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

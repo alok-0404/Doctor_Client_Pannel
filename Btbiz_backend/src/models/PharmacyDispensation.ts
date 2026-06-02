@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export interface IPharmacyDispensationItem {
   medicineName: string;
   mrp: number;
@@ -52,6 +54,9 @@ const PharmacyDispensationSchema = new Schema<IPharmacyDispensation>(
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+PharmacyDispensationSchema.plugin(tenantPlugin);
+PharmacyDispensationSchema.index({ tenantId: 1, dispensedBy: 1, createdAt: -1 });
 
 export const PharmacyDispensation = mongoose.model<IPharmacyDispensation>(
   "PharmacyDispensation",

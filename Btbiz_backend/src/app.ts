@@ -14,6 +14,7 @@ import appointmentRoutes from "./routes/appointmentRoutes";
 import pharmacyRoutes from "./routes/pharmacyRoutes";
 import superAdminRoutes from "./routes/superAdminRoutes";
 import orderRoutes from "./routes/orderRoutes";
+import { tenantMiddleware } from "./tenant";
 
 const app = express();
 
@@ -101,6 +102,10 @@ app.use(
 );
 app.use(express.json());
 app.use(morgan("dev"));
+// Multi-tenant context (soft mode by default — see TENANT_ENFORCE in env).
+app.use((req, res, next) => {
+  void tenantMiddleware(req, res, next);
+});
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });

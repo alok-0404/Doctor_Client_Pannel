@@ -1,4 +1,5 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 
 import { Doctor } from "../models/Doctor";
 import { DiagnosticTest } from "../models/DiagnosticTest";
@@ -12,6 +13,7 @@ import {
   updateLegacyPartner,
   updatePartnerTenant,
 } from "../services/tenantService";
+import { geocodeAllPartnersMissingCoords } from "../services/providerLocationService";
 
 const router = Router();
 
@@ -21,7 +23,7 @@ router.use(authenticateSuperAdmin);
 router.get("/overview", async (_req, res) => {
   try {
     const users = await Doctor.find({})
-      .select("name email phone role status createdAt")
+      .select("name email phone role status approvalStatus createdAt")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -30,6 +32,7 @@ router.get("/overview", async (_req, res) => {
     const labAssistants = users.filter((u: any) => u.role === "LAB_ASSISTANT");
     const pharmacies = users.filter((u: any) => u.role === "PHARMACY");
     const labs = users.filter((u: any) => u.role === "LAB_MANAGER");
+    const pendingDoctorApprovals = doctors.filter((u: any) => (u.approvalStatus ?? "APPROVED") === "PENDING");
     const diagnosticsCount = await DiagnosticTest.countDocuments();
 
     const toListItem = (u: any) => ({
@@ -38,6 +41,7 @@ router.get("/overview", async (_req, res) => {
       email: u.email,
       phone: u.phone,
       status: Boolean(u.status),
+      approvalStatus: u.approvalStatus ?? "APPROVED",
       createdAt: u.createdAt
     });
 
@@ -48,7 +52,8 @@ router.get("/overview", async (_req, res) => {
         labAssistants: labAssistants.length,
         pharmacies: pharmacies.length,
         labs: labs.length,
-        diagnostics: diagnosticsCount
+        diagnostics: diagnosticsCount,
+        pendingDoctorApprovals: pendingDoctorApprovals.length
       },
       lists: {
         doctors: doctors.map(toListItem),
@@ -61,6 +66,60 @@ router.get("/overview", async (_req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("super-admin/overview error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /super-admin/doctors/:doctorId/approval
+router.patch("/doctors/:doctorId/approval", async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+
+    const { approvalStatus } = req.body ?? {};
+    if (approvalStatus !== "APPROVED" && approvalStatus !== "REJECTED") {
+      res.status(400).json({ message: "approvalStatus must be APPROVED or REJECTED" });
+      return;
+    }
+
+    const doctor = await Doctor.findById(req.params.doctorId).select("_id role").lean();
+    if (!doctor || doctor.role !== "DOCTOR") {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+
+    await Doctor.findByIdAndUpdate(req.params.doctorId, {
+      approvalStatus
+    });
+    res.status(200).json({ message: `Doctor ${approvalStatus.toLowerCase()} successfully` });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("super-admin/doctors approval PATCH error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /super-admin/geocode-partners?kind=pharmacy|lab|all — fill missing map pins for km distance
+router.post("/geocode-partners", async (req, res) => {
+  try {
+    const raw = String(req.query.kind ?? "all").toLowerCase();
+    const results: Array<{ kind: string; updated: number; failed: number }> = [];
+    if (raw === "pharmacy" || raw === "all") {
+      results.push({ kind: "pharmacy", ...(await geocodeAllPartnersMissingCoords("pharmacy")) });
+    }
+    if (raw === "lab" || raw === "all") {
+      results.push({ kind: "lab", ...(await geocodeAllPartnersMissingCoords("lab")) });
+    }
+    if (results.length === 0) {
+      res.status(400).json({ message: "kind must be pharmacy, lab, or all" });
+      return;
+    }
+    res.status(200).json({ results });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("super-admin/geocode-partners error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -126,7 +185,7 @@ router.post("/tenants", async (req, res) => {
 // PATCH /super-admin/tenants/:id — update tenant + owner
 router.patch("/tenants/:id", async (req, res) => {
   try {
-    const { name, slug, email, password, phone, status } = req.body ?? {};
+    const { name, slug, email, password, phone, status, address } = req.body ?? {};
     if (
       status &&
       status !== "ACTIVE" &&
@@ -148,6 +207,7 @@ router.patch("/tenants/:id", async (req, res) => {
       password: password ? String(password) : undefined,
       phone: phone ? String(phone) : undefined,
       status,
+      address,
     });
 
     res.status(200).json({ tenant });

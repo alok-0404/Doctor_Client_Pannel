@@ -2,6 +2,10 @@ import bcrypt from "bcrypt";
 
 import { Doctor, type DoctorRole } from "../models/Doctor";
 import { Tenant, type TenantType } from "../models/Tenant";
+import {
+  buildProviderLocationQuery,
+  geocodeAddressWithFallbacks,
+} from "./geocodeService";
 
 export interface CreatePartnerTenantPayload {
   tenantType: "PHARMACY" | "LAB";
@@ -68,6 +72,19 @@ export const createPartnerTenant = async (
 
   let ownerId: string | null = null;
   try {
+    const locationQuery = buildProviderLocationQuery(address, undefined, name.trim());
+    let clinicLatitude: number | undefined;
+    let clinicLongitude: number | undefined;
+    let clinicAddress: string | undefined;
+    if (locationQuery) {
+      const coords = await geocodeAddressWithFallbacks(locationQuery, name.trim());
+      if (coords) {
+        clinicLatitude = coords.lat;
+        clinicLongitude = coords.lng;
+        clinicAddress = locationQuery.replace(/, India$/i, "");
+      }
+    }
+
     const owner = await Doctor.create({
       name: name.trim(),
       email: email.trim().toLowerCase(),
@@ -77,6 +94,9 @@ export const createPartnerTenant = async (
       status: true,
       tenantId,
       tenantType,
+      ...(clinicLatitude != null && { clinicLatitude }),
+      ...(clinicLongitude != null && { clinicLongitude }),
+      ...(clinicAddress && { clinicAddress }),
     });
     ownerId = owner._id.toString();
 
@@ -144,6 +164,12 @@ export interface UpdatePartnerTenantPayload {
   phone?: string;
   password?: string;
   status?: "ACTIVE" | "SUSPENDED" | "TRIAL";
+  address?: {
+    line1?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+  };
 }
 
 export const updatePartnerTenant = async (
@@ -169,6 +195,9 @@ export const updatePartnerTenant = async (
   }
   if (payload.status) {
     updates.status = payload.status;
+  }
+  if (payload.address) {
+    updates.address = payload.address;
   }
 
   let normalizedPhone: string | undefined;
@@ -204,6 +233,26 @@ export const updatePartnerTenant = async (
     }
     if (Object.keys(ownerUpdates).length > 0) {
       await Doctor.findByIdAndUpdate(tenant.ownerUserId, ownerUpdates);
+    }
+
+    if (payload.address && tenant.ownerUserId) {
+      const displayName =
+        (typeof updates.name === "string" ? updates.name : tenant.name) || tenant.name;
+      const locationQuery = buildProviderLocationQuery(
+        payload.address,
+        undefined,
+        displayName
+      );
+      if (locationQuery) {
+        const coords = await geocodeAddressWithFallbacks(locationQuery, displayName);
+        if (coords) {
+          await Doctor.findByIdAndUpdate(tenant.ownerUserId, {
+            clinicLatitude: coords.lat,
+            clinicLongitude: coords.lng,
+            clinicAddress: locationQuery.replace(/, India$/i, ""),
+          });
+        }
+      }
     }
   }
 

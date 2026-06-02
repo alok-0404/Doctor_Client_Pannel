@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
 import { PatientId } from "./Patient";
 
 export interface IPatientDocument extends Document {
@@ -66,6 +67,9 @@ const PatientDocumentSchema = new Schema<IPatientDocument>(
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+PatientDocumentSchema.plugin(tenantPlugin);
+PatientDocumentSchema.index({ tenantId: 1, patient: 1 });
 
 export const PatientDocument = mongoose.model<IPatientDocument>(
   "PatientDocument",

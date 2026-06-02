@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
+import { ClinicLocationSetup } from '../components/ClinicLocationSetup'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
@@ -7,6 +9,7 @@ import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { authService, type AssistantSummary } from '../services/api'
 
 export const LabManagerDashboard = () => {
+  const navigate = useNavigate()
   const name = authStorage.getName() ?? 'Lab Manager'
 
   const [showAddLabAssistant, setShowAddLabAssistant] = useState(false)
@@ -20,6 +23,7 @@ export const LabManagerDashboard = () => {
   const [labSuccess, setLabSuccess] = useState<string | null>(null)
   const [labAssistants, setLabAssistants] = useState<AssistantSummary[]>([])
   const [labAssistantsOpen, setLabAssistantsOpen] = useState(true)
+  const [deletingAssistantId, setDeletingAssistantId] = useState<string | null>(null)
 
   const loadLabAssistants = async () => {
     try {
@@ -71,17 +75,57 @@ export const LabManagerDashboard = () => {
     }
   }
 
+  const handleDeleteLabAssistant = async (assistantId: string) => {
+    try {
+      setDeletingAssistantId(assistantId)
+      await authService.deleteLabAssistant(assistantId)
+      setLabSuccess('Lab assistant deleted successfully.')
+      await loadLabAssistants()
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? 'Unable to delete lab assistant.'
+      setLabError(msg)
+    } finally {
+      setDeletingAssistantId(null)
+    }
+  }
+
   return (
     <div className="app-shell">
       <Header doctorName={name} />
+      <div style={{ maxWidth: 640, margin: '12px auto 0', padding: '0 16px' }}>
+        <ClinicLocationSetup />
+      </div>
       <main className="dashboard-main">
         <section className="dashboard-left" style={{ maxWidth: 640 }}>
           <Card className="dashboard-overview-card">
             <p className="dashboard-kicker">Lab Manager panel</p>
             <h2 className="dashboard-heading">Good day, {name}</h2>
-            <p className="dashboard-body">
-              Add and manage lab assistants. They can search patients by mobile and record diagnostic tests for visits.
+            <p
+              className="dashboard-body"
+              style={{
+                marginBottom: 12,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: '#ecfdf5',
+                color: '#065f46',
+                fontWeight: 500,
+              }}
+            >
+              Your lab is already registered (Super Admin onboarding). You are logged in as the lab owner — no need to
+              Register again on the home page.
             </p>
+            <p className="dashboard-body">
+              Open the lab workspace to search patients, record tests, and handle incoming orders — same as your lab
+              assistants. Optionally add assistants below so they can sign in under Assistant / Lab.
+            </p>
+            <button
+              type="button"
+              className="ui-button ui-button-primary"
+              style={{ marginTop: 8 }}
+              onClick={() => navigate('/lab')}
+            >
+              Open lab workspace
+            </button>
           </Card>
 
           <div style={{ marginTop: 16 }}>
@@ -118,7 +162,8 @@ export const LabManagerDashboard = () => {
                 <>
                   {labAssistants.length === 0 && (
                     <p className="dashboard-body" style={{ marginTop: 8 }}>
-                      No lab assistants yet. Add one below.
+                      No lab assistants yet (optional). You can work from the lab workspace yourself, or add assistants
+                      here for extra staff logins.
                     </p>
                   )}
                   {labAssistants.length > 0 && (
@@ -163,6 +208,16 @@ export const LabManagerDashboard = () => {
                                   })}
                                 </div>
                               )}
+                            </div>
+                            <div>
+                              <button
+                                type="button"
+                                className="ui-button ui-button-danger-outline ui-button-sm"
+                                disabled={deletingAssistantId === c.id}
+                                onClick={() => void handleDeleteLabAssistant(c.id)}
+                              >
+                                {deletingAssistantId === c.id ? 'Deleting…' : 'Delete'}
+                              </button>
                             </div>
                           </li>
                         ))}

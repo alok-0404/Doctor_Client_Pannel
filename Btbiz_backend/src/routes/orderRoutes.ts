@@ -75,6 +75,9 @@ router.get("/medicine-requests", async (req, res) => {
           paidAt: r.paidAt,
           preferredProviderId: r.preferredProvider?._id?.toString?.(),
           preferredProviderName: r.preferredProvider?.name,
+          isSubstitute: !!r.isSubstitute,
+          substituteMedicineName: r.substituteMedicineName,
+          substituteNotes: r.substituteNotes,
           createdAt: r.createdAt,
         });
       } else {
@@ -128,6 +131,9 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       totalDiscount?: number;
       totalAmount?: number;
       paidAmount?: number;
+      isSubstitute?: boolean;
+      substituteMedicineName?: string;
+      substituteNotes?: string;
     };
 
     const update: Record<string, unknown> = {};
@@ -154,6 +160,20 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
     }
     if (typeof body.paidAmount === "number" && body.paidAmount >= 0) {
       update.paidAmount = body.paidAmount;
+    }
+    if (typeof body.isSubstitute === "boolean") {
+      update.isSubstitute = body.isSubstitute;
+      if (!body.isSubstitute) {
+        update.substituteMedicineName = undefined;
+        update.substituteNotes = undefined;
+      }
+    }
+    if (typeof body.substituteMedicineName === "string") {
+      update.substituteMedicineName = body.substituteMedicineName.trim();
+      update.isSubstitute = body.substituteMedicineName.trim().length > 0;
+    }
+    if (typeof body.substituteNotes === "string") {
+      update.substituteNotes = body.substituteNotes.trim();
     }
     if (body.status === "COMPLETED") {
       update.fulfilledAt = new Date();

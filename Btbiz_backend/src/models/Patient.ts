@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export interface IPatient extends Document {
   firstName: string;
   lastName?: string;
@@ -43,6 +45,9 @@ const PatientSchema = new Schema<IPatient>(
   },
   { timestamps: true }
 );
+
+PatientSchema.plugin(tenantPlugin);
+PatientSchema.index({ tenantId: 1, mobileNumber: 1 });
 
 export const Patient = mongoose.model<IPatient>("Patient", PatientSchema);
 

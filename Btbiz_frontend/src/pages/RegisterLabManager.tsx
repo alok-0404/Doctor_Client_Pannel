@@ -5,6 +5,7 @@ import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { LoginHomeLink } from '../components/LoginHomeLink'
 
 export const RegisterLabManager = () => {
   const navigate = useNavigate()
@@ -44,7 +45,7 @@ export const RegisterLabManager = () => {
       setSuccess('Registration successful. Redirecting to your panel…')
       authStorage.set(result.token, result.doctorName, result.role)
       setTimeout(() => {
-        navigate('/lab-manager')
+        navigate('/lab')
       }, 600)
     } catch (err: any) {
       const msg =
@@ -59,8 +60,11 @@ export const RegisterLabManager = () => {
     <div className="page-center">
       <div className="ui-card login-layout">
         <div className="login-panel">
-          <div className="login-brand">
-            <span className="login-logo-pill">MEDIGRAPH</span>
+          <div className="login-brand-row">
+            <div className="login-brand">
+              <span className="login-logo-pill">MEDIGRAPH</span>
+            </div>
+            <LoginHomeLink />
           </div>
 
           <h1 className="login-heading">Lab Manager – Create account</h1>

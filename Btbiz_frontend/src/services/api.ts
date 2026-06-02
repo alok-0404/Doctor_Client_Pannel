@@ -136,6 +136,7 @@ export interface SuperAdminListItem {
   email: string
   phone: string
   status: boolean
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED'
   createdAt: string
 }
 
@@ -147,6 +148,7 @@ export interface SuperAdminOverview {
     pharmacies: number
     labs: number
     diagnostics: number
+    pendingDoctorApprovals: number
   }
   lists: {
     doctors: SuperAdminListItem[]
@@ -172,6 +174,13 @@ export interface SuperAdminTenant {
   createdAt: string
 }
 
+export interface TenantAddressPayload {
+  line1?: string
+  city?: string
+  state?: string
+  pincode?: string
+}
+
 export interface CreateSuperAdminTenantPayload {
   tenantType: 'PHARMACY' | 'LAB'
   name: string
@@ -179,6 +188,7 @@ export interface CreateSuperAdminTenantPayload {
   email: string
   password: string
   phone: string
+  address?: TenantAddressPayload
 }
 
 export interface UpdateSuperAdminTenantPayload {
@@ -188,6 +198,7 @@ export interface UpdateSuperAdminTenantPayload {
   password?: string
   phone?: string
   status?: 'ACTIVE' | 'SUSPENDED' | 'TRIAL'
+  address?: TenantAddressPayload
 }
 
 export interface UpdateSuperAdminLegacyPartnerPayload {
@@ -200,7 +211,11 @@ export interface UpdateSuperAdminLegacyPartnerPayload {
 
 export const authService = {
   async login(payload: DoctorLoginPayload): Promise<DoctorLoginResponse> {
-    const res = await api.post('/auth/doctor/login', payload)
+    // Do not send stale staff JWT — it can activate tenant filters on the server.
+    const res = await axios.post(`${API_BASE_URL}/auth/doctor/login`, payload, {
+      timeout: API_TIMEOUT_MS,
+      headers: { 'Content-Type': 'application/json' },
+    })
     const data = res.data as {
       accessToken: string
       doctor: { name: string; role: DoctorRole }
@@ -272,6 +287,13 @@ export const authService = {
     await api.post('/auth/doctor/password/reset', payload)
   },
 
+  async updateDoctorApproval(
+    doctorId: string,
+    approvalStatus: 'APPROVED' | 'REJECTED'
+  ): Promise<void> {
+    await api.patch(`/super-admin/doctors/${doctorId}/approval`, { approvalStatus })
+  },
+
   async createAssistant(payload: {
     name: string
     email: string
@@ -300,6 +322,10 @@ export const authService = {
     const res = await api.get('/auth/lab-assistants')
     const data = res.data as { labAssistants: AssistantSummary[] }
     return data.labAssistants
+  },
+
+  async deleteLabAssistant(assistantId: string): Promise<void> {
+    await api.delete(`/auth/lab-assistant/${assistantId}`)
   },
 
   async getProfile(): Promise<{
@@ -396,6 +422,16 @@ export const authService = {
   async deleteSuperAdminLegacyPartner(doctorId: string): Promise<void> {
     await api.delete(`/super-admin/partners/${doctorId}`)
   },
+
+  async geocodeSuperAdminPartners(
+    kind: 'pharmacy' | 'lab' | 'all' = 'all',
+  ): Promise<{ results: Array<{ kind: string; updated: number; failed: number }> }> {
+    const res = await api.post('/super-admin/geocode-partners', null, {
+      params: { kind },
+      timeout: 120_000,
+    })
+    return res.data as { results: Array<{ kind: string; updated: number; failed: number }> }
+  },
 }
 
 export interface DoctorNotificationItem {
@@ -455,6 +491,9 @@ export interface PharmacyOrderRequest {
   fulfilledAt?: string
   receiptNumber?: string
   paidAt?: string
+  isSubstitute?: boolean
+  substituteMedicineName?: string
+  substituteNotes?: string
   createdAt: string
 }
 
@@ -577,6 +616,9 @@ export const orderService = {
       totalDiscount: number
       totalAmount: number
       paidAmount: number
+      isSubstitute: boolean
+      substituteMedicineName: string
+      substituteNotes: string
     }>
   ): Promise<void> {
     await api.patch(`/orders/medicine-requests/${requestId}`, payload)
@@ -753,6 +795,9 @@ export interface FullPatientHistory {
     totalDiscount?: number
     totalAmount?: number
     paidAmount?: number
+    isSubstitute?: boolean
+    substituteMedicineName?: string
+    substituteNotes?: string
     preferredProviderId?: string
     preferredProviderName?: string
     preferredProviderAddress?: string
@@ -829,13 +874,20 @@ export const patientPortalService = {
     const res = await patientApi.post('/public/patient/tests', payload)
     return res.data as any
   },
-  async getServiceProviders(kind: 'pharmacy' | 'lab', lat?: number, lng?: number): Promise<ServiceProviderOption[]> {
+  async getServiceProviders(
+    kind: 'pharmacy' | 'lab',
+    lat?: number,
+    lng?: number,
+    patientAddress?: string,
+  ): Promise<ServiceProviderOption[]> {
     const res = await patientApi.get('/public/patient/providers', {
       params: {
         kind,
         ...(typeof lat === 'number' ? { lat } : {}),
         ...(typeof lng === 'number' ? { lng } : {}),
+        ...(patientAddress?.trim() ? { patientAddress: patientAddress.trim() } : {}),
       },
+      timeout: 60_000,
     })
     return ((res.data as any)?.providers ?? []) as ServiceProviderOption[]
   },

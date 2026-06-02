@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export type NotificationStatus = "unread" | "dismissed" | "read";
 export type NotificationSource = "ASSISTANT_REFERRAL" | "ONLINE_APPOINTMENT";
 
@@ -52,6 +54,9 @@ const DoctorNotificationSchema = new Schema<IDoctorNotification>(
   },
   { timestamps: true }
 );
+
+DoctorNotificationSchema.plugin(tenantPlugin);
+DoctorNotificationSchema.index({ tenantId: 1, doctor: 1, status: 1 });
 
 export const DoctorNotification = mongoose.model<IDoctorNotification>(
   "DoctorNotification",

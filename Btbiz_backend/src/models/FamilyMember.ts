@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
+
+import { tenantPlugin } from "../tenant/tenantPlugin";
 import { FamilyAccountId } from "./FamilyAccount";
 import { PatientId } from "./Patient";
 
@@ -77,6 +79,9 @@ const FamilyMemberSchema = new Schema<IFamilyMember>(
   },
   { timestamps: true }
 );
+
+FamilyMemberSchema.plugin(tenantPlugin);
+FamilyMemberSchema.index({ tenantId: 1, account: 1 });
 
 export const FamilyMember = mongoose.model<IFamilyMember>(
   "FamilyMember",

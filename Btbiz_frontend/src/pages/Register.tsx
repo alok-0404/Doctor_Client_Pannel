@@ -4,6 +4,7 @@ import { authService } from '../services/api'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { LoginHomeLink } from '../components/LoginHomeLink'
 
 export const Register = () => {
   const navigate = useNavigate()
@@ -35,7 +36,7 @@ export const Register = () => {
       setLoading(true)
       const normalizedPhone = `${countryCode}${phoneDigits}`
       await authService.register({ name, email, password, phone: normalizedPhone })
-      setSuccess('Registration successful. Redirecting to login…')
+      setSuccess('Registration request submitted. Super Admin approval ke baad hi login hoga. Redirecting to login…')
 
       setTimeout(() => {
         navigate('/login')
@@ -53,17 +54,18 @@ export const Register = () => {
     <div className="page-center">
       <div className="ui-card login-layout">
         <div className="login-panel">
-          <div className="login-brand">
-            <span className="login-logo-pill">
-              MEDIGRAPH
-            </span>
+          <div className="login-brand-row">
+            <div className="login-brand">
+              <span className="login-logo-pill">MEDIGRAPH</span>
+            </div>
+            <LoginHomeLink />
           </div>
 
           <h1 className="login-heading">
             Create account
           </h1>
           <p className="login-tagline">
-            Register a doctor profile to start using the workspace.
+            Register doctor profile. Account super admin approval ke baad activate hoga.
           </p>
 
           <form

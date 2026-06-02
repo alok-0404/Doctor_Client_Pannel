@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export interface IMedicine extends Document {
   name: string;
   dosage?: string;
@@ -16,6 +18,9 @@ const MedicineSchema = new Schema<IMedicine>(
   },
   { timestamps: false }
 );
+
+MedicineSchema.plugin(tenantPlugin);
+MedicineSchema.index({ tenantId: 1, name: 1 });
 
 export const Medicine = mongoose.model<IMedicine>("Medicine", MedicineSchema);
 

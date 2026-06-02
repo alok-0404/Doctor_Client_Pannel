@@ -6,6 +6,7 @@ import {
   completeDoctorPasswordReset,
   createAssistant,
   createLabAssistant,
+  deleteLabAssistant,
   listLabAssistants as listLabAssistantsService,
   loginDoctor,
   registerDoctor,
@@ -154,6 +155,14 @@ export const doctorLogin = async (req: Request, res: Response): Promise<void> =>
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
+    if (error instanceof Error && error.message === "ACCOUNT_PENDING_APPROVAL") {
+      res.status(403).json({ message: "Your account is pending super admin approval" });
+      return;
+    }
+    if (error instanceof Error && error.message === "ACCOUNT_REJECTED") {
+      res.status(403).json({ message: "Your account registration was rejected by super admin" });
+      return;
+    }
 
     // eslint-disable-next-line no-console
     console.error("doctorLogin error:", error);
@@ -208,10 +217,10 @@ export const completeDoctorForgotPassword = async (
       newPassword?: string;
     };
 
-    if (!phone || !otp || !newPassword) {
+    if (!phone || !newPassword) {
       res
         .status(400)
-        .json({ message: "Phone, OTP and new password are required" });
+        .json({ message: "Phone and new password are required" });
       return;
     }
 
@@ -349,12 +358,19 @@ export const updateDoctorClinic = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  if (!req.doctor || req.doctor.role !== "DOCTOR") {
-    res.status(403).json({ message: "Only doctors can update clinic location" });
+  const canSetLocation =
+    req.doctor &&
+    (req.doctor.role === "DOCTOR" ||
+      req.doctor.role === "PHARMACY" ||
+      req.doctor.role === "LAB_MANAGER");
+  if (!canSetLocation) {
+    res.status(403).json({
+      message: "Only clinic, pharmacy, or lab accounts can update shop location",
+    });
     return;
   }
   const body = req.body as { clinicLatitude?: number; clinicLongitude?: number; clinicAddress?: string };
-  await Doctor.findByIdAndUpdate(req.doctor._id, {
+  await Doctor.findByIdAndUpdate(req.doctor!._id, {
     ...(typeof body.clinicLatitude === "number" && { clinicLatitude: body.clinicLatitude }),
     ...(typeof body.clinicLongitude === "number" && { clinicLongitude: body.clinicLongitude }),
     ...(body.clinicAddress !== undefined && { clinicAddress: body.clinicAddress })
@@ -514,8 +530,8 @@ export const createLabAssistantAccount = async (
       return;
     }
 
-    if (req.doctor?.role !== "DOCTOR" && req.doctor?.role !== "LAB_MANAGER") {
-      res.status(403).json({ message: "Only doctors or lab managers can create lab assistants" });
+    if (req.doctor?.role !== "LAB_MANAGER") {
+      res.status(403).json({ message: "Only lab managers can create lab assistants" });
       return;
     }
 
@@ -556,8 +572,8 @@ export const listLabAssistants = async (
   res: Response
 ): Promise<void> => {
   try {
-    if (req.doctor?.role !== "DOCTOR" && req.doctor?.role !== "LAB_MANAGER") {
-      res.status(403).json({ message: "Only doctors or lab managers can list lab assistants" });
+    if (req.doctor?.role !== "LAB_MANAGER") {
+      res.status(403).json({ message: "Only lab managers can list lab assistants" });
       return;
     }
 
@@ -572,6 +588,34 @@ export const listLabAssistants = async (
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("listLabAssistants error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const deleteLabAssistantAccount = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.doctor?.role !== "LAB_MANAGER") {
+      res.status(403).json({ message: "Only lab managers can delete lab assistants" });
+      return;
+    }
+    const creatorId = req.doctor?._id?.toString();
+    if (!creatorId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    await deleteLabAssistant(req.params.assistantId, creatorId);
+    res.status(200).json({ message: "Lab assistant deleted successfully" });
+  } catch (error) {
+    if (error instanceof Error && error.message === "LAB_ASSISTANT_NOT_FOUND") {
+      res.status(404).json({ message: "Lab assistant not found" });
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.error("deleteLabAssistantAccount error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

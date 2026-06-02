@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export interface IPrescription extends Document {
   visit: mongoose.Types.ObjectId;
   medicines: mongoose.Types.ObjectId[];
@@ -26,6 +28,9 @@ const PrescriptionSchema = new Schema<IPrescription>(
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+PrescriptionSchema.plugin(tenantPlugin);
+PrescriptionSchema.index({ tenantId: 1, visit: 1 });
 
 export const Prescription = mongoose.model<IPrescription>(
   "Prescription",

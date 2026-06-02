@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { patientAuthService } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 import { Button } from '../components/ui/Button'
@@ -199,11 +199,6 @@ export const PatientLogin = () => {
             </form>
           )}
 
-          <div className="login-secondary-text" style={{ marginTop: 20 }}>
-            <Link to="/" className="login-link">
-              ← Back to Home
-            </Link>
-          </div>
         </div>
         <div className="login-image-panel">
           <div className="login-image-frame" />

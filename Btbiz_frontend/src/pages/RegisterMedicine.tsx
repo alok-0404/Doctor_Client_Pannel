@@ -5,6 +5,7 @@ import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { LoginHomeLink } from '../components/LoginHomeLink'
 
 export const RegisterMedicine = () => {
   const navigate = useNavigate()
@@ -59,8 +60,11 @@ export const RegisterMedicine = () => {
     <div className="page-center">
       <div className="ui-card login-layout">
         <div className="login-panel">
-          <div className="login-brand">
-            <span className="login-logo-pill">MEDIGRAPH</span>
+          <div className="login-brand-row">
+            <div className="login-brand">
+              <span className="login-logo-pill">MEDIGRAPH</span>
+            </div>
+            <LoginHomeLink />
           </div>
 
           <h1 className="login-heading">Medicine – Create account</h1>

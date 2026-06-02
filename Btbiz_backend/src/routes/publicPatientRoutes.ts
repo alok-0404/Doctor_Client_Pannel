@@ -17,6 +17,8 @@ import {
   isProviderSelectableForPatient,
   listPatientSelectableProviders,
 } from "../services/patientProviderService";
+import { resolveProvidersCoordinatesSequential } from "../services/providerLocationService";
+import { geocodeAddressWithFallbacks } from "../services/geocodeService";
 import ocrService from "../ocrService";
 import { getFullPatientHistory } from "../services/patientService";
 import {
@@ -281,17 +283,34 @@ router.get(
         return;
       }
 
-      const lat = req.query.lat != null ? Number(req.query.lat) : undefined;
-      const lng = req.query.lng != null ? Number(req.query.lng) : undefined;
-      const hasUserCoords =
+      let lat = req.query.lat != null ? Number(req.query.lat) : undefined;
+      let lng = req.query.lng != null ? Number(req.query.lng) : undefined;
+      let hasUserCoords =
         typeof lat === "number" &&
         typeof lng === "number" &&
         !Number.isNaN(lat) &&
         !Number.isNaN(lng);
 
-      const providers = await listPatientSelectableProviders(kind);
+      const patientAddress =
+        typeof req.query.patientAddress === "string"
+          ? req.query.patientAddress.trim()
+          : "";
+      if (!hasUserCoords && patientAddress) {
+        const patientPin = await geocodeAddressWithFallbacks(
+          `${patientAddress}, India`,
+          patientAddress
+        );
+        if (patientPin) {
+          lat = patientPin.lat;
+          lng = patientPin.lng;
+          hasUserCoords = true;
+        }
+      }
 
-      const mapped = providers.map((p) => {
+      const providers = await listPatientSelectableProviders(kind);
+      const withCoords = await resolveProvidersCoordinatesSequential(providers);
+
+      const mapped = withCoords.map((p) => {
         const providerLat =
           typeof p.clinicLatitude === "number" ? p.clinicLatitude : undefined;
         const providerLng =

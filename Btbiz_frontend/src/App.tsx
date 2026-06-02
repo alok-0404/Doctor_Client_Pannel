@@ -98,7 +98,7 @@ export const App = () => {
       <Route
         path="/lab"
         element={(
-          <ProtectedRoute allowedRoles={['LAB_ASSISTANT']}>
+          <ProtectedRoute allowedRoles={['LAB_ASSISTANT', 'LAB_MANAGER']}>
             <LabDashboard />
           </ProtectedRoute>
         )}

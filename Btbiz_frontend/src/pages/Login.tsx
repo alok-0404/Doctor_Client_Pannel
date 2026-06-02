@@ -1,17 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { LoginHomeLink } from '../components/LoginHomeLink'
+
+/** Must match backend default SUPER_ADMIN_EMAIL in Btbiz_backend/.env */
+const SUPER_ADMIN_EMAIL = 'superadmin@medigraph.com'
 
 export const Login = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+
+  useEffect(() => {
+    authStorage.clear()
+  }, [])
   const isSuperAdminLogin = searchParams.get('role') === 'super-admin'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const isSuperAdminEmail =
+    email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
+  const useSuperAdminFlow = isSuperAdminLogin || isSuperAdminEmail
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,7 +47,7 @@ export const Login = () => {
 
     try {
       setLoading(true)
-      const result = isSuperAdminLogin
+      const result = useSuperAdminFlow
         ? await authService.superAdminLogin({ email, password })
         : await authService.login({ email, password })
       authStorage.set(result.token, result.doctorName, result.role)
@@ -54,8 +65,26 @@ export const Login = () => {
         navigate('/dashboard')
       }
     }
-    catch {
-      setError('Unable to log in. Please check credentials.')
+    catch (err: unknown) {
+      const apiMsg =
+        err &&
+        typeof err === 'object' &&
+        'response' in err &&
+        err.response &&
+        typeof err.response === 'object' &&
+        'data' in err.response &&
+        err.response.data &&
+        typeof err.response.data === 'object' &&
+        'message' in err.response.data &&
+        typeof (err.response.data as { message?: string }).message === 'string'
+          ? (err.response.data as { message: string }).message
+          : null
+      setError(
+        apiMsg ??
+          (useSuperAdminFlow
+            ? 'Super admin login failed. Check password in Btbiz_backend/.env (SUPER_ADMIN_PASSWORD).'
+            : 'Unable to log in. Please check credentials.'),
+      )
     }
     finally {
       setLoading(false)
@@ -81,7 +110,7 @@ export const Login = () => {
       setForgotLoading(true)
       const normalizedPhone = `${forgotCountryCode}${forgotPhoneDigits}`
       await authService.startForgotPassword({ phone: normalizedPhone })
-      setForgotSuccess('OTP sent on your WhatsApp (if number exists).')
+      setForgotSuccess('OTP flow temporarily bypassed. Continue to reset password.')
       setForgotStep('otp')
     } catch {
       setForgotError('Could not send OTP. Please try again.')
@@ -118,7 +147,7 @@ export const Login = () => {
         setForgotPhoneDigits('')
       }, 800)
     } catch {
-      setForgotError('Invalid or expired OTP. Please try again.')
+      setForgotError('Could not reset password. Please try again.')
     } finally {
       setForgotLoading(false)
     }
@@ -129,11 +158,11 @@ export const Login = () => {
       <div className="ui-card login-layout">
         {/* Left form panel (MEDIGRAPH brand) */}
         <div className="login-panel">
-          {/* Logo / brand */}
-          <div className="login-brand">
-            <span className="login-logo-pill">
-              MEDIGRAPH
-            </span>
+          <div className="login-brand-row">
+            <div className="login-brand">
+              <span className="login-logo-pill">MEDIGRAPH</span>
+            </div>
+            <LoginHomeLink />
           </div>
 
           {/* Heading + tagline */}
@@ -196,7 +225,7 @@ export const Login = () => {
               </p>
             )}
 
-            {!isSuperAdminLogin && (
+            {!useSuperAdminFlow && (
               <div className="login-links">
                 <button
                   type="button"
@@ -247,7 +276,7 @@ export const Login = () => {
               Reset password
             </h2>
             <p className="dialog-body">
-              We&apos;ll send a one-time password (OTP) to your registered WhatsApp number.
+              OTP service is under integration right now. Abhi temporary bypass mode enabled hai.
             </p>
 
             {forgotStep === 'phone' && (
@@ -294,8 +323,8 @@ export const Login = () => {
                 <TextField
                   id="forgot-otp"
                   type="text"
-                  label="OTP"
-                  placeholder="Enter 6-digit OTP"
+                  label="OTP (temporary bypass)"
+                  placeholder="Enter 123456 (temporary)"
                   value={forgotOtp}
                   onChange={(e) => setForgotOtp(e.target.value)}
                 />

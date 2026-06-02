@@ -2,6 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import {
   patientPortalService,
   type FullPatientHistory,
   type PharmacyDispensationSummary,
@@ -114,19 +124,58 @@ function labNormalizedNamesMatch(a: string, b: string): boolean {
   return a.includes(b) || b.includes(a)
 }
 
+function distanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+function providerDistanceKm(
+  p: ServiceProviderOption,
+  patientLat?: number,
+  patientLng?: number
+): number | undefined {
+  if (typeof p.distanceKm === 'number') return p.distanceKm
+  if (
+    typeof patientLat === 'number' &&
+    typeof patientLng === 'number' &&
+    typeof p.clinicLatitude === 'number' &&
+    typeof p.clinicLongitude === 'number'
+  ) {
+    return distanceKm(patientLat, patientLng, p.clinicLatitude, p.clinicLongitude)
+  }
+  return undefined
+}
+
 /** Label for provider dropdown: always show km when we can compute it. */
 function formatProviderOptionLabel(
   p: ServiceProviderOption,
-  geo: 'loading' | 'ok' | 'none'
+  geo: 'loading' | 'ok' | 'none',
+  patientLat?: number,
+  patientLng?: number
 ): string {
-  if (typeof p.distanceKm === 'number') {
-    return `${p.name} · ${p.distanceKm.toFixed(1)} km`
+  const km = providerDistanceKm(p, patientLat, patientLng)
+  if (typeof km === 'number') {
+    return `${p.name} · ${km.toFixed(1)} km`
   }
   if (geo === 'loading') {
     return `${p.name} · …`
   }
   if (geo === 'ok') {
-    return `${p.name} · — km (no map location on file)`
+    return `${p.name} · — km (shop location not set yet)`
   }
   return `${p.name} · — (allow location for km)`
 }
@@ -159,37 +208,76 @@ function PatientProfileAccordionSection({
   )
 }
 
+function ProviderDistanceActions({
+  loading,
+  onRefresh,
+  onUseLocation,
+}: {
+  loading: boolean
+  onRefresh: () => void
+  onUseLocation: () => void
+}) {
+  return (
+    <div className="patient-profile-distance-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+      <button
+        type="button"
+        className="patient-profile-link-btn"
+        disabled={loading}
+        onClick={onUseLocation}
+      >
+        {loading ? 'Loading…' : 'Use my location'}
+      </button>
+      <button
+        type="button"
+        className="patient-profile-link-btn"
+        disabled={loading}
+        onClick={onRefresh}
+      >
+        Refresh distances
+      </button>
+    </div>
+  )
+}
+
 function ProviderDistanceHint({
   geo,
   providers,
+  patientLat,
+  patientLng,
+  loading,
 }: {
   geo: 'loading' | 'ok' | 'none'
   providers: ServiceProviderOption[]
+  patientLat?: number
+  patientLng?: number
+  loading?: boolean
 }) {
-  if (geo === 'loading') {
-    return <p className="patient-profile-distance-hint">Getting distances…</p>
+  if (loading || geo === 'loading') {
+    return <p className="patient-profile-distance-hint">Getting distances… (first time may take up to a minute)</p>
   }
   if (providers.length === 0) {
     return null
   }
-  const withKm = providers.filter((p) => typeof p.distanceKm === 'number')
+  const withKm = providers.filter(
+    (p) => typeof providerDistanceKm(p, patientLat, patientLng) === 'number',
+  )
   if (geo === 'none') {
     return (
       <p className="patient-profile-distance-hint">
-        Turn on / allow location for this site to see straight-line distance (km) from you for each tie-up.
+        Allow location in the browser (padlock icon → Location → Allow), or tap “Use my location” above. We also use your profile address when GPS is off.
       </p>
     )
   }
   if (withKm.length === 0) {
     return (
       <p className="patient-profile-distance-hint">
-        Tie-ups have no map coordinates yet — distance (km) will show after clinic location is saved.
+        Pharmacies/labs have no map pin yet. Ask Super Admin to run “Fix km distance”, or each shop to tap “Save shop location” in their dashboard.
       </p>
     )
   }
   return (
     <p className="patient-profile-distance-hint">
-      Distance is approximate straight-line km from your location; list is sorted nearest first.
+      Straight-line km from your home / location — nearest pharmacy or lab is listed first so you can pick the closest one.
     </p>
   )
 }
@@ -218,6 +306,8 @@ export const PatientProfile = () => {
   const [labProviders, setLabProviders] = useState<ServiceProviderOption[]>([])
   const [selectedLabProviderId, setSelectedLabProviderId] = useState('')
   const [providerGeoStatus, setProviderGeoStatus] = useState<'loading' | 'ok' | 'none'>('loading')
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [patientCoords, setPatientCoords] = useState<{ lat: number; lng: number } | null>(null)
   const lastVisibilityRefreshRef = useRef(0)
   const paymentToastShownRef = useRef<Set<string>>(new Set())
   const dataRef = useRef<FullPatientHistory | null>(data)
@@ -342,48 +432,89 @@ export const PatientProfile = () => {
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [loadProfile])
 
-  useEffect(() => {
-    let cancelled = false
+  const loadProviderLists = useCallback(
+    async (opts?: { lat?: number; lng?: number; forceGps?: boolean }) => {
+      const patientAddress = data?.patient?.address?.trim()
+      if (!patientAddress && opts?.lat == null && !opts?.forceGps) {
+        setProviderGeoStatus('none')
+        return
+      }
 
-    const loadProviders = async (lat?: number, lng?: number) => {
-      try {
+      setProvidersLoading(true)
+      setProviderGeoStatus('loading')
+
+      const applyLists = (labs: ServiceProviderOption[], pharmacies: ServiceProviderOption[]) => {
+        setLabProviders(labs)
+        setPharmacyProviders(pharmacies)
+        const hasKm = [...labs, ...pharmacies].some((p) => typeof p.distanceKm === 'number')
+        setProviderGeoStatus(hasKm ? 'ok' : 'none')
+      }
+
+      const fetchLists = async (lat?: number, lng?: number) => {
         const [labs, pharmacies] = await Promise.all([
-          patientPortalService.getServiceProviders('lab', lat, lng),
-          patientPortalService.getServiceProviders('pharmacy', lat, lng),
+          patientPortalService.getServiceProviders('lab', lat, lng, patientAddress),
+          patientPortalService.getServiceProviders('pharmacy', lat, lng, patientAddress),
         ])
-        if (!cancelled) {
-          setLabProviders(labs)
-          setPharmacyProviders(pharmacies)
-        }
-      } catch {
-        if (!cancelled) {
-          setLabProviders([])
-          setPharmacyProviders([])
+        applyLists(labs, pharmacies)
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          setPatientCoords({ lat, lng })
         }
       }
-    }
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (!cancelled) setProviderGeoStatus('ok')
-          loadProviders(pos.coords.latitude, pos.coords.longitude)
-        },
-        () => {
-          if (!cancelled) setProviderGeoStatus('none')
-          loadProviders()
-        },
-        { timeout: 12000, maximumAge: 300000, enableHighAccuracy: false }
-      )
-    } else {
-      setProviderGeoStatus('none')
-      loadProviders()
-    }
+      try {
+        if (opts?.forceGps && navigator.geolocation) {
+          await new Promise<void>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                void fetchLists(pos.coords.latitude, pos.coords.longitude).then(resolve).catch(reject)
+              },
+              () => reject(new Error('denied')),
+              { timeout: 15000, maximumAge: 0, enableHighAccuracy: true },
+            )
+          })
+          return
+        }
 
-    return () => {
-      cancelled = true
-    }
-  }, [])
+        if (opts?.lat != null && opts?.lng != null) {
+          await fetchLists(opts.lat, opts.lng)
+          return
+        }
+
+        // 1) Home / profile address first (works even when browser blocks GPS)
+        if (patientAddress) {
+          await fetchLists()
+        }
+
+        // 2) Refine with live GPS when allowed (more accurate if patient is not at home)
+        if (navigator.geolocation) {
+          await new Promise<void>((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                void fetchLists(pos.coords.latitude, pos.coords.longitude).then(resolve)
+              },
+              () => resolve(),
+              { timeout: 8000, maximumAge: 300000, enableHighAccuracy: false },
+            )
+          })
+        } else if (!patientAddress) {
+          await fetchLists()
+        }
+      } catch {
+        setLabProviders([])
+        setPharmacyProviders([])
+        setProviderGeoStatus('none')
+      } finally {
+        setProvidersLoading(false)
+      }
+    },
+    [data?.patient?.address],
+  )
+
+  /** Wait for profile, then load distances (GPS or profile address). */
+  useEffect(() => {
+    if (!data?.patient) return
+    void loadProviderLists()
+  }, [data?.patient, loadProviderLists])
 
   const selectedLabProvider = useMemo(
     () => labProviders.find((p) => p.id === selectedLabProviderId),
@@ -437,6 +568,28 @@ export const PatientProfile = () => {
   } = data
 
   const labPaidRequests = testRequests.filter((t) => t.paymentStatus === 'PAID')
+  const healthTrendData = useMemo(() => {
+    return visits
+      .slice()
+      .sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime())
+      .map((v) => ({
+        dateKey: formatDate(v.visitDate),
+        fullDate: formatDateTime(v.visitDate),
+        sugar: typeof v.bloodSugarFasting === 'number' ? v.bloodSugarFasting : undefined,
+        systolic: typeof v.bloodPressureSystolic === 'number' ? v.bloodPressureSystolic : undefined,
+        diastolic: typeof v.bloodPressureDiastolic === 'number' ? v.bloodPressureDiastolic : undefined,
+        weight: typeof v.weightKg === 'number' ? v.weightKg : undefined,
+        temperature: typeof v.temperature === 'number' ? v.temperature : undefined,
+      }))
+      .filter(
+        (p) =>
+          p.sugar != null ||
+          p.systolic != null ||
+          p.diastolic != null ||
+          p.weight != null ||
+          p.temperature != null
+      )
+  }, [visits])
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -934,6 +1087,86 @@ export const PatientProfile = () => {
         </PatientProfileAccordionSection>
 
         <section className="patient-profile-section">
+          <h2>Health Trend Graph</h2>
+          {healthTrendData.length < 2 ? (
+            <p className="patient-profile-empty">
+              At least 2 visit readings are needed to show trend graph.
+            </p>
+          ) : (
+            <div className="patient-profile-chart-card">
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart data={healthTrendData} margin={{ top: 12, right: 20, left: 10, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="dateKey" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip
+                    formatter={(value: any, name: any) => {
+                      if (value == null) return ['—', name]
+                      if (name === 'Temperature') return [`${value} F`, name]
+                      if (name === 'Weight') return [`${value} kg`, name]
+                      if (name === 'Sugar (Fasting)') return [`${value} mg/dL`, name]
+                      return [`${value} mmHg`, name]
+                    }}
+                    labelFormatter={(label: any, payload: any) =>
+                      payload?.[0]?.payload?.fullDate ?? String(label ?? '')
+                    }
+                  />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="sugar"
+                    name="Sugar (Fasting)"
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="systolic"
+                    name="BP Systolic"
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="diastolic"
+                    name="BP Diastolic"
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weight"
+                    name="Weight"
+                    stroke="#16a34a"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="temperature"
+                    name="Temperature"
+                    stroke="#7c3aed"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    connectNulls
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="patient-profile-muted" style={{ marginTop: 10 }}>
+                Graph shows date-wise trend from your visit vitals and basic tests.
+              </p>
+            </div>
+          )}
+        </section>
+
+        <section className="patient-profile-section">
           <div className="patient-profile-heading-with-hint">
             <div className="patient-profile-section-heading-row">
               <h2>Lab Tests</h2>
@@ -946,25 +1179,51 @@ export const PatientProfile = () => {
                 <option value="">Choose lab (auto-assign if not selected)</option>
                 {labProviders.map((lab) => (
                   <option key={lab.id} value={lab.id}>
-                    {formatProviderOptionLabel(lab, providerGeoStatus)}
+                    {formatProviderOptionLabel(
+                      lab,
+                      providerGeoStatus,
+                      patientCoords?.lat,
+                      patientCoords?.lng,
+                    )}
                   </option>
                 ))}
               </select>
             </div>
-            <ProviderDistanceHint geo={providerGeoStatus} providers={labProviders} />
+            <ProviderDistanceActions
+              loading={providersLoading}
+              onRefresh={() => void loadProviderLists()}
+              onUseLocation={() => void loadProviderLists({ forceGps: true })}
+            />
+            <ProviderDistanceHint
+              geo={providerGeoStatus}
+              providers={labProviders}
+              patientLat={patientCoords?.lat}
+              patientLng={patientCoords?.lng}
+              loading={providersLoading}
+            />
             {selectedLabProvider && (
               <p className="patient-profile-distance-selected">
-                {typeof selectedLabProvider.distanceKm === 'number' ? (
-                  <>
-                    Selected: <strong>{selectedLabProvider.name}</strong> — {selectedLabProvider.distanceKm.toFixed(1)}{' '}
-                    km from you
-                  </>
-                ) : (
-                  <>
-                    Selected: <strong>{selectedLabProvider.name}</strong>
-                    {providerGeoStatus === 'ok' ? ' — distance not available (no map pin)' : ''}
-                  </>
-                )}
+                {(() => {
+                  const km = providerDistanceKm(
+                    selectedLabProvider,
+                    patientCoords?.lat,
+                    patientCoords?.lng,
+                  )
+                  if (typeof km === 'number') {
+                    return (
+                      <>
+                        Selected: <strong>{selectedLabProvider.name}</strong> — {km.toFixed(1)} km from
+                        you
+                      </>
+                    )
+                  }
+                  return (
+                    <>
+                      Selected: <strong>{selectedLabProvider.name}</strong>
+                      {providerGeoStatus === 'ok' ? ' — distance not available (shop location not set)' : ''}
+                    </>
+                  )
+                })()}
               </p>
             )}
           </div>
@@ -1278,25 +1537,53 @@ export const PatientProfile = () => {
                 <option value="">Choose pharmacy (auto-assign if not selected)</option>
                 {pharmacyProviders.map((ph) => (
                   <option key={ph.id} value={ph.id}>
-                    {formatProviderOptionLabel(ph, providerGeoStatus)}
+                    {formatProviderOptionLabel(
+                      ph,
+                      providerGeoStatus,
+                      patientCoords?.lat,
+                      patientCoords?.lng,
+                    )}
                   </option>
                 ))}
               </select>
             </div>
-            <ProviderDistanceHint geo={providerGeoStatus} providers={pharmacyProviders} />
+            <ProviderDistanceActions
+              loading={providersLoading}
+              onRefresh={() => void loadProviderLists()}
+              onUseLocation={() => void loadProviderLists({ forceGps: true })}
+            />
+            <ProviderDistanceHint
+              geo={providerGeoStatus}
+              providers={pharmacyProviders}
+              patientLat={patientCoords?.lat}
+              patientLng={patientCoords?.lng}
+              loading={providersLoading}
+            />
             {selectedPharmacyProvider && (
               <p className="patient-profile-distance-selected">
-                {typeof selectedPharmacyProvider.distanceKm === 'number' ? (
-                  <>
-                    Selected: <strong>{selectedPharmacyProvider.name}</strong> —{' '}
-                    {selectedPharmacyProvider.distanceKm.toFixed(1)} km from you
-                  </>
-                ) : (
-                  <>
-                    Selected: <strong>{selectedPharmacyProvider.name}</strong>
-                    {providerGeoStatus === 'ok' ? ' — distance not available (no map pin)' : ''}
-                  </>
-                )}
+                {(() => {
+                  const km = providerDistanceKm(
+                    selectedPharmacyProvider,
+                    patientCoords?.lat,
+                    patientCoords?.lng,
+                  )
+                  if (typeof km === 'number') {
+                    return (
+                      <>
+                        Selected: <strong>{selectedPharmacyProvider.name}</strong> — {km.toFixed(1)} km from
+                        you
+                      </>
+                    )
+                  }
+                  return (
+                    <>
+                      Selected: <strong>{selectedPharmacyProvider.name}</strong>
+                      {providerGeoStatus === 'ok'
+                        ? ' — distance not available (shop location not set)'
+                        : ''}
+                    </>
+                  )
+                })()}
               </p>
             )}
           </div>
@@ -1428,6 +1715,23 @@ export const PatientProfile = () => {
                         {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
                         {typeof m.totalAmount === 'number' ? ` · Amount ₹${m.totalAmount.toFixed(2)}` : ''}
                       </span>
+                      {m.isSubstitute && m.substituteMedicineName && (
+                        <p
+                          className="patient-profile-muted"
+                          style={{
+                            margin: '0 0 8px',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            border: '1px solid #fcd34d',
+                            background: '#fffbeb',
+                            color: '#92400e',
+                            fontWeight: 600,
+                          }}
+                        >
+                          This tablet is substitute: {m.substituteMedicineName}
+                          {m.substituteNotes ? ` (${m.substituteNotes})` : ''}
+                        </p>
+                      )}
                       {m.paymentStatus === 'PAID' && (
                         <div className="patient-profile-receipt-box">
                           <strong>Receipt</strong>
@@ -1720,6 +2024,12 @@ const patientProfileStyles = `
   }
   .patient-profile-section {
     margin-bottom: 32px;
+  }
+  .patient-profile-chart-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 14px 8px;
   }
   .patient-profile-section h2 {
     font-size: 1.2rem;

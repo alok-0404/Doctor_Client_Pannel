@@ -1,5 +1,6 @@
 import { Doctor } from "../models/Doctor";
 import { Tenant, type TenantType } from "../models/Tenant";
+import { buildProviderLocationQuery } from "./geocodeService";
 
 export type PatientProviderKind = "pharmacy" | "lab";
 
@@ -17,6 +18,8 @@ export interface PatientSelectableProvider {
   clinicLatitude?: number;
   clinicLongitude?: number;
   clinicAddress?: string;
+  /** Used to geocode when lat/lng are missing (tenant address, shop name, etc.). */
+  locationQuery?: string;
 }
 
 /** All pharmacies/labs patients can pick: Super Admin tenants (ACTIVE) + active self-signup accounts. */
@@ -31,7 +34,7 @@ export async function listPatientSelectableProviders(
     tenantType,
     status: "ACTIVE",
   })
-    .select("_id name ownerUserId phone")
+    .select("_id name ownerUserId phone address")
     .lean();
 
   const ownerIds = activeTenants
@@ -52,14 +55,20 @@ export async function listPatientSelectableProviders(
     const owner = ownerById.get(tenant.ownerUserId);
     if (!owner) continue;
     const id = owner._id.toString();
+    const displayName = tenant.name?.trim() || owner.name;
     byId.set(id, {
       _id: id,
-      name: tenant.name?.trim() || owner.name,
+      name: displayName,
       role: owner.role,
       tenantId: tenant._id,
       clinicLatitude: owner.clinicLatitude,
       clinicLongitude: owner.clinicLongitude,
       clinicAddress: owner.clinicAddress,
+      locationQuery: buildProviderLocationQuery(
+        tenant.address,
+        owner.clinicAddress,
+        displayName
+      ),
     });
   }
 
@@ -82,6 +91,7 @@ export async function listPatientSelectableProviders(
       clinicLatitude: doc.clinicLatitude,
       clinicLongitude: doc.clinicLongitude,
       clinicAddress: doc.clinicAddress,
+      locationQuery: buildProviderLocationQuery(undefined, doc.clinicAddress, doc.name),
     });
   }
 

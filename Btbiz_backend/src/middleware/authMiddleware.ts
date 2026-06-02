@@ -8,11 +8,14 @@ import { env } from "../config/env";
 interface DoctorJwtPayload extends JwtPayload {
   doctorId: string;
   role: DoctorRole;
+  tenantId?: string;
+  tenantType?: string;
 }
 
 interface PatientJwtPayload extends JwtPayload {
   patientId: string;
   type: "patient";
+  tenantId?: string;
 }
 
 export const authenticatePatient = async (
@@ -50,7 +53,11 @@ export const authenticatePatient = async (
       firstName: (patient as any).firstName,
       lastName: (patient as any).lastName,
       mobileNumber: (patient as any).mobileNumber,
+      ...(decoded.tenantId ? { tenantId: decoded.tenantId } : {}),
     };
+    if (decoded.tenantId) {
+      req.tenantId = decoded.tenantId;
+    }
     next();
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -88,10 +95,20 @@ export const authenticateDoctor = async (
     }
 
     const doctor = await Doctor.findById(decoded.doctorId).select(
-      "_id name email role"
+      "_id name email role tenantId tenantType"
     );
     if (!doctor) {
       res.status(401).json({ message: "Doctor not found for token" });
+      return;
+    }
+
+    const doctorTenantId = doctor.tenantId?.trim() || undefined;
+    if (
+      decoded.tenantId &&
+      doctorTenantId &&
+      decoded.tenantId !== doctorTenantId
+    ) {
+      res.status(403).json({ message: "Invalid tenant context" });
       return;
     }
 
@@ -99,8 +116,16 @@ export const authenticateDoctor = async (
       _id: doctor._id,
       name: doctor.name,
       email: doctor.email,
-      role: doctor.role
+      role: doctor.role,
+      ...(doctorTenantId ? { tenantId: doctorTenantId } : {}),
+      ...(doctor.tenantType ? { tenantType: doctor.tenantType } : {}),
     };
+
+    if (doctorTenantId) {
+      req.tenantId = doctorTenantId;
+    } else if (decoded.tenantId) {
+      req.tenantId = decoded.tenantId;
+    }
 
     next();
   } catch (error) {

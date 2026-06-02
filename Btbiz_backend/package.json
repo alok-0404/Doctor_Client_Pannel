@@ -7,7 +7,9 @@
     "build": "tsc",
     "prestart": "npm run build",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "backfill:tenant": "ts-node --transpile-only src/scripts/backfill-tenant-id.ts",
+    "backfill:tenant:dry": "ts-node --transpile-only src/scripts/backfill-tenant-id.ts --dry-run"
   },
   "author": "",
   "license": "MIT",

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
+import { ClinicLocationSetup } from '../components/ClinicLocationSetup'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
 import { TextField } from '../components/ui/TextField'
@@ -80,6 +81,7 @@ export const MedicineDashboard = () => {
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
+  const [substituteDraftByRequest, setSubstituteDraftByRequest] = useState<Record<string, { name: string; notes: string }>>({})
   const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
   const authWarningShownRef = useRef(false)
   const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
@@ -515,6 +517,31 @@ export const MedicineDashboard = () => {
     })
   }
 
+  const handleMarkSubstitute = async (r: PharmacyOrderRequest) => {
+    const draft = substituteDraftByRequest[r.id]
+    const substituteName = (draft?.name ?? '').trim()
+    if (!substituteName) {
+      toast.error('Enter substitute medicine name first.')
+      return
+    }
+    try {
+      await orderService.updateMedicineRequest(r.id, {
+        isSubstitute: true,
+        substituteMedicineName: substituteName,
+        substituteNotes: (draft?.notes ?? '').trim() || undefined,
+      })
+      toast.success('Substitute medicine marked successfully.')
+      await loadIncomingRequests(true)
+      if (patient && patientIdsMatch(patient.id, r.patientId)) {
+        const h = await patientService.getFullHistory(r.patientId)
+        setHistory(h)
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } }
+      toast.error(e?.response?.data?.message ?? 'Could not save substitute medicine.')
+    }
+  }
+
   const getDateBucket = (isoDate: string): 'today' | 'yesterday' | 'older' => {
     const requestDate = new Date(isoDate)
     if (Number.isNaN(requestDate.getTime())) return 'older'
@@ -552,9 +579,53 @@ export const MedicineDashboard = () => {
         {r.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
         {r.expectedFulfillmentMinutes ? ` · Need in ${r.expectedFulfillmentMinutes} min` : ''}
       </p>
+      {r.isSubstitute && r.substituteMedicineName && (
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#92400e', fontWeight: 600 }}>
+          Substitute: {r.substituteMedicineName}
+          {r.substituteNotes ? ` · ${r.substituteNotes}` : ''}
+        </p>
+      )}
       <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
         Request time: {new Date(r.createdAt).toLocaleString('en-IN')}
       </p>
+      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+        <input
+          type="text"
+          value={substituteDraftByRequest[r.id]?.name ?? ''}
+          onChange={(e) =>
+            setSubstituteDraftByRequest((prev) => ({
+              ...prev,
+              [r.id]: { name: e.target.value, notes: prev[r.id]?.notes ?? '' },
+            }))
+          }
+          placeholder="Substitute medicine name (if original unavailable)"
+          style={{
+            width: '100%',
+            padding: '7px 10px',
+            border: '1px solid #e2e8f0',
+            borderRadius: 6,
+            fontSize: 12,
+          }}
+        />
+        <input
+          type="text"
+          value={substituteDraftByRequest[r.id]?.notes ?? ''}
+          onChange={(e) =>
+            setSubstituteDraftByRequest((prev) => ({
+              ...prev,
+              [r.id]: { name: prev[r.id]?.name ?? '', notes: e.target.value },
+            }))
+          }
+          placeholder="Substitute note (e.g. same composition, different brand)"
+          style={{
+            width: '100%',
+            padding: '7px 10px',
+            border: '1px solid #e2e8f0',
+            borderRadius: 6,
+            fontSize: 12,
+          }}
+        />
+      </div>
       <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button type="button" variant="secondary" onClick={() => void handleAcceptIncomingRequest(r)}>
           Accept
@@ -591,6 +662,13 @@ export const MedicineDashboard = () => {
         >
           Mark paid
         </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void handleMarkSubstitute(r)}
+        >
+          Mark substitute
+        </Button>
       </div>
     </div>
   )
@@ -617,6 +695,9 @@ export const MedicineDashboard = () => {
   return (
     <div className="app-shell">
       <Header doctorName={name} />
+      <div style={{ maxWidth: 1280, margin: '12px auto 0', padding: '0 16px' }}>
+        <ClinicLocationSetup />
+      </div>
       <main className="dashboard-main" style={{ maxWidth: '100%' }}>
         <section style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div

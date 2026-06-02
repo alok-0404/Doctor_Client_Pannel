@@ -23,7 +23,14 @@ export const env = {
     email: process.env.SUPER_ADMIN_EMAIL || "superadmin@medigraph.com",
     password: process.env.SUPER_ADMIN_PASSWORD || "Admin@123",
     name: process.env.SUPER_ADMIN_NAME || "Super Admin"
-  }
+  },
+  /** Multi-tenant rollout — keep false until models are backfilled (see docs/MULTI_TENANT_IMPLEMENTATION_GUIDE.md). */
+  tenant: {
+    enforce: process.env.TENANT_ENFORCE === "true",
+    pluginEnforce: process.env.TENANT_PLUGIN_ENFORCE === "true",
+    /** Until Step 8 backfill: scoped queries also return records missing tenantId. */
+    legacyOrphanRead: process.env.TENANT_LEGACY_ORPHAN_READ !== "false",
+  },
 } as const;
 
 if (!env.jwt.secret) {

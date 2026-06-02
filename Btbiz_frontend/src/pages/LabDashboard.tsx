@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
 import { authStorage } from '../utils/authStorage'
@@ -122,7 +123,9 @@ const COMMON_LAB_TESTS = [
 ]
 
 export const LabDashboard = () => {
-  const name = authStorage.getName() ?? 'Lab Assistant'
+  const navigate = useNavigate()
+  const role = authStorage.getRole()
+  const name = authStorage.getName() ?? (role === 'LAB_MANAGER' ? 'Lab Manager' : 'Lab Assistant')
 
   const [mobileSearch, setMobileSearch] = useState('')
   const [searchLoading, setSearchLoading] = useState(false)
@@ -731,6 +734,17 @@ export const LabDashboard = () => {
   return (
     <div className="app-shell">
       <Header doctorName={name} />
+      {role === 'LAB_MANAGER' && (
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 16px 12px' }}>
+          <button
+            type="button"
+            className="ui-button ui-button-secondary ui-button-sm"
+            onClick={() => navigate('/lab-manager')}
+          >
+            Manage lab assistants
+          </button>
+        </div>
+      )}
       <main className="dashboard-main" style={{ maxWidth: '100%' }}>
         <section style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div

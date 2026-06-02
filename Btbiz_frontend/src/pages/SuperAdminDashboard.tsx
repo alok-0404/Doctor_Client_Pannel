@@ -14,11 +14,6 @@ import {
 
 type CardKey = 'doctors' | 'assistants' | 'labAssistants' | 'pharmacies' | 'labs' | 'diagnostics'
 
-type EditTarget =
-  | { kind: 'tenant'; tenant: SuperAdminTenant }
-  | { kind: 'legacy'; item: SuperAdminListItem }
-  | null
-
 const cardTitleMap: Record<CardKey, string> = {
   doctors: 'Doctors',
   assistants: 'Assistants',
@@ -34,6 +29,9 @@ const emptyPartnerForm = () => ({
   email: '',
   password: '',
   phone: '',
+  addressLine1: '',
+  addressCity: '',
+  addressPincode: '',
   statusActive: true,
 })
 
@@ -84,9 +82,10 @@ export const SuperAdminDashboard = () => {
   const [error, setError] = useState<string | null>(null)
   const [openCard, setOpenCard] = useState<CardKey | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [editTarget, setEditTarget] = useState<EditTarget>(null)
+  const [editTarget, setEditTarget] = useState<SuperAdminTenant | null>(null)
   const [form, setForm] = useState(emptyPartnerForm)
   const [saving, setSaving] = useState(false)
+  const [geocoding, setGeocoding] = useState(false)
 
   const loadAll = useCallback(async () => {
     try {
@@ -113,6 +112,17 @@ export const SuperAdminDashboard = () => {
     void loadAll()
   }, [loadAll])
 
+  useEffect(() => {
+    if (!overview) return
+    const pendingCount = overview.summary.pendingDoctorApprovals ?? 0
+    if (pendingCount > 0) {
+      toast.info(
+        `${pendingCount} doctor approval request${pendingCount > 1 ? 's' : ''} pending.`,
+        { autoClose: 6000 }
+      )
+    }
+  }, [overview])
+
   const resetFormState = () => {
     setShowForm(false)
     setEditTarget(null)
@@ -126,27 +136,14 @@ export const SuperAdminDashboard = () => {
   }
 
   const openEditTenant = (tenant: SuperAdminTenant) => {
-    setEditTarget({ kind: 'tenant', tenant })
+    setEditTarget(tenant)
     setForm({
+      ...emptyPartnerForm(),
       name: tenant.name,
       slug: tenant.slug,
       email: tenant.ownerEmail ?? '',
-      password: '',
       phone: tenant.phone ?? '',
       statusActive: tenant.status === 'ACTIVE',
-    })
-    setShowForm(true)
-  }
-
-  const openEditLegacy = (item: SuperAdminListItem) => {
-    setEditTarget({ kind: 'legacy', item })
-    setForm({
-      name: item.name,
-      slug: '',
-      email: item.email,
-      password: '',
-      phone: item.phone,
-      statusActive: item.status,
     })
     setShowForm(true)
   }
@@ -168,7 +165,7 @@ export const SuperAdminDashboard = () => {
       try {
         await authService.deleteSuperAdminTenant(tenant.id)
         toast.success(`${tenant.name} deleted successfully.`)
-        if (editTarget?.kind === 'tenant' && editTarget.tenant.id === tenant.id) {
+        if (editTarget?.id === tenant.id) {
           resetFormState()
         }
         await loadAll()
@@ -178,17 +175,22 @@ export const SuperAdminDashboard = () => {
     })
   }
 
-  const handleDeleteLegacy = (item: SuperAdminListItem) => {
-    confirmCenterToast('Are you sure you want to delete this registration?', async () => {
+  const handleDoctorApproval = (
+    doctor: SuperAdminListItem,
+    approvalStatus: 'APPROVED' | 'REJECTED'
+  ) => {
+    const actionText = approvalStatus === 'APPROVED' ? 'approve' : 'reject'
+    confirmCenterToast(`Are you sure you want to ${actionText} ${doctor.name}?`, async () => {
       try {
-        await authService.deleteSuperAdminLegacyPartner(item.id)
-        toast.success(`${item.name} deleted successfully.`)
-        if (editTarget?.kind === 'legacy' && editTarget.item.id === item.id) {
-          resetFormState()
-        }
+        await authService.updateDoctorApproval(doctor.id, approvalStatus)
+        toast.success(
+          approvalStatus === 'APPROVED'
+            ? `${doctor.name} approved successfully.`
+            : `${doctor.name} rejected successfully.`
+        )
         await loadAll()
       } catch (err: any) {
-        toast.error(err?.response?.data?.message ?? 'Failed to delete registration.')
+        toast.error(err?.response?.data?.message ?? 'Failed to update doctor approval.')
       }
     })
   }
@@ -212,35 +214,53 @@ export const SuperAdminDashboard = () => {
     try {
       setSaving(true)
 
-      if (editTarget?.kind === 'tenant') {
-        await authService.updateSuperAdminTenant(editTarget.tenant.id, {
+      if (editTarget) {
+        const address =
+          form.addressLine1.trim() || form.addressCity.trim() || form.addressPincode.trim()
+            ? {
+                line1: form.addressLine1.trim() || undefined,
+                city: form.addressCity.trim() || undefined,
+                pincode: form.addressPincode.trim() || undefined,
+                state: 'Haryana',
+              }
+            : undefined
+        await authService.updateSuperAdminTenant(editTarget.id, {
           name: form.name.trim(),
           slug: form.slug.trim() || undefined,
           email: form.email.trim(),
           phone: form.phone.trim(),
           password: form.password.trim() || undefined,
           status: form.statusActive ? 'ACTIVE' : 'SUSPENDED',
+          address,
         })
         toast.success('Tenant updated successfully.')
-      } else if (editTarget?.kind === 'legacy') {
-        await authService.updateSuperAdminLegacyPartner(editTarget.item.id, {
-          name: form.name.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          password: form.password.trim() || undefined,
-          status: form.statusActive,
-        })
-        toast.success('Registration updated successfully.')
       } else {
+        const address =
+          form.addressLine1.trim() || form.addressCity.trim() || form.addressPincode.trim()
+            ? {
+                line1: form.addressLine1.trim() || undefined,
+                city: form.addressCity.trim() || undefined,
+                pincode: form.addressPincode.trim() || undefined,
+                state: 'Haryana',
+              }
+            : undefined
+        const ownerEmail = form.email.trim().toLowerCase()
+        const ownerPassword = form.password.trim()
         await authService.createSuperAdminTenant({
           tenantType,
           name: form.name.trim(),
           slug: form.slug.trim() || undefined,
-          email: form.email.trim(),
-          password: form.password,
+          email: ownerEmail,
+          password: ownerPassword,
           phone: form.phone.trim(),
+          address,
         })
-        toast.success(`${tenantType === 'PHARMACY' ? 'Pharmacy' : 'Lab'} created successfully. Owner can login now.`)
+        toast.success(
+          `${tenantType === 'PHARMACY' ? 'Pharmacy' : 'Lab'} created. Owner logs in via "Login as ${
+            tenantType === 'PHARMACY' ? 'Medicine' : 'Lab Manager'
+          }" with email: ${ownerEmail}`,
+          { autoClose: 12000 }
+        )
       }
 
       resetFormState()
@@ -256,22 +276,31 @@ export const SuperAdminDashboard = () => {
     onEdit: () => void,
     onDelete: () => void
   ) => (
-    <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
-      <button
-        type="button"
-        className="ui-button ui-button-edit ui-button-sm"
-        style={{ marginRight: 6 }}
-        onClick={onEdit}
-      >
-        Edit
-      </button>
-      <button
-        type="button"
-        className="ui-button ui-button-danger-outline ui-button-sm"
-        onClick={onDelete}
-      >
-        Delete
-      </button>
+    <td
+      style={{
+        padding: '10px 8px',
+        borderBottom: '1px solid #f1f5f9',
+        whiteSpace: 'nowrap',
+        textAlign: 'center',
+        width: '1%',
+      }}
+    >
+      <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
+        <button
+          type="button"
+          className="ui-button ui-button-edit ui-button-sm"
+          onClick={onEdit}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="ui-button ui-button-danger-outline ui-button-sm"
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      </div>
     </td>
   )
 
@@ -288,6 +317,22 @@ export const SuperAdminDashboard = () => {
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Email</th>
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Phone</th>
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
+              {openCard === 'doctors' && (
+                <>
+                  <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Approval</th>
+                  <th
+                    style={{
+                      padding: '10px 8px',
+                      borderBottom: '1px solid #e2e8f0',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
+                      width: '1%',
+                    }}
+                  >
+                    Action
+                  </th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -299,42 +344,51 @@ export const SuperAdminDashboard = () => {
                 <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9', color: i.status ? '#2e7d32' : '#b91c1c' }}>
                   {i.status ? 'Active' : 'Inactive'}
                 </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
-
-  const renderLegacyPartnerList = (items: SuperAdminListItem[]) => {
-    if (items.length === 0) {
-      return <p className="dashboard-body">No records found.</p>
-    }
-    return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Name</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Email</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Phone</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((i) => (
-              <tr key={i.id}>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.name}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.email}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.phone}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9', color: i.status ? '#2e7d32' : '#b91c1c' }}>
-                  {i.status ? 'Active' : 'Inactive'}
-                </td>
-                {renderActions(
-                  () => openEditLegacy(i),
-                  () => handleDeleteLegacy(i)
+                {openCard === 'doctors' && (
+                  <>
+                    <td
+                      style={{
+                        padding: '10px 8px',
+                        borderBottom: '1px solid #f1f5f9',
+                        color:
+                          i.approvalStatus === 'APPROVED'
+                            ? '#2e7d32'
+                            : i.approvalStatus === 'REJECTED'
+                              ? '#b91c1c'
+                              : '#b45309',
+                      }}
+                    >
+                      {i.approvalStatus ?? 'APPROVED'}
+                    </td>
+                    <td
+                      style={{
+                        padding: '10px 8px',
+                        borderBottom: '1px solid #f1f5f9',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'center',
+                        width: '1%',
+                      }}
+                    >
+                      <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          className="ui-button ui-button-sm"
+                          disabled={i.approvalStatus === 'APPROVED'}
+                          onClick={() => handleDoctorApproval(i, 'APPROVED')}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-button ui-button-danger-outline ui-button-sm"
+                          disabled={i.approvalStatus === 'REJECTED'}
+                          onClick={() => handleDoctorApproval(i, 'REJECTED')}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </>
                 )}
               </tr>
             ))}
@@ -362,7 +416,17 @@ export const SuperAdminDashboard = () => {
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Owner login</th>
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Phone</th>
               <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Action</th>
+              <th
+                style={{
+                  padding: '10px 8px',
+                  borderBottom: '1px solid #e2e8f0',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                  width: '1%',
+                }}
+              >
+                Action
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -392,8 +456,6 @@ export const SuperAdminDashboard = () => {
 
   const renderPartnerForm = () => {
     const isEdit = !!editTarget
-    const showSlug = !editTarget || editTarget.kind === 'tenant'
-
     return (
       <div
         style={{
@@ -415,14 +477,12 @@ export const SuperAdminDashboard = () => {
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
         />
-        {showSlug && (
-          <input
-            placeholder="URL slug (optional, e.g. medplus)"
-            value={form.slug}
-            onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-            style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
-          />
-        )}
+        <input
+          placeholder="URL slug (optional, e.g. medplus)"
+          value={form.slug}
+          onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
+          style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
+        />
         <input
           placeholder="Owner email *"
           value={form.email}
@@ -440,6 +500,24 @@ export const SuperAdminDashboard = () => {
           placeholder="Phone *"
           value={form.phone}
           onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+          style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
+        />
+        <input
+          placeholder="Shop address line (for patient km distance)"
+          value={form.addressLine1}
+          onChange={(e) => setForm((f) => ({ ...f, addressLine1: e.target.value }))}
+          style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
+        />
+        <input
+          placeholder="City (e.g. Gurgaon, Faridabad)"
+          value={form.addressCity}
+          onChange={(e) => setForm((f) => ({ ...f, addressCity: e.target.value }))}
+          style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
+        />
+        <input
+          placeholder="Pincode"
+          value={form.addressPincode}
+          onChange={(e) => setForm((f) => ({ ...f, addressPincode: e.target.value }))}
           style={{ padding: 8, borderRadius: 8, border: '1px solid #cbd5e1' }}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
@@ -472,42 +550,8 @@ export const SuperAdminDashboard = () => {
     if (openCard === 'doctors') return renderSimpleList(overview.lists.doctors)
     if (openCard === 'assistants') return renderSimpleList(overview.lists.assistants)
     if (openCard === 'labAssistants') return renderSimpleList(overview.lists.labAssistants)
-    if (openCard === 'pharmacies') {
-      const legacy = overview.lists.pharmacies.filter(
-        (p) => !pharmacyTenants.some((t) => t.ownerEmail === p.email)
-      )
-      return (
-        <div style={{ display: 'grid', gap: 16 }}>
-          {renderTenantList(pharmacyTenants)}
-          {legacy.length > 0 && (
-            <div>
-              <p className="dashboard-body" style={{ marginBottom: 8 }}>
-                <strong>Older registrations</strong> (no tenant record yet — self-signup):
-              </p>
-              {renderLegacyPartnerList(legacy)}
-            </div>
-          )}
-        </div>
-      )
-    }
-    if (openCard === 'labs') {
-      const legacy = overview.lists.labs.filter(
-        (l) => !labTenants.some((t) => t.ownerEmail === l.email)
-      )
-      return (
-        <div style={{ display: 'grid', gap: 16 }}>
-          {renderTenantList(labTenants)}
-          {legacy.length > 0 && (
-            <div>
-              <p className="dashboard-body" style={{ marginBottom: 8 }}>
-                <strong>Older registrations</strong> (no tenant record yet — self-signup):
-              </p>
-              {renderLegacyPartnerList(legacy)}
-            </div>
-          )}
-        </div>
-      )
-    }
+    if (openCard === 'pharmacies') return renderTenantList(pharmacyTenants)
+    if (openCard === 'labs') return renderTenantList(labTenants)
     return (
       <p className="dashboard-body">
         Total diagnostics records in system: <strong>{overview.summary.diagnostics}</strong>
@@ -516,6 +560,21 @@ export const SuperAdminDashboard = () => {
   }
 
   const canAddPartner = openCard === 'pharmacies' || openCard === 'labs'
+
+  const handleGeocodePartners = async () => {
+    const kind = openCard === 'pharmacies' ? 'pharmacy' : 'lab'
+    try {
+      setGeocoding(true)
+      const { results } = await authService.geocodeSuperAdminPartners(kind)
+      const lines = results.map((r) => `${r.kind}: ${r.updated} updated, ${r.failed} still without map`)
+      toast.success(`Map locations saved. ${lines.join('; ')}`)
+      await loadAll()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Could not update map locations.')
+    } finally {
+      setGeocoding(false)
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -526,8 +585,27 @@ export const SuperAdminDashboard = () => {
             <p className="dashboard-kicker">Overview</p>
             <h2 className="dashboard-heading">Tenant management</h2>
             <p className="dashboard-body">
-              Add pharmacy / lab tenants here. Edit or delete from the Action column. Confirmations appear as center toasts.
+              Add pharmacy / lab tenants here. Fill shop address (city + pincode) so patients see km distance and can choose the nearest one.
+              Use “Fix km distance” after adding shops.
             </p>
+            {!!overview && overview.summary.pendingDoctorApprovals > 0 && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  background: '#fff7ed',
+                  border: '1px solid #fed7aa',
+                  color: '#9a3412',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                Notification: {overview.summary.pendingDoctorApprovals} doctor approval request
+                {overview.summary.pendingDoctorApprovals > 1 ? 's are' : ' is'} pending.
+                Open <strong>Doctors</strong> card to approve/reject.
+              </div>
+            )}
           </Card>
 
           {loading && (
@@ -569,14 +647,25 @@ export const SuperAdminDashboard = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
                     <p className="dashboard-kicker" style={{ marginBottom: 0 }}>{cardTitleMap[openCard]}</p>
                     {canAddPartner && !showForm && (
-                      <button
-                        type="button"
-                        className="public-cta"
-                        style={{ padding: '8px 14px' }}
-                        onClick={openCreateForm}
-                      >
-                        {openCard === 'pharmacies' ? 'Add Pharmacy' : 'Add Lab'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="public-cta"
+                          style={{ padding: '8px 14px' }}
+                          onClick={openCreateForm}
+                        >
+                          {openCard === 'pharmacies' ? 'Add Pharmacy' : 'Add Lab'}
+                        </button>
+                        <button
+                          type="button"
+                          className="public-cta-secondary"
+                          style={{ padding: '8px 14px' }}
+                          disabled={geocoding}
+                          onClick={() => void handleGeocodePartners()}
+                        >
+                          {geocoding ? 'Updating map…' : 'Fix km distance (save map pins)'}
+                        </button>
+                      </div>
                     )}
                   </div>
 

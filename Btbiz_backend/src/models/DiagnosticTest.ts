@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
+
 export interface IDiagnosticTest extends Document {
   visit: mongoose.Types.ObjectId;
   testName: string;
@@ -33,6 +35,9 @@ const DiagnosticTestSchema = new Schema<IDiagnosticTest>(
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+DiagnosticTestSchema.plugin(tenantPlugin);
+DiagnosticTestSchema.index({ tenantId: 1, visit: 1 });
 
 export const DiagnosticTest = mongoose.model<IDiagnosticTest>(
   "DiagnosticTest",

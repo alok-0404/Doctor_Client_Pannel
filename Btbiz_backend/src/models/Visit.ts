@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
+import { tenantPlugin } from "../tenant/tenantPlugin";
 import { PatientId } from "./Patient";
 
 export type AppointmentChannel = "ONLINE_BOOKING" | "WALK_IN";
@@ -80,6 +81,9 @@ const VisitSchema = new Schema<IVisit>(
 );
 
 VisitSchema.index({ doctor: 1, visitDate: 1, appointmentChannel: 1 });
+VisitSchema.plugin(tenantPlugin);
+VisitSchema.index({ tenantId: 1, visitDate: -1 });
+VisitSchema.index({ tenantId: 1, patient: 1, visitDate: -1 });
 
 export const Visit = mongoose.model<IVisit>("Visit", VisitSchema);
 
