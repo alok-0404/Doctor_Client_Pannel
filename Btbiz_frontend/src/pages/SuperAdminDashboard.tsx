@@ -2,8 +2,15 @@ import { useMemo, useState, useEffect, useCallback } from 'react'
 import { toast } from 'react-toastify'
 
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
 import { Card } from '../components/ui/Card'
-import { DnaLoader } from '../components/ui/DnaLoader'
+import { DataTable } from '../components/ui/DataTable'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { EmptyState } from '../components/ui/EmptyState'
+import { StatCard } from '../components/ui/StatCard'
+import { LabIcon, PharmacyIcon, UserIcon } from '../components/ui/icons'
 import { authStorage } from '../utils/authStorage'
 import {
   authService,
@@ -14,6 +21,14 @@ import {
 
 type CardKey = 'doctors' | 'assistants' | 'labAssistants' | 'pharmacies' | 'labs' | 'diagnostics'
 
+const CARD_KEYS: CardKey[] = [
+  'doctors',
+  'assistants',
+  'labAssistants',
+  'pharmacies',
+  'labs',
+  'diagnostics',
+]
 const cardTitleMap: Record<CardKey, string> = {
   doctors: 'Doctors',
   assistants: 'Assistants',
@@ -276,16 +291,8 @@ export const SuperAdminDashboard = () => {
     onEdit: () => void,
     onDelete: () => void
   ) => (
-    <td
-      style={{
-        padding: '10px 8px',
-        borderBottom: '1px solid #f1f5f9',
-        whiteSpace: 'nowrap',
-        textAlign: 'center',
-        width: '1%',
-      }}
-    >
-      <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
+    <td className="super-admin-td-actions">
+      <div className="super-admin-row-actions">
         <button
           type="button"
           className="ui-button ui-button-edit ui-button-sm"
@@ -306,154 +313,134 @@ export const SuperAdminDashboard = () => {
 
   const renderSimpleList = (items: SuperAdminListItem[]) => {
     if (items.length === 0) {
-      return <p className="dashboard-body">No records found.</p>
+      return (
+        <EmptyState
+          className="super-admin-empty-state"
+          icon={<UserIcon size={22} />}
+          title="No records yet"
+          message="New staff accounts will appear in this list."
+        />
+      )
     }
+
+    const columns =
+      openCard === 'doctors'
+        ? [
+            { label: 'Name' },
+            { label: 'Email' },
+            { label: 'Phone' },
+            { label: 'Status' },
+            { label: 'Approval' },
+            { label: 'Action', align: 'center' as const },
+          ]
+        : [
+            { label: 'Name' },
+            { label: 'Email' },
+            { label: 'Phone' },
+            { label: 'Status' },
+          ]
+
     return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Name</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Email</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Phone</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-              {openCard === 'doctors' && (
-                <>
-                  <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Approval</th>
-                  <th
-                    style={{
-                      padding: '10px 8px',
-                      borderBottom: '1px solid #e2e8f0',
-                      textAlign: 'center',
-                      whiteSpace: 'nowrap',
-                      width: '1%',
-                    }}
-                  >
-                    Action
-                  </th>
-                </>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((i) => (
-              <tr key={i.id}>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.name}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.email}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{i.phone}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9', color: i.status ? '#2e7d32' : '#b91c1c' }}>
-                  {i.status ? 'Active' : 'Inactive'}
+      <DataTable
+        className="super-admin-data-table"
+        columns={columns}
+        stickyHeader={items.length > 5}
+      >
+        {items.map((i) => (
+          <tr key={i.id}>
+            <td>{i.name}</td>
+            <td>{i.email}</td>
+            <td>{i.phone}</td>
+            <td className={i.status ? 'super-admin-td-status super-admin-td-status--active' : 'super-admin-td-status super-admin-td-status--inactive'}>
+              {i.status ? 'Active' : 'Inactive'}
+            </td>
+            {openCard === 'doctors' && (
+              <>
+                <td
+                  className={
+                    i.approvalStatus === 'APPROVED'
+                      ? 'super-admin-td-status super-admin-td-status--active'
+                      : i.approvalStatus === 'REJECTED'
+                        ? 'super-admin-td-status super-admin-td-status--inactive'
+                        : 'super-admin-td-status super-admin-td-status--pending'
+                  }
+                >
+                  {i.approvalStatus ?? 'APPROVED'}
                 </td>
-                {openCard === 'doctors' && (
-                  <>
-                    <td
-                      style={{
-                        padding: '10px 8px',
-                        borderBottom: '1px solid #f1f5f9',
-                        color:
-                          i.approvalStatus === 'APPROVED'
-                            ? '#2e7d32'
-                            : i.approvalStatus === 'REJECTED'
-                              ? '#b91c1c'
-                              : '#b45309',
-                      }}
+                <td className="super-admin-td-actions">
+                  <div className="super-admin-row-actions">
+                    <button
+                      type="button"
+                      className="ui-button ui-button-sm"
+                      disabled={i.approvalStatus === 'APPROVED'}
+                      onClick={() => handleDoctorApproval(i, 'APPROVED')}
                     >
-                      {i.approvalStatus ?? 'APPROVED'}
-                    </td>
-                    <td
-                      style={{
-                        padding: '10px 8px',
-                        borderBottom: '1px solid #f1f5f9',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center',
-                        width: '1%',
-                      }}
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-button ui-button-danger-outline ui-button-sm"
+                      disabled={i.approvalStatus === 'REJECTED'}
+                      onClick={() => handleDoctorApproval(i, 'REJECTED')}
                     >
-                      <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'center' }}>
-                        <button
-                          type="button"
-                          className="ui-button ui-button-sm"
-                          disabled={i.approvalStatus === 'APPROVED'}
-                          onClick={() => handleDoctorApproval(i, 'APPROVED')}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          className="ui-button ui-button-danger-outline ui-button-sm"
-                          disabled={i.approvalStatus === 'REJECTED'}
-                          onClick={() => handleDoctorApproval(i, 'REJECTED')}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                      Reject
+                    </button>
+                  </div>
+                </td>
+              </>
+            )}
+          </tr>
+        ))}
+      </DataTable>
     )
   }
 
   const renderTenantList = (tenants: SuperAdminTenant[]) => {
     if (tenants.length === 0) {
       return (
-        <p className="dashboard-body">
-          No tenants yet. Use <strong>Add {openCard === 'pharmacies' ? 'Pharmacy' : 'Lab'}</strong> above.
-        </p>
+        <EmptyState
+          className="super-admin-empty-state"
+          icon={openCard === 'pharmacies' ? <PharmacyIcon size={22} /> : <LabIcon size={22} />}
+          title={`No ${openCard === 'pharmacies' ? 'pharmacies' : 'labs'} yet`}
+          message={`Use Add ${openCard === 'pharmacies' ? 'pharmacy' : 'lab'} above to onboard a new tenant.`}
+        />
       )
     }
+
     return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Business</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Slug</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Owner login</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Phone</th>
-              <th style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0' }}>Status</th>
-              <th
-                style={{
-                  padding: '10px 8px',
-                  borderBottom: '1px solid #e2e8f0',
-                  textAlign: 'center',
-                  whiteSpace: 'nowrap',
-                  width: '1%',
-                }}
-              >
-                Action
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {tenants.map((t) => (
-              <tr key={t.id}>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{t.name}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{t.slug}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>
-                  {t.ownerEmail ?? '—'}
-                  {t.ownerName ? ` (${t.ownerName})` : ''}
-                </td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>{t.phone ?? '—'}</td>
-                <td style={{ padding: '10px 8px', borderBottom: '1px solid #f1f5f9', color: t.status === 'ACTIVE' ? '#2e7d32' : '#b91c1c' }}>
-                  {t.status}
-                </td>
-                {renderActions(
-                  () => openEditTenant(t),
-                  () => handleDeleteTenant(t)
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        className="super-admin-data-table"
+        columns={[
+          { label: 'Business' },
+          { label: 'Slug' },
+          { label: 'Owner login' },
+          { label: 'Phone' },
+          { label: 'Status' },
+          { label: 'Action', align: 'center' },
+        ]}
+        stickyHeader={tenants.length > 5}
+      >
+        {tenants.map((t) => (
+          <tr key={t.id}>
+            <td>{t.name}</td>
+            <td>{t.slug}</td>
+            <td>
+              {t.ownerEmail ?? '—'}
+              {t.ownerName ? ` (${t.ownerName})` : ''}
+            </td>
+            <td>{t.phone ?? '—'}</td>
+            <td className={t.status === 'ACTIVE' ? 'super-admin-td-status super-admin-td-status--active' : 'super-admin-td-status super-admin-td-status--inactive'}>
+              {t.status}
+            </td>
+            {renderActions(
+              () => openEditTenant(t),
+              () => handleDeleteTenant(t)
+            )}
+          </tr>
+        ))}
+      </DataTable>
     )
   }
-
   const renderPartnerForm = () => {
     const isEdit = !!editTarget
     return (
@@ -577,107 +564,109 @@ export const SuperAdminDashboard = () => {
   }
 
   return (
-    <div className="app-shell">
-      <Header clinicName="Super Admin Dashboard" doctorName={name} />
-      <main className="dashboard-main">
-        <section className="dashboard-left" style={{ width: '100%' }}>
-          <Card className="dashboard-overview-card">
-            <p className="dashboard-kicker">Overview</p>
-            <h2 className="dashboard-heading">Tenant management</h2>
-            <p className="dashboard-body">
-              Add pharmacy / lab tenants here. Fill shop address (city + pincode) so patients see km distance and can choose the nearest one.
-              Use “Fix km distance” after adding shops.
-            </p>
-            {!!overview && overview.summary.pendingDoctorApprovals > 0 && (
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  background: '#fff7ed',
-                  border: '1px solid #fed7aa',
-                  color: '#9a3412',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                Notification: {overview.summary.pendingDoctorApprovals} doctor approval request
+    <AppLayout
+      showSidebar
+      header={<Header clinicName="Super Admin Dashboard" doctorName={name} />}
+      breadcrumb={(
+        <Breadcrumb
+          items={[
+            { label: 'Home', href: '/' },
+            { label: 'Super Admin' },
+          ]}
+        />
+      )}
+    >
+      <main className="dashboard-main super-admin-dashboard-main">
+        <section className="super-admin-dashboard-section">
+          <PageHeader
+            className="super-admin-page-header"
+            title="Super Admin"
+            subtitle="Add pharmacy and lab tenants, approve doctors, and manage staff. Fill shop address (city + pincode) so patients see km distance — use Fix km distance after adding shops."
+          />
+
+          {!!overview && overview.summary.pendingDoctorApprovals > 0 && (
+            <Card className="dashboard-overview-card super-admin-alert-card">
+              <p className="super-admin-alert-copy">
+                {overview.summary.pendingDoctorApprovals} doctor approval request
                 {overview.summary.pendingDoctorApprovals > 1 ? 's are' : ' is'} pending.
-                Open <strong>Doctors</strong> card to approve/reject.
-              </div>
-            )}
-          </Card>
-
-          {loading && (
-            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
-              <DnaLoader label="Loading data…" />
-            </div>
+                Open <strong>Doctors</strong> below to approve or reject.
+              </p>
+            </Card>
           )}
-          {error && <p className="dashboard-body" style={{ marginTop: 12, color: '#b91c1c' }}>{error}</p>}
 
-          {!loading && !error && (
-            <>
-              <div style={{ marginTop: 14, display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 6 }}>
-                {summaryCards.map((c) => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => {
-                      setOpenCard(c.key)
-                      resetFormState()
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      border: openCard === c.key ? '2px solid #1e40af' : '1px solid #dbeafe',
-                      borderRadius: 12,
-                      background: '#fff',
-                      padding: '12px 14px',
-                      cursor: 'pointer',
-                      minWidth: 170,
-                      flex: '0 0 auto',
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>{cardTitleMap[c.key]}</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: '#0f172a' }}>{c.count}</div>
-                  </button>
-                ))}
-              </div>
-              {openCard && (
-                <Card className="dashboard-overview-card" style={{ marginTop: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-                    <p className="dashboard-kicker" style={{ marginBottom: 0 }}>{cardTitleMap[openCard]}</p>
-                    {canAddPartner && !showForm && (
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="public-cta"
-                          style={{ padding: '8px 14px' }}
-                          onClick={openCreateForm}
-                        >
-                          {openCard === 'pharmacies' ? 'Add Pharmacy' : 'Add Lab'}
-                        </button>
-                        <button
-                          type="button"
-                          className="public-cta-secondary"
-                          style={{ padding: '8px 14px' }}
-                          disabled={geocoding}
-                          onClick={() => void handleGeocodePartners()}
-                        >
-                          {geocoding ? 'Updating map…' : 'Fix km distance (save map pins)'}
-                        </button>
-                      </div>
-                    )}
+          <div className="super-admin-stats">
+            {CARD_KEYS.map((key) => {
+              const card = summaryCards.find((c) => c.key === key)
+              const isActive = openCard === key
+              return (
+                <StatCard
+                  key={key}
+                  className={`super-admin-stat-card${isActive ? ' super-admin-stat-card--active' : ''}`}
+                  title={cardTitleMap[key]}
+                  value={loading ? <Skeleton width={48} height={30} /> : (card?.count ?? '—')}
+                  trend={
+                    key === 'doctors' && overview && overview.summary.pendingDoctorApprovals > 0
+                      ? {
+                          label: `${overview.summary.pendingDoctorApprovals} pending approval`,
+                          direction: 'neutral',
+                        }
+                      : undefined
+                  }
+                  disabled={loading}
+                  onClick={() => {
+                    setOpenCard(key)
+                    resetFormState()
+                  }}
+                />
+              )
+            })}
+          </div>
+
+          {error && (
+            <p className="dashboard-body super-admin-error-copy">{error}</p>
+          )}
+
+          {openCard && (
+            <Card className="dashboard-overview-card super-admin-panel-card">
+              <div className="super-admin-panel-header">
+                <p className="dashboard-kicker super-admin-panel-kicker">{cardTitleMap[openCard]}</p>
+                {canAddPartner && !showForm && (
+                  <div className="super-admin-panel-actions">
+                    <button
+                      type="button"
+                      className="ui-button ui-button-primary ui-button-sm"
+                      onClick={openCreateForm}
+                    >
+                      {openCard === 'pharmacies' ? 'Add pharmacy' : 'Add lab'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-button ui-button-secondary ui-button-sm"
+                      disabled={geocoding}
+                      onClick={() => void handleGeocodePartners()}
+                    >
+                      {geocoding ? 'Updating map…' : 'Fix km distance (save map pins)'}
+                    </button>
                   </div>
+                )}
+              </div>
 
-                  {showForm && canAddPartner && renderPartnerForm()}
+              {showForm && canAddPartner && renderPartnerForm()}
 
-                  <div style={{ marginTop: 12 }}>{renderCardContent()}</div>
-                </Card>
-              )}
-            </>
+              <div className="super-admin-panel-body">
+                {loading || geocoding ? (
+                  <div className="super-admin-skeleton-stack" aria-busy="true" aria-label="Loading records">
+                    <Skeleton lines={2} />
+                    <Skeleton variant="rect" height={220} />
+                  </div>
+                ) : (
+                  renderCardContent()
+                )}
+              </div>
+            </Card>
           )}
         </section>
       </main>
-    </div>
+    </AppLayout>
   )
 }

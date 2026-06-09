@@ -18,6 +18,22 @@ export const GlobalBackButton = () => {
     '/super-admin',
   ])
 
+  /** Pages using AppLayout sidebar — back button sits in main column, not over sidebar brand. */
+  const sidebarLayoutRoots = new Set([
+    '/dashboard',
+    '/assistant',
+    '/lab',
+    '/lab-manager',
+    '/medicine',
+    '/super-admin',
+    '/ocr',
+    '/search-patients',
+  ])
+
+  const usesSidebarLayout =
+    sidebarLayoutRoots.has(location.pathname) ||
+    location.pathname.startsWith('/patient/')
+
   const handleBack = () => {
     if (dashboardRoots.has(location.pathname)) {
       setShowLogoutConfirm(true)
@@ -46,22 +62,7 @@ export const GlobalBackButton = () => {
         type="button"
         onClick={handleBack}
         aria-label="Go back"
-        style={{
-          position: 'fixed',
-          top: 14,
-          left: 14,
-          zIndex: 1000,
-          width: 30,
-          height: 30,
-          borderRadius: 999,
-          border: '1px solid #cbd5e1',
-          background: '#ffffff',
-          color: '#0f172a',
-          display: 'grid',
-          placeItems: 'center',
-          cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(15, 23, 42, 0.08)'
-        }}
+        className={`global-back-btn${usesSidebarLayout ? ' global-back-btn--sidebar-layout' : ''}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
           <path d="M11.78 4.22a.75.75 0 0 1 0 1.06L7.06 10l4.72 4.72a.75.75 0 0 1-1.06 1.06l-5.25-5.25a.75.75 0 0 1 0-1.06l5.25-5.25a.75.75 0 0 1 1.06 0Z" />

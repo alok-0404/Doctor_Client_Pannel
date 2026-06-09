@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authService } from '../services/api'
 import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { LoginHomeLink } from '../components/LoginHomeLink'
@@ -51,8 +53,8 @@ export const Register = () => {
   }
 
   return (
-    <div className="page-center">
-      <div className="ui-card login-layout">
+    <div className="page-center login-page">
+      <Card className="login-layout" elevated>
         <div className="login-panel">
           <div className="login-brand-row">
             <div className="login-brand">
@@ -61,71 +63,67 @@ export const Register = () => {
             <LoginHomeLink />
           </div>
 
-          <h1 className="login-heading">
-            Create account
-          </h1>
-          <p className="login-tagline">
-            Register doctor profile. Account super admin approval ke baad activate hoga.
-          </p>
+          <PageHeader
+            className="login-page-header"
+            title="Create account"
+            subtitle="Register your doctor profile. Account activates after Super Admin approval."
+          />
 
-          <form
-            onSubmit={handleSubmit}
-            className="login-form"
-          >
-            <TextField
-              id="name"
-              type="text"
-              label="Full name"
-              placeholder="Dr. Basant Tomar"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <TextField
-              id="email"
-              type="email"
-              label="Email"
-              autoComplete="email"
-              placeholder="doctor@medigraph.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <CountryCodePhoneInput
-              id="phone"
-              label="Registered WhatsApp number"
-              countryCode={countryCode}
-              onCountryCodeChange={setCountryCode}
-              phoneDigits={phoneDigits}
-              onPhoneDigitsChange={setPhoneDigits}
-            />
-            <TextField
-              id="password"
-              type="password"
-              label="Password"
-              autoComplete="new-password"
-              placeholder="Choose a strong password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              canTogglePassword
-            />
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="login-form-fields">
+              <TextField
+                id="name"
+                type="text"
+                label="Full name"
+                placeholder="Dr. Basant Tomar"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <TextField
+                id="email"
+                type="email"
+                label="Email"
+                autoComplete="email"
+                placeholder="doctor@medigraph.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <CountryCodePhoneInput
+                id="phone"
+                label="Registered WhatsApp number"
+                countryCode={countryCode}
+                onCountryCodeChange={setCountryCode}
+                phoneDigits={phoneDigits}
+                onPhoneDigitsChange={setPhoneDigits}
+              />
+              <TextField
+                id="password"
+                type="password"
+                label="Password"
+                autoComplete="new-password"
+                placeholder="Choose a strong password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                canTogglePassword
+              />
+            </div>
 
             {error && (
-              <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+              <p className="login-message login-message--error" role="alert">
                 {error}
               </p>
             )}
             {success && (
-              <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+              <p className="login-message login-message--success" role="status">
                 {success}
               </p>
             )}
 
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full"
-            >
-              {loading ? 'Creating account…' : 'Register'}
-            </Button>
+            <div className="login-form-actions">
+              <Button type="submit" disabled={loading} fullWidth>
+                {loading ? 'Creating account…' : 'Register'}
+              </Button>
+            </div>
 
             <div className="login-secondary-text">
               Already have an account?{' '}
@@ -141,10 +139,17 @@ export const Register = () => {
         </div>
 
         <div className="login-image-panel">
-          <div className="login-image-frame" />
+          <div className="login-image-frame">
+            <div className="login-image-overlay">
+              <p className="login-image-kicker">Doctor onboarding</p>
+              <p className="login-image-title">Join the clinical workspace</p>
+              <p className="login-image-text">
+                Manage patients, visits, and prescriptions once your account is approved.
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }
-

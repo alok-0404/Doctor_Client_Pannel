@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
 import { ClinicLocationSetup } from '../components/ClinicLocationSetup'
 import { authStorage } from '../utils/authStorage'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { DataTable } from '../components/ui/DataTable'
+import { EmptyState } from '../components/ui/EmptyState'
+import { PageHeader } from '../components/ui/PageHeader'
+import { UserIcon } from '../components/ui/icons'
+import { Skeleton } from '../components/ui/Skeleton'
+import { StatCard } from '../components/ui/StatCard'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { authService, type AssistantSummary } from '../services/api'
@@ -22,15 +31,19 @@ export const LabManagerDashboard = () => {
   const [labError, setLabError] = useState<string | null>(null)
   const [labSuccess, setLabSuccess] = useState<string | null>(null)
   const [labAssistants, setLabAssistants] = useState<AssistantSummary[]>([])
+  const [assistantsLoading, setAssistantsLoading] = useState(true)
   const [labAssistantsOpen, setLabAssistantsOpen] = useState(true)
   const [deletingAssistantId, setDeletingAssistantId] = useState<string | null>(null)
 
   const loadLabAssistants = async () => {
     try {
+      setAssistantsLoading(true)
       const list = await authService.listLabAssistants()
       setLabAssistants(list)
     } catch {
       // ignore
+    } finally {
+      setAssistantsLoading(false)
     }
   }
 
@@ -90,126 +103,131 @@ export const LabManagerDashboard = () => {
   }
 
   return (
-    <div className="app-shell">
-      <Header doctorName={name} />
-      <div style={{ maxWidth: 640, margin: '12px auto 0', padding: '0 16px' }}>
-        <ClinicLocationSetup />
-      </div>
-      <main className="dashboard-main">
-        <section className="dashboard-left" style={{ maxWidth: 640 }}>
-          <Card className="dashboard-overview-card">
-            <p className="dashboard-kicker">Lab Manager panel</p>
-            <h2 className="dashboard-heading">Good day, {name}</h2>
-            <p
-              className="dashboard-body"
-              style={{
-                marginBottom: 12,
-                padding: '10px 12px',
-                borderRadius: 8,
-                background: '#ecfdf5',
-                color: '#065f46',
-                fontWeight: 500,
-              }}
-            >
-              Your lab is already registered (Super Admin onboarding). You are logged in as the lab owner — no need to
-              Register again on the home page.
-            </p>
-            <p className="dashboard-body">
-              Open the lab workspace to search patients, record tests, and handle incoming orders — same as your lab
-              assistants. Optionally add assistants below so they can sign in under Assistant / Lab.
-            </p>
-            <button
-              type="button"
-              className="ui-button ui-button-primary"
-              style={{ marginTop: 8 }}
-              onClick={() => navigate('/lab')}
-            >
-              Open lab workspace
-            </button>
-          </Card>
+    <>
+      <AppLayout
+        showSidebar
+        header={(
+          <>
+            <Header doctorName={name} />
+            <div className="staff-clinic-setup-bar">
+              <ClinicLocationSetup />
+            </div>
+          </>
+        )}
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Lab Assistants' },
+            ]}
+          />
+        )}
+      >
+        <main className="dashboard-main lab-manager-dashboard-main">
+          <section className="lab-manager-dashboard-section">
+            <PageHeader
+              className="lab-manager-page-header"
+              title="Lab Assistants"
+              subtitle="Manage your lab team, save shop location for patient distance, and open the lab workspace to fulfill test orders."
+            />
 
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
+            <div className="lab-manager-dashboard-stats">
+              <StatCard
+                title="Lab assistants"
+                value={assistantsLoading ? <Skeleton width={40} height={30} /> : labAssistants.length}
+              />
+              <StatCard
+                title="Lab owner"
+                value={assistantsLoading ? <Skeleton width={120} height={30} /> : name}
+              />
+              <StatCard
+                title="Lab workspace"
+                value={assistantsLoading ? <Skeleton width={72} height={30} /> : 'Ready'}
+                trend={{ label: 'Open to search patients & orders', direction: 'neutral' }}
+              />
+            </div>
+
+            <Card className="dashboard-overview-card lab-manager-overview-card">
+              <p className="dashboard-kicker">Lab Manager panel</p>
+              <p className="lab-manager-onboard-note">
+                Your lab is already registered (Super Admin onboarding). You are logged in as the lab owner — no need to
+                register again on the home page.
+              </p>
+              <p className="dashboard-body">
+                Open the lab workspace to search patients, record tests, and handle incoming orders — same as your lab
+                assistants. Optionally add assistants below so they can sign in under Lab.
+              </p>
+              <Button
+                type="button"
+                className="lab-manager-open-workspace-btn"
+                onClick={() => navigate('/lab')}
+              >
+                Open lab workspace
+              </Button>
+            </Card>
+
+            <Card className="dashboard-overview-card lab-manager-assistants-card">
               <button
                 type="button"
                 onClick={() => setLabAssistantsOpen((o) => !o)}
-                style={{
-                  border: 'none',
-                  background: 'none',
-                  padding: 0,
-                  margin: 0,
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                }}
+                className="lab-manager-collapsible-header"
               >
                 <p className="dashboard-kicker">Lab assistants</p>
                 <span
-                  style={{
-                    display: 'inline-block',
-                    fontSize: 16,
-                    transform: labAssistantsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                    transition: 'transform 0.16s ease',
-                    color: '#9fb3c8',
-                  }}
+                  className={`lab-manager-collapsible-chevron${
+                    labAssistantsOpen ? ' lab-manager-collapsible-chevron--open' : ''
+                  }`}
                 >
                   ▾
                 </span>
               </button>
+
               {labAssistantsOpen && (
                 <>
-                  {labAssistants.length === 0 && (
-                    <p className="dashboard-body" style={{ marginTop: 8 }}>
-                      No lab assistants yet (optional). You can work from the lab workspace yourself, or add assistants
-                      here for extra staff logins.
-                    </p>
-                  )}
-                  {labAssistants.length > 0 && (
+                  {assistantsLoading ? (
+                    <div className="lab-manager-skeleton-stack" aria-busy="true" aria-label="Loading lab assistants">
+                      <Skeleton variant="rect" height={56} />
+                      <Skeleton variant="rect" height={56} />
+                      <Skeleton lines={2} />
+                    </div>
+                  ) : labAssistants.length === 0 ? (
+                    <EmptyState
+                      className="lab-manager-empty-state"
+                      icon={<UserIcon size={22} />}
+                      title="No lab assistants yet"
+                      message="You can use the lab workspace yourself, or add assistants for extra staff logins."
+                    />
+                  ) : (
                     <>
-                      <p className="dashboard-body" style={{ marginTop: 8, marginBottom: 4 }}>
+                      <p className="dashboard-body lab-manager-assistant-count">
                         {labAssistants.length} lab assistant{labAssistants.length !== 1 ? 's' : ''} added
                       </p>
-                      <ul
-                        style={{
-                          listStyle: 'none',
-                          padding: 0,
-                          marginTop: 10,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6,
-                        }}
+                      <DataTable
+                        className="lab-manager-data-table"
+                        columns={[
+                          { label: 'Name' },
+                          { label: 'Phone' },
+                          { label: 'Added' },
+                          { label: 'Action', align: 'center' },
+                        ]}
+                        stickyHeader={labAssistants.length > 5}
                       >
                         {labAssistants.map((c) => (
-                          <li
-                            key={c.id}
-                            style={{
-                              fontSize: 12,
-                              padding: '8px 10px',
-                              borderRadius: 12,
-                              backgroundColor: '#f5f9fc',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              gap: 8,
-                            }}
-                          >
-                            <div>
-                              <strong>{c.name}</strong>
-                              <div style={{ color: '#607d8b' }}>{c.phone}</div>
-                              {c.createdAt && (
-                                <div style={{ fontSize: 11, color: '#9fb3c8', marginTop: 2 }}>
-                                  Added: {new Date(c.createdAt).toLocaleString('en-IN', {
+                          <tr key={c.id}>
+                            <td className="lab-manager-td-name">{c.name}</td>
+                            <td className="lab-manager-td-muted">{c.phone}</td>
+                            <td className="lab-manager-td-muted">
+                              {c.createdAt
+                                ? new Date(c.createdAt).toLocaleString('en-IN', {
                                     day: '2-digit',
                                     month: 'short',
                                     year: 'numeric',
                                     hour: '2-digit',
                                     minute: '2-digit',
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                            <div>
+                                  })
+                                : '—'}
+                            </td>
+                            <td className="lab-manager-td-actions">
                               <button
                                 type="button"
                                 className="ui-button ui-button-danger-outline ui-button-sm"
@@ -218,16 +236,23 @@ export const LabManagerDashboard = () => {
                               >
                                 {deletingAssistantId === c.id ? 'Deleting…' : 'Delete'}
                               </button>
-                            </div>
-                          </li>
+                            </td>
+                          </tr>
                         ))}
-                      </ul>
+                      </DataTable>
                     </>
                   )}
-                  <button
+
+                  {labSuccess && !showAddLabAssistant && (
+                    <p className="lab-manager-inline-msg lab-manager-inline-msg--ok">{labSuccess}</p>
+                  )}
+                  {labError && !showAddLabAssistant && (
+                    <p className="lab-manager-inline-msg lab-manager-inline-msg--err">{labError}</p>
+                  )}
+
+                  <Button
                     type="button"
-                    className="ui-button ui-button-primary"
-                    style={{ marginTop: 12 }}
+                    className="lab-manager-add-btn"
                     onClick={() => {
                       setShowAddLabAssistant(true)
                       setLabError(null)
@@ -235,13 +260,13 @@ export const LabManagerDashboard = () => {
                     }}
                   >
                     Add lab assistant
-                  </button>
+                  </Button>
                 </>
               )}
             </Card>
-          </div>
-        </section>
-      </main>
+          </section>
+        </main>
+      </AppLayout>
 
       {showAddLabAssistant && (
         <div className="dialog-backdrop">
@@ -315,6 +340,6 @@ export const LabManagerDashboard = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

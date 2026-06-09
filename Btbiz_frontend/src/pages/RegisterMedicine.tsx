@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { LoginHomeLink } from '../components/LoginHomeLink'
@@ -57,8 +59,8 @@ export const RegisterMedicine = () => {
   }
 
   return (
-    <div className="page-center">
-      <div className="ui-card login-layout">
+    <div className="page-center login-page">
+      <Card className="login-layout" elevated>
         <div className="login-panel">
           <div className="login-brand-row">
             <div className="login-brand">
@@ -67,62 +69,67 @@ export const RegisterMedicine = () => {
             <LoginHomeLink />
           </div>
 
-          <h1 className="login-heading">Medicine – Create account</h1>
-          <p className="login-tagline">
-            Register your medical shop. Search patients by mobile, add medicines with MRP and discount, collect payment and generate receipt.
-          </p>
+          <PageHeader
+            className="login-page-header"
+            title="Medicine – Create account"
+            subtitle="Register your medical shop. Search patients, add medicines with MRP and discount, collect payment and generate receipts."
+          />
 
           <form onSubmit={handleSubmit} className="login-form">
-            <TextField
-              id="name"
-              type="text"
-              label="Full name / Shop name"
-              placeholder="Medical Shop Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <TextField
-              id="email"
-              type="email"
-              label="Email"
-              autoComplete="email"
-              placeholder="shop@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <CountryCodePhoneInput
-              id="phone"
-              label="Mobile number"
-              countryCode={countryCode}
-              onCountryCodeChange={setCountryCode}
-              phoneDigits={phoneDigits}
-              onPhoneDigitsChange={setPhoneDigits}
-            />
-            <TextField
-              id="password"
-              type="password"
-              label="Password"
-              autoComplete="new-password"
-              placeholder="Choose a strong password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              canTogglePassword
-            />
+            <div className="login-form-fields">
+              <TextField
+                id="name"
+                type="text"
+                label="Full name / Shop name"
+                placeholder="Medical Shop Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <TextField
+                id="email"
+                type="email"
+                label="Email"
+                autoComplete="email"
+                placeholder="shop@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <CountryCodePhoneInput
+                id="phone"
+                label="Mobile number"
+                countryCode={countryCode}
+                onCountryCodeChange={setCountryCode}
+                phoneDigits={phoneDigits}
+                onPhoneDigitsChange={setPhoneDigits}
+              />
+              <TextField
+                id="password"
+                type="password"
+                label="Password"
+                autoComplete="new-password"
+                placeholder="Choose a strong password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                canTogglePassword
+              />
+            </div>
 
             {error && (
-              <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+              <p className="login-message login-message--error" role="alert">
                 {error}
               </p>
             )}
             {success && (
-              <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+              <p className="login-message login-message--success" role="status">
                 {success}
               </p>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? 'Creating account…' : 'Register as Medicine'}
-            </Button>
+            <div className="login-form-actions">
+              <Button type="submit" disabled={loading} fullWidth>
+                {loading ? 'Creating account…' : 'Register as medicine'}
+              </Button>
+            </div>
 
             <div className="login-secondary-text">
               Already have an account?{' '}
@@ -138,9 +145,17 @@ export const RegisterMedicine = () => {
         </div>
 
         <div className="login-image-panel">
-          <div className="login-image-frame" />
+          <div className="login-image-frame">
+            <div className="login-image-overlay">
+              <p className="login-image-kicker">Pharmacy workspace</p>
+              <p className="login-image-title">Dispense with confidence</p>
+              <p className="login-image-text">
+                Fulfill patient medicine orders, manage bills, and print receipts in one place.
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

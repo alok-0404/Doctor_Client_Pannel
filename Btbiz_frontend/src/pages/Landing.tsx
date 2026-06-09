@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
 
 type LandingRole = {
   title: string
@@ -21,7 +23,7 @@ const roles: LandingRole[] = [
     title: 'Doctor',
     description: 'Manage patients, prescriptions and view diagnostic reports.',
     path: '/login',
-    cta: 'Login as Doctor',
+    cta: 'Login as doctor',
     registerPath: '/register',
     registerHint: 'Self-registration requires Super Admin approval before account activation.',
   },
@@ -30,44 +32,44 @@ const roles: LandingRole[] = [
     description:
       'Run your lab: patient search, tests, and orders.',
     path: '/login',
-    cta: 'Login as Lab Manager',
+    cta: 'Login as lab manager',
     registerPath: '/register-lab-manager',
-    
   },
-  { title: 'Assistant / Lab', description: 'Check-in patients, upload documents, or record lab tests.', path: '/login', cta: 'Login as Assistant / Lab', registerPath: null },
+  { title: 'Assistant / Lab', description: 'Check-in patients, upload documents, or record lab tests.', path: '/login', cta: 'Login as assistant / lab', registerPath: null },
   {
     title: 'Pharmacy',
     description:
       'Dispense medicines, search patients by mobile, and manage orders.',
     path: '/login',
-    cta: 'Login as Medicine',
+    cta: 'Login as medicine',
     registerPath: '/register-medicine',
   },
-  { title: 'Super Admin', description: 'Platform-level dashboard for users and system overview.', path: '/login?role=super-admin', cta: 'Login as Super Admin', registerPath: null },
+  { title: 'Super Admin', description: 'Platform-level dashboard for users and system overview.', path: '/login?role=super-admin', cta: 'Login as super admin', registerPath: null },
 ]
 
 export const Landing = () => {
   return (
     <div className="landing-page">
       <div className="landing-content">
-        <div className="login-brand" style={{ marginBottom: 24 }}>
+        <div className="landing-brand">
           <span className="login-logo-pill">MEDIGRAPH</span>
         </div>
-        <h1 className="landing-title">Welcome</h1>
-        <p className="landing-lead">
-          A simple clinical workspace for doctors, lab managers and assistants.
-          Manage patients, visits, prescriptions and diagnostic tests in one place.
-        </p>
+
+        <PageHeader
+          className="landing-page-header"
+          title="Welcome"
+          subtitle="A simple clinical workspace for doctors, lab managers and assistants. Manage patients, visits, prescriptions and diagnostic tests in one place."
+        />
 
         <section className="landing-roles" aria-label="App roles">
           <p className="landing-roles-intro">Choose your role and sign in:</p>
           <div className="landing-role-cards">
             {roles.map((r) => (
-              <div key={r.title} className="landing-role-card">
+              <Card key={r.title} className="landing-role-card" interactive>
                 <h2 className="landing-role-title">{r.title}</h2>
                 <p className="landing-role-desc">{r.description}</p>
                 <div className="landing-role-actions">
-                  <Link to={r.path} className="ui-button ui-button-primary">
+                  <Link to={r.path} className="ui-button ui-button-primary ui-button--full-width">
                     {r.cta}
                   </Link>
                   {r.registerPath && (
@@ -81,7 +83,7 @@ export const Landing = () => {
                     </>
                   )}
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         </section>
@@ -108,116 +110,6 @@ export const Landing = () => {
           © {new Date().getFullYear()} MEDIGRAPH. All rights reserved.
         </p>
       </footer>
-
-      <style>{`
-        .landing-page {
-          min-height: 100vh;
-          display: flex;
-          flex-direction: column;
-          background: radial-gradient(circle at top left, #e3f2fd 0, #f5f9fc 40%, #ffffff 100%);
-          color: #102a43;
-        }
-        .landing-content {
-          flex: 1;
-          max-width: 720px;
-          margin: 0 auto;
-          padding: 48px 24px 32px;
-          text-align: center;
-        }
-        .landing-title {
-          font-size: 2rem;
-          font-weight: 700;
-          margin: 0 0 12px;
-          color: #102a43;
-        }
-        .landing-lead {
-          font-size: 1.05rem;
-          line-height: 1.6;
-          color: #486581;
-          margin: 0 0 40px;
-        }
-        .landing-roles-intro {
-          font-size: 0.95rem;
-          color: #627d98;
-          margin: 0 0 16px;
-        }
-        .landing-roles {
-          margin-top: 32px;
-        }
-        .landing-role-cards {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px;
-          justify-content: center;
-        }
-        .landing-role-card {
-          background: #fff;
-          border: 1px solid #d9e2ec;
-          border-radius: 12px;
-          padding: 24px;
-          min-width: 200px;
-          max-width: 260px;
-          text-align: left;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-        }
-        .landing-role-title {
-          font-size: 1.15rem;
-          font-weight: 600;
-          margin: 0 0 8px;
-          color: #102a43;
-        }
-        .landing-role-desc {
-          font-size: 0.9rem;
-          color: #627d98;
-          margin: 0 0 16px;
-          line-height: 1.5;
-        }
-        .landing-role-actions {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .landing-register-link {
-          font-size: 0.9rem;
-          color: #1e88e5;
-        }
-        .landing-register-link:hover {
-          color: #26a69a;
-        }
-        .landing-role-register-hint {
-          font-size: 0.75rem;
-          color: #829ab1;
-          margin: 0;
-          line-height: 1.35;
-        }
-        .landing-footer {
-          padding: 24px 24px 32px;
-          text-align: center;
-          border-top: 1px solid #d9e2ec;
-          background: rgba(255,255,255,0.6);
-        }
-        .landing-social {
-          display: flex;
-          justify-content: center;
-          gap: 16px;
-          margin-bottom: 12px;
-        }
-        .landing-social-icon {
-          color: #627d98;
-          padding: 8px;
-          border-radius: 8px;
-          transition: color 0.15s, background 0.15s;
-        }
-        .landing-social-icon:hover {
-          color: #102a43;
-          background: #e3f2fd;
-        }
-        .landing-copy {
-          font-size: 0.85rem;
-          color: #829ab1;
-          margin: 0;
-        }
-      `}</style>
     </div>
   )
 }

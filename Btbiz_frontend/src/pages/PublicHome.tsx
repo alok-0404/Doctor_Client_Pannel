@@ -1,319 +1,304 @@
+import type { FC } from 'react'
 import { Link } from 'react-router-dom'
+import { PublicLayout } from '../components/layout/PublicLayout'
 import { patientStorage } from '../utils/patientStorage'
+import { Card } from '../components/ui/Card'
+import { StatCard } from '../components/ui/StatCard'
+import {
+  ClockIcon,
+  DocumentIcon,
+  LabIcon,
+  PhoneIcon,
+  PharmacyIcon,
+  UserIcon,
+  type IconProps,
+} from '../components/ui/icons'
 
-const navLinks = [
-  { label: 'Home', to: '/' },
-  { label: 'About Us', to: '#about' },
-  { label: 'Services', to: '#services' },
-  { label: 'Doctors', to: '#doctors' },
-  { label: 'Contact', to: '#contact' },
-  { label: 'Book Appointment', to: '/book-appointment' },
+const SERVICES: Array<{
+  title: string
+  description: string
+  tone: string
+  Icon: FC<IconProps>
+}> = [
+  {
+    title: 'General Consultation',
+    description: 'In-clinic and follow-up visits with experienced physicians for everyday health needs.',
+    tone: 'consult',
+    Icon: UserIcon,
+  },
+  {
+    title: 'Lab Tests & Reports',
+    description: 'Diagnostic tests with secure digital reports patients can access after processing.',
+    tone: 'lab',
+    Icon: LabIcon,
+  },
+  {
+    title: 'Pharmacy & Prescriptions',
+    description: 'Medicine orders, dispensing records, and receipts managed in one connected workflow.',
+    tone: 'pharmacy',
+    Icon: PharmacyIcon,
+  },
+  {
+    title: 'Patient Records',
+    description: 'Unified history for visits, vitals, documents, and family profiles on one portal.',
+    tone: 'records',
+    Icon: DocumentIcon,
+  },
+]
+
+const DOCTORS = [
+  { name: 'Dr. Basant Tomar', specialty: 'General Physician', experience: '15+ years', status: 'Available' },
+  { name: 'Dr. Priya Sharma', specialty: 'Internal Medicine', experience: '12+ years', status: 'Available' },
+  { name: 'Dr. Arjun Mehta', specialty: 'Family Medicine', experience: '10+ years', status: 'In clinic' },
+]
+
+const TRUST_POINTS = [
+  { title: 'Trusted Care', description: 'Experienced clinicians and coordinated lab, pharmacy, and front-desk workflows.' },
+  { title: 'Digital Records', description: 'Secure patient profiles with prescriptions, reports, and appointment history.' },
+  { title: 'Easy Booking', description: 'Online appointment booking for patients and family members in a few steps.' },
 ]
 
 export const PublicHome = () => {
-  const patientToken = patientStorage.getToken()
-  const myProfileTo = patientToken ? '/patient-profile' : '/patient-login'
+  const hasPortalLogin = patientStorage.hasVerifiedPortalLogin()
+  const myProfileTo = hasPortalLogin ? '/patient-profile' : '/patient-login'
+  const myProfileLabel = hasPortalLogin ? 'My profile' : 'Patient login'
 
   return (
-    <div className="public-home">
-      {/* Header + Navbar */}
-      <header className="public-header">
-        <div className="public-header-inner">
-          <Link to="/" className="public-logo">
-            MEDIGRAPH
-          </Link>
-          <div className="public-header-right">
-            <nav className="public-nav" aria-label="Main">
-              {navLinks.map((item) => (
-                <Link key={item.to} to={item.to} className="public-nav-link">
-                  {item.label}
+    <PublicLayout className="public-home-landing">
+        <section className="public-home-hero">
+          <div className="public-home-container public-home-hero-grid">
+            <div className="public-home-hero-copy">
+              <span className="public-home-eyebrow">Your health, our priority</span>
+              <h1 className="public-hero-title public-home-hero-title">
+                Compassionate care with a modern digital clinic experience
+              </h1>
+              <p className="public-hero-lead public-home-hero-lead">
+                Book appointments, access reports, and manage family health records — all in one trusted platform built for patients and clinic staff.
+              </p>
+              <div className="public-home-hero-actions">
+                <Link to="/book-appointment" className="public-cta public-home-cta-primary">
+                  Book appointment
                 </Link>
-              ))}
-              <Link to={myProfileTo} className="public-nav-link">
-                My Profile
+                <Link to={myProfileTo} className="public-cta public-home-cta-secondary">
+                  {myProfileLabel}
+                </Link>
+              </div>
+            </div>
+
+            <div className="public-home-hero-visual" aria-hidden="true">
+              <Card className="public-home-hero-card public-home-lift-card" elevated interactive>
+                <p className="public-home-hero-card-kicker">Clinic at a glance</p>
+                <h2 className="public-home-hero-card-title">Connected patient care</h2>
+                <p className="public-home-hero-card-text">
+                  Doctors, lab, pharmacy, and assistants work on the same secure records — so your visit is smoother from booking to report.
+                </p>
+                <div className="public-home-hero-mini-stats">
+                  <div className="public-home-hero-mini-stat">
+                    <strong>24/7</strong>
+                    <span>Record access</span>
+                  </div>
+                  <div className="public-home-hero-mini-stat">
+                    <strong>Same day</strong>
+                    <span>Lab updates</span>
+                  </div>
+                  <div className="public-home-hero-mini-stat">
+                    <strong>Family</strong>
+                    <span>Profiles</span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+          <div className="public-home-container public-home-hero-info">
+            <div className="public-home-hero-info-item">
+              <span className="public-home-hero-info-icon" aria-hidden="true">
+                <PhoneIcon size={20} />
+              </span>
+              <div>
+                <p className="public-home-hero-info-label">Appointment line</p>
+                <p className="public-home-hero-info-value">Book online anytime</p>
+              </div>
+            </div>
+            <div className="public-home-hero-info-item">
+              <span className="public-home-hero-info-icon" aria-hidden="true">
+                <ClockIcon size={20} />
+              </span>
+              <div>
+                <p className="public-home-hero-info-label">Clinic hours</p>
+                <p className="public-home-hero-info-value">Mon – Sat · 10 AM – 3 PM</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="public-home-stats-band" aria-label="Clinic highlights">
+          <div className="public-home-container public-home-stats-grid">
+            <StatCard title="Happy patients" value="10k+" trend={{ label: 'Trusted locally', direction: 'up' }} className="public-home-stat" />
+            <StatCard title="Expert doctors" value="25+" trend={{ label: 'Multi-specialty', direction: 'neutral' }} className="public-home-stat" />
+            <StatCard title="Years of care" value="15+" trend={{ label: 'Established practice', direction: 'up' }} className="public-home-stat" />
+            <StatCard title="Digital services" value="4+" trend={{ label: 'Lab · Rx · OPD', direction: 'neutral' }} className="public-home-stat" />
+          </div>
+        </section>
+
+        <section id="about" className="public-home-section">
+          <div className="public-home-container public-home-about-grid">
+            <div className="public-home-about-copy">
+              <span className="public-home-section-eyebrow">About us</span>
+              <h2 className="public-section-title public-home-section-title">Healthcare that feels personal and organised</h2>
+              <p className="public-section-text public-home-section-text">
+                We provide quality healthcare with experienced doctors and modern facilities. Our team is dedicated to your wellbeing — from the first appointment to lab reports and pharmacy fulfilment.
+              </p>
+              <ul className="public-home-checklist">
+                <li>Experienced doctors and coordinated clinic staff</li>
+                <li>Secure digital records for every visit</li>
+                <li>Lab, pharmacy, and OPD on one platform</li>
+              </ul>
+            </div>
+            <Card className="public-home-about-card public-home-lift-card" elevated interactive>
+              <p className="public-home-about-card-label">Why patients choose us</p>
+              <h3 className="public-home-about-card-title">End-to-end clinic journey</h3>
+              <p className="public-home-about-card-text">
+                Book online, visit the clinic, receive prescriptions and diagnostics, and revisit your history anytime from your patient profile.
+              </p>
+              <Link to="/book-appointment" className="public-cta public-home-cta-primary public-home-about-cta">
+                Start booking
               </Link>
-            </nav>
-            <Link to="/portal" className="public-nav-staff">
-              For staff only
+            </Card>
+          </div>
+        </section>
+
+        <section id="services" className="public-home-section public-home-section--muted">
+          <div className="public-home-container">
+            <div className="public-home-section-head">
+              <span className="public-home-section-eyebrow">Our services</span>
+              <h2 className="public-section-title public-home-section-title">Complete care under one roof</h2>
+              <p className="public-section-text public-home-section-lead">
+                Everything your family needs — consultation, diagnostics, medicines, and records — connected in MEDIGRAPH.
+              </p>
+            </div>
+            <div className="public-home-services-grid">
+              {SERVICES.map((service) => (
+                <Card
+                  key={service.title}
+                  className={`public-home-service-card public-home-lift-card public-home-service-card--${service.tone}`}
+                  elevated
+                  interactive
+                >
+                  <div className={`public-home-service-media public-home-service-media--${service.tone}`} />
+                  <span className="public-home-service-icon" aria-hidden="true">
+                    <service.Icon size={22} />
+                  </span>
+                  <div className="public-home-service-body">
+                    <h3 className="public-home-service-title">{service.title}</h3>
+                    <p className="public-home-service-text">{service.description}</p>
+                    <Link to="/book-appointment" className="public-home-learn-more">
+                      Learn more <span aria-hidden="true">→</span>
+                    </Link>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="public-home-section">
+          <div className="public-home-container">
+            <div className="public-home-section-head">
+              <span className="public-home-section-eyebrow">Why MEDIGRAPH</span>
+              <h2 className="public-section-title public-home-section-title">Built for patients and clinic teams</h2>
+            </div>
+            <div className="public-home-trust-grid">
+              {TRUST_POINTS.map((point) => (
+                <Card key={point.title} className="public-home-trust-card public-home-lift-card" elevated interactive>
+                  <span className="public-home-trust-accent" aria-hidden="true" />
+                  <h3 className="public-home-trust-title">{point.title}</h3>
+                  <p className="public-home-trust-text">{point.description}</p>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="doctors" className="public-home-section public-home-section--muted">
+          <div className="public-home-container">
+            <div className="public-home-section-head">
+              <span className="public-home-section-eyebrow">Our doctors</span>
+              <h2 className="public-section-title public-home-section-title">Meet our medical professionals</h2>
+              <p className="public-section-text public-home-section-lead">
+                Experienced physicians focused on clear communication and consistent follow-up care.
+              </p>
+            </div>
+            <div className="public-home-doctors-grid">
+              {DOCTORS.map((doctor) => (
+                <Card key={doctor.name} className="public-home-doctor-card public-home-lift-card" elevated interactive>
+                  <div className="public-home-doctor-media">
+                    <span className="public-home-doctor-badge">{doctor.status}</span>
+                    <div className="public-home-doctor-avatar" aria-hidden="true">
+                      {doctor.name.replace(/^Dr\.\s*/, '').charAt(0)}
+                    </div>
+                  </div>
+                  <div className="public-home-doctor-body">
+                    <h3 className="public-home-doctor-name">{doctor.name}</h3>
+                    <p className="public-home-doctor-specialty">{doctor.specialty}</p>
+                    <p className="public-home-doctor-exp">{doctor.experience} experience</p>
+                    <div className="public-home-doctor-actions">
+                      <Link to="/book-appointment" className="public-home-doctor-btn public-home-doctor-btn--ghost">
+                        View profile
+                      </Link>
+                      <Link to="/book-appointment" className="public-home-doctor-btn public-home-doctor-btn--primary">
+                        Book appointment
+                      </Link>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="public-home-cta-band">
+          <div className="public-home-container public-home-cta-band-inner">
+            <div>
+              <h2 className="public-home-cta-band-title">Ready to book your visit?</h2>
+              <p className="public-home-cta-band-text">
+                Choose a family member, pick a date, and confirm — online booking takes only a few minutes.
+              </p>
+            </div>
+            <Link to="/book-appointment" className="public-cta public-home-cta-primary public-home-cta-band-btn">
+              Book appointment
             </Link>
           </div>
-        </div>
-      </header>
-
-      {/* Body */}
-      <main className="public-main">
-        <section className="public-hero">
-          <h1 className="public-hero-title">Welcome to MEDIGRAPH</h1>
-          <p className="public-hero-lead">
-            Your health, our priority. Book appointments, meet our doctors, and get the care you deserve.
-          </p>
-          <Link to="/book-appointment" className="public-cta">
-            Book Appointment
-          </Link>
         </section>
 
-        <section id="about" className="public-section">
-          <h2 className="public-section-title">About Us</h2>
-          <p className="public-section-text">
-            We provide quality healthcare with experienced doctors and modern facilities. Our team is dedicated to your wellbeing.
-          </p>
-        </section>
-
-        <section id="services" className="public-section">
-          <h2 className="public-section-title">Our Services</h2>
-          <ul className="public-list">
-            <li>General consultation</li>
-            <li>Lab tests & reports</li>
-            <li>Prescriptions & follow-ups</li>
-            <li>Patient records & history</li>
-          </ul>
-        </section>
-
-        <section id="doctors" className="public-section">
-          <h2 className="public-section-title">Our Doctors</h2>
-          <p className="public-section-text">
-            Experienced medical professionals for your care. Login as staff to manage patients and appointments.
-          </p>
-        </section>
-
-        <section id="contact" className="public-section">
-          <h2 className="public-section-title">Contact Us</h2>
-          <p className="public-section-text">
-            Reach out for appointments and enquiries. Use &quot;Book Appointment&quot; for online booking.
-          </p>
-        </section>
-      </main>
-
-      {/* Footer */}
-      <footer className="public-footer">
-        <div className="public-footer-inner">
-          <div className="public-footer-links">
-            <Link to="/">Home</Link>
-            <Link to="/#about">About</Link>
-            <Link to="/#services">Services</Link>
-            <Link to="/book-appointment">Book Appointment</Link>
-            <Link to={myProfileTo}>My Profile</Link>
+        <section id="contact" className="public-home-section">
+          <div className="public-home-container public-home-contact-grid">
+            <div>
+              <span className="public-home-section-eyebrow">Contact us</span>
+              <h2 className="public-section-title public-home-section-title">We&apos;re here to help</h2>
+              <p className="public-section-text public-home-section-text">
+                Reach out for appointments and enquiries. For the fastest response, use online booking or your patient profile.
+              </p>
+            </div>
+            <div className="public-home-contact-cards">
+              <Card className="public-home-contact-card public-home-lift-card" elevated interactive>
+                <p className="public-home-contact-label">Appointments</p>
+                <p className="public-home-contact-value">Mon – Sat · 10 AM – 3 PM</p>
+              </Card>
+              <Card className="public-home-contact-card public-home-lift-card" elevated interactive>
+                <p className="public-home-contact-label">Online booking</p>
+                <Link to="/book-appointment" className="public-home-contact-link">
+                  Go to book appointment →
+                </Link>
+              </Card>
+              <Card className="public-home-contact-card public-home-lift-card" elevated interactive>
+                <p className="public-home-contact-label">Patient portal</p>
+                <Link to={myProfileTo} className="public-home-contact-link">
+                  {hasPortalLogin ? 'Open my profile →' : 'Patient login →'}
+                </Link>
+              </Card>
+            </div>
           </div>
-          <p className="public-footer-copy">
-            © {new Date().getFullYear()} MEDIGRAPH. All rights reserved.
-          </p>
-        </div>
-      </footer>
-
-      <style>{`
-        .public-home {
-          min-height: 100vh;
-          display: flex;
-          flex-direction: column;
-          background: #f8fafc;
-          color: #0f172a;
-        }
-        .public-header {
-          background: #fff;
-          border-bottom: 1px solid #e2e8f0;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-        }
-        .public-header-inner {
-          max-width: 1100px;
-          margin: 0 auto;
-          padding: 14px 20px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-        .public-logo {
-          font-size: 1.35rem;
-          font-weight: 700;
-          color: #0f172a;
-          text-decoration: none;
-          letter-spacing: 0.02em;
-        }
-        .public-logo:hover {
-          color: #1e40af;
-        }
-        .public-header-right {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-        .public-nav {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-        .public-nav-link {
-          padding: 8px 12px;
-          color: #475569;
-          text-decoration: none;
-          font-size: 0.95rem;
-          border-radius: 8px;
-          transition: color 0.15s, background 0.15s;
-        }
-        .public-nav-link:hover {
-          color: #0f172a;
-          background: #f1f5f9;
-        }
-        .public-nav-staff {
-          padding: 8px 16px;
-          border-radius: 9999px;
-          background: #0f172a;
-          color: #fff;
-          text-decoration: none;
-          font-size: 0.9rem;
-          font-weight: 600;
-          box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
-          white-space: nowrap;
-        }
-        .public-nav-staff:hover {
-          background: #1e40af;
-          color: #fff;
-        }
-        .public-main {
-          flex: 1;
-          max-width: 800px;
-          margin: 0 auto;
-          padding: 40px 20px 60px;
-          width: 100%;
-        }
-        .public-hero {
-          text-align: center;
-          padding: 48px 24px 56px;
-          background: linear-gradient(135deg, #e0e7ff 0%, #f0f9ff 100%);
-          border-radius: 16px;
-          margin-bottom: 48px;
-        }
-        .public-hero-title {
-          font-size: 2rem;
-          font-weight: 700;
-          margin: 0 0 12px;
-          color: #0f172a;
-        }
-        .public-hero-lead {
-          font-size: 1.1rem;
-          color: #475569;
-          margin: 0 0 24px;
-          line-height: 1.6;
-        }
-        .public-cta {
-          display: inline-block;
-          padding: 12px 24px;
-          background: #1e40af;
-          color: #fff;
-          text-decoration: none;
-          font-weight: 600;
-          border-radius: 10px;
-          transition: background 0.15s;
-        }
-        .public-cta:hover {
-          background: #1e3a8a;
-        }
-        .public-section {
-          margin-bottom: 40px;
-          padding: 24px 0;
-          border-bottom: 1px solid #e2e8f0;
-        }
-        .public-section:last-of-type {
-          border-bottom: none;
-        }
-        .public-section-title {
-          font-size: 1.35rem;
-          font-weight: 600;
-          margin: 0 0 12px;
-          color: #0f172a;
-        }
-        .public-section-text {
-          font-size: 1rem;
-          color: #475569;
-          margin: 0;
-          line-height: 1.6;
-        }
-        .public-list {
-          margin: 0;
-          padding-left: 20px;
-          color: #475569;
-          line-height: 1.8;
-        }
-        .public-footer {
-          margin-top: auto;
-          background: #0f172a;
-          color: #94a3b8;
-          padding: 28px 20px;
-        }
-        .public-footer-inner {
-          max-width: 1100px;
-          margin: 0 auto;
-          text-align: center;
-        }
-        .public-footer-links {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          gap: 16px 24px;
-          margin-bottom: 16px;
-        }
-        .public-footer-links a {
-          color: #cbd5e1;
-          text-decoration: none;
-          font-size: 0.95rem;
-        }
-        .public-footer-links a:hover {
-          color: #fff;
-        }
-        .public-footer-copy {
-          font-size: 0.875rem;
-          margin: 0;
-          color: #64748b;
-        }
-        @media (max-width: 640px) {
-          .public-header-inner {
-            padding: 12px 14px;
-            justify-content: center;
-          }
-          .public-logo {
-            width: 100%;
-            text-align: center;
-          }
-          .public-header-right {
-            justify-content: center;
-          }
-          .public-nav {
-            justify-content: center;
-          }
-          .public-main {
-            padding: 24px 12px 40px;
-          }
-          .public-hero {
-            padding: 34px 14px 38px;
-            margin-bottom: 28px;
-            text-align: center;
-          }
-          .public-hero-title {
-            font-size: clamp(1.7rem, 7vw, 2rem);
-            line-height: 1.2;
-            margin-bottom: 10px;
-            text-wrap: balance;
-          }
-          .public-hero-lead {
-            font-size: 1rem;
-            line-height: 1.55;
-          }
-          .public-section {
-            margin-bottom: 26px;
-            padding: 18px 0;
-            text-align: center;
-          }
-          .public-list {
-            padding-left: 0;
-            list-style-position: inside;
-          }
-        }
-      `}</style>
-    </div>
+        </section>
+    </PublicLayout>
   )
 }

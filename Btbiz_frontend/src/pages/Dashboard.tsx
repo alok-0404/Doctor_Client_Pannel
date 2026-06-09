@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { EmptyState } from '../components/ui/EmptyState'
+import { BellIcon, CalendarIcon, UserIcon } from '../components/ui/icons'
 import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { StatCard } from '../components/ui/StatCard'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
-import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   authService,
   notificationService,
@@ -14,6 +20,25 @@ import {
   type DoctorAppointmentItem,
 } from '../services/api'
 import { authStorage } from '../utils/authStorage'
+
+/** Online / portal / bot bookings — API returns reason & notes, not always source: WHATSAPP. */
+function isWhatsappOrOnlineBooking(a: DoctorAppointmentItem): boolean {
+  const source = String(a.source ?? '').toUpperCase()
+  if (source.includes('WHATSAPP') || source.includes('BOT')) return true
+
+  const reason = String(a.reason ?? '').toUpperCase().replace(/\s+/g, '_')
+  if (
+    reason === 'NEW_CONSULTATION' ||
+    reason === 'REVIEW_APPOINTMENT' ||
+    reason === 'NEW_APPOINTMENT' ||
+    reason === 'FAMILY_APPOINTMENT'
+  ) {
+    return true
+  }
+
+  const notes = String(a.notes ?? '').toUpperCase()
+  return notes.includes('OPD NO:') || notes.includes('PREFERRED TIME:')
+}
 
 export const Dashboard = () => {
   const navigate = useNavigate()
@@ -295,24 +320,67 @@ export const Dashboard = () => {
 
 
   return (
-    <div className="app-shell">
-      <Header
-        doctorName={doctorName}
-        onAddAssistantClick={() => {
-          setShowAddAssistant(true)
-          setCError(null)
-          setCSuccess(null)
-        }}
-      />
-      <main className="dashboard-main">
-        {/* Left: Summary + cards */}
+    <>
+      <AppLayout
+        showSidebar
+        header={(
+          <Header
+            doctorName={doctorName}
+            onAddAssistantClick={() => {
+              setShowAddAssistant(true)
+              setCError(null)
+              setCSuccess(null)
+            }}
+          />
+        )}
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Doctor Dashboard' },
+            ]}
+          />
+        )}
+      >
+        <main className="dashboard-main doctor-dashboard-main">
+          <div className="doctor-dashboard-shell">
+            <PageHeader
+              className="doctor-dashboard-page-header"
+              title="Doctor Dashboard"
+              subtitle={`Good day, ${doctorName}. Review appointments, availability, and patient alerts in one place.`}
+            />
+
+          <div className="doctor-dashboard-stats">
+            <StatCard
+              title="Today's appointments"
+              value={appointmentsLoading ? <Skeleton width={48} height={30} /> : todayAppointments.length}
+            />
+            <StatCard
+              title="Assistants"
+              value={assistants.length}
+            />
+            <StatCard
+              title="Upcoming"
+              value={upcomingAppointmentsLoading ? <Skeleton width={40} height={30} /> : upcomingAppointments.length}
+            />
+            <StatCard
+              title="New notifications"
+              value={pendingNotifications.filter((n) => n.status === 'unread').length}
+              trend={{
+                label: `${referralNotifications.length} total alerts`,
+                direction: 'neutral',
+              }}
+            />
+          </div>
+
+          <div className="doctor-dashboard-content">
         <section className="dashboard-left">
-          <Card className="dashboard-overview-card">
+          <Card className="dashboard-overview-card doctor-dashboard-overview-card">
             <p className="dashboard-kicker">
               Overview
             </p>
             <h2 className="dashboard-heading">
-              Good day, {doctorName}
+              Clinical workspace
             </h2>
             <p className="dashboard-body">
               This panel is designed for calm clinical work. Quickly move between
@@ -321,69 +389,49 @@ export const Dashboard = () => {
             </p>
           </Card>
 
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
+          <div className="doctor-dashboard-section-spacer">
+            <Card className="dashboard-overview-card doctor-dashboard-section-card">
               <p className="dashboard-kicker">Today's appointments</p>
               {appointmentsLoading ? (
-                <DnaLoader label="Loading appointments..." />
+                <div className="doctor-dashboard-skeleton-stack" aria-busy="true" aria-label="Loading appointments">
+                  <Skeleton lines={3} />
+                  <Skeleton variant="rect" height={56} />
+                  <Skeleton variant="rect" height={56} />
+                </div>
               ) : (
                 <>
                   {todayAppointments.length === 0 && (
-                    <p className="dashboard-body" style={{ marginTop: 8 }}>
-                      No appointments scheduled for today.
-                    </p>
+                    <EmptyState
+                      className="doctor-dashboard-empty-state"
+                      icon={<CalendarIcon size={22} />}
+                      title="No appointments today"
+                      message="When patients are booked for today, they will appear here."
+                    />
                   )}
                   {todayAppointments.length > 0 && (
                     <ul
-                      style={{
-                        listStyle: 'none',
-                        padding: 0,
-                        marginTop: 10,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6,
-                        maxHeight: todayAppointments.length > 5 ? 280 : undefined,
-                        overflowY: todayAppointments.length > 5 ? 'auto' : undefined,
-                      }}
+                      className={
+                        todayAppointments.length > 5
+                          ? 'doctor-dashboard-appointment-list doctor-dashboard-appointment-list--scroll'
+                          : 'doctor-dashboard-appointment-list'
+                      }
                     >
                       {todayAppointments.map((a) => (
-                        <li
-                          key={a.id}
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: 10,
-                            backgroundColor: '#f5f9fc',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            gap: 8,
-                            fontSize: 13,
-                          }}
-                        >
+                        <li key={a.id} className="doctor-dashboard-appointment-item">
                           <div>
                             <strong>{a.patientName}</strong>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                              <span style={{ color: '#607d8b' }}>
+                            <div className="doctor-dashboard-appointment-meta">
+                              <span className="doctor-dashboard-appointment-reason">
                                 {a.reason || 'Appointment'}
                               </span>
-                              {a.source === 'WHATSAPP' && (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    textTransform: 'uppercase',
-                                    letterSpacing: 0.4,
-                                    padding: '2px 6px',
-                                    borderRadius: 999,
-                                    backgroundColor: '#e0f2f1',
-                                    color: '#00695c',
-                                    border: '1px solid #80cbc4',
-                                  }}
-                                >
+                              {isWhatsappOrOnlineBooking(a) && (
+                                <span className="doctor-dashboard-badge doctor-dashboard-badge--whatsapp">
                                   WhatsApp
                                 </span>
                               )}
                             </div>
                           </div>
-                          <div style={{ textAlign: 'right', color: '#9fb3c8', fontSize: 12 }}>
+                          <div className="doctor-dashboard-appointment-time">
                             {new Date(a.visitDate).toLocaleTimeString('en-IN', {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -398,53 +446,44 @@ export const Dashboard = () => {
             </Card>
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
+          <div className="doctor-dashboard-section-spacer">
+            <Card className="dashboard-overview-card doctor-dashboard-section-card">
               <p className="dashboard-kicker">Upcoming appointments</p>
-              <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8, fontSize: 13, color: '#627d98' }}>
+              <p className="dashboard-body doctor-dashboard-section-hint">
                 Appointments booked for future dates (after today).
               </p>
               {upcomingAppointmentsLoading ? (
-                <DnaLoader label="Loading upcoming appointments..." />
+                <div className="doctor-dashboard-skeleton-stack" aria-busy="true" aria-label="Loading upcoming appointments">
+                  <Skeleton lines={2} />
+                  <Skeleton variant="rect" height={56} />
+                  <Skeleton variant="rect" height={56} />
+                </div>
               ) : (
                 <>
                   {upcomingAppointments.length === 0 && (
-                    <p className="dashboard-body" style={{ marginTop: 8 }}>
-                      No upcoming appointments.
-                    </p>
+                    <EmptyState
+                      className="doctor-dashboard-empty-state"
+                      icon={<CalendarIcon size={22} />}
+                      title="No upcoming appointments"
+                      message="Future bookings will show up in this list."
+                    />
                   )}
                   {upcomingAppointments.length > 0 && (
                     <>
-                      <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 8, fontSize: 13, fontWeight: 600 }}>
+                      <p className="dashboard-body doctor-dashboard-section-count">
                         {upcomingAppointments.length} appointment{upcomingAppointments.length !== 1 ? 's' : ''} scheduled
                       </p>
                       <ul
-                        style={{
-                          listStyle: 'none',
-                          padding: 0,
-                          marginTop: 10,
-                          marginBottom: 0,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6,
-                          maxHeight: upcomingAppointments.length > 5 ? 280 : undefined,
-                          overflowY: upcomingAppointments.length > 5 ? 'auto' : undefined,
-                        }}
+                        className={
+                          upcomingAppointments.length > 5
+                            ? 'doctor-dashboard-appointment-list doctor-dashboard-appointment-list--scroll'
+                            : 'doctor-dashboard-appointment-list'
+                        }
                       >
                         {upcomingAppointments.map((a) => (
                           <li
                             key={a.id}
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: 10,
-                              backgroundColor: '#f5f9fc',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              gap: 8,
-                              fontSize: 13,
-                              cursor: 'pointer',
-                              border: '1px solid transparent',
-                            }}
+                            className="doctor-dashboard-appointment-item doctor-dashboard-appointment-item--clickable"
                             onClick={() => navigate(`/patient/${a.patientId}`)}
                             onKeyDown={(e) => e.key === 'Enter' && navigate(`/patient/${a.patientId}`)}
                             role="button"
@@ -452,29 +491,18 @@ export const Dashboard = () => {
                           >
                             <div>
                               <strong>{a.patientName}</strong>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                                <span style={{ color: '#607d8b' }}>
+                              <div className="doctor-dashboard-appointment-meta">
+                                <span className="doctor-dashboard-appointment-reason">
                                   {a.reason || 'Appointment'}
                                 </span>
-                                {a.source === 'WHATSAPP' && (
-                                  <span
-                                    style={{
-                                      fontSize: 10,
-                                      textTransform: 'uppercase',
-                                      letterSpacing: 0.4,
-                                      padding: '2px 6px',
-                                      borderRadius: 999,
-                                      backgroundColor: '#e0f2f1',
-                                      color: '#00695c',
-                                      border: '1px solid #80cbc4',
-                                    }}
-                                  >
+                                {isWhatsappOrOnlineBooking(a) && (
+                                  <span className="doctor-dashboard-badge doctor-dashboard-badge--whatsapp">
                                     WhatsApp
                                   </span>
                                 )}
                               </div>
                             </div>
-                            <div style={{ textAlign: 'right', color: '#486581', fontSize: 12, whiteSpace: 'nowrap' }}>
+                            <div className="doctor-dashboard-appointment-datetime">
                               {new Date(a.visitDate).toLocaleDateString('en-IN', {
                                 day: '2-digit',
                                 month: 'short',
@@ -493,36 +521,33 @@ export const Dashboard = () => {
             </Card>
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
+          <div className="doctor-dashboard-section-spacer">
+            <Card className="dashboard-overview-card doctor-dashboard-section-card doctor-dashboard-availability-card">
               <p className="dashboard-kicker">Your availability</p>
-              <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
+              <p className="dashboard-body doctor-dashboard-section-hint">
                 Mark yourself unavailable or busy so your assistant can inform patients in real time.
               </p>
               {availabilityLoading ? (
-                <DnaLoader label="Loading availability..." />
+                <div className="doctor-dashboard-skeleton-stack" aria-busy="true" aria-label="Loading availability">
+                  <Skeleton lines={2} />
+                  <div className="doctor-dashboard-skeleton-row">
+                    <Skeleton variant="rect" height={36} />
+                    <Skeleton variant="rect" height={36} />
+                    <Skeleton variant="rect" height={36} />
+                  </div>
+                </div>
               ) : (
                 <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                  <div className="doctor-dashboard-availability-actions">
                     {(['available', 'unavailable', 'busy'] as const).map((status) => (
                       <button
                         key={status}
                         type="button"
                         disabled={availabilityUpdating}
                         onClick={() => handleSetAvailability(status)}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          border: availabilityStatus === status ? '2px solid #0d47a1' : '1px solid #e2e8f0',
-                          background: availabilityStatus === status
-                            ? (status === 'unavailable' ? '#fff3e0' : status === 'busy' ? '#fce4ec' : '#e3f2fd')
-                            : '#fff',
-                          color: availabilityStatus === status ? '#0d47a1' : '#334155',
-                          fontWeight: availabilityStatus === status ? 600 : 400,
-                          cursor: availabilityUpdating ? 'not-allowed' : 'pointer',
-                          fontSize: 13,
-                          textTransform: 'capitalize',
-                        }}
+                        className={`doctor-dashboard-availability-btn doctor-dashboard-availability-btn--${status}${
+                          availabilityStatus === status ? ' doctor-dashboard-availability-btn--selected' : ''
+                        }`}
                       >
                         {status}
                       </button>
@@ -629,61 +654,49 @@ export const Dashboard = () => {
             </Card>
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <Card className="dashboard-overview-card">
+          <div className="doctor-dashboard-section-spacer">
+            <Card className="dashboard-overview-card doctor-dashboard-section-card doctor-dashboard-notifications-card">
                 <button
                   type="button"
                   onClick={() => setNotificationsOpen((o) => !o)}
-                  style={{
-                    border: 'none',
-                    background: 'none',
-                    padding: 0,
-                    margin: 0,
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                  }}
+                  className="doctor-dashboard-collapsible-header"
                 >
-                  <p className="dashboard-kicker">New patient notifications</p>
-                  <span style={{ fontSize: 12, color: '#627d98' }}>
-                    {pendingNotifications.filter((n) => n.status === 'unread').length} new
-                    {pendingNotifications.filter((n) => n.status === 'dismissed').length > 0 &&
-                      ` · ${pendingNotifications.filter((n) => n.status === 'dismissed').length} dismissed`}
-                  </span>
+                  <div className="doctor-dashboard-collapsible-title">
+                    <p className="dashboard-kicker">New patient notifications</p>
+                    <span className="doctor-dashboard-collapsible-meta">
+                      {pendingNotifications.filter((n) => n.status === 'unread').length} new
+                      {pendingNotifications.filter((n) => n.status === 'dismissed').length > 0 &&
+                        ` · ${pendingNotifications.filter((n) => n.status === 'dismissed').length} dismissed`}
+                    </span>
+                  </div>
                   <span
-                    style={{
-                      display: 'inline-block',
-                      fontSize: 16,
-                      transform: notificationsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                      transition: 'transform 0.16s ease',
-                      color: '#9fb3c8',
-                    }}
+                    className={`doctor-dashboard-collapsible-chevron${
+                      notificationsOpen ? ' doctor-dashboard-collapsible-chevron--open' : ''
+                    }`}
                   >
                     ▾
                   </span>
                 </button>
                 {notificationsOpen && (
-                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <p className="dashboard-body" style={{ margin: 0, fontSize: 12, color: '#627d98' }}>
+                  <div className="doctor-dashboard-collapsible-body">
+                    <p className="dashboard-body doctor-dashboard-section-hint doctor-dashboard-section-hint--flush">
                       Referrals &amp; appointment alerts
                     </p>
                     <ul
-                      style={{
-                        listStyle: 'none',
-                        padding: 0,
-                        margin: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6,
-                        maxHeight: referralNotifications.length > 5 ? 320 : undefined,
-                        overflowY: referralNotifications.length > 5 ? 'auto' : undefined,
-                      }}
+                      className={
+                        referralNotifications.length > 5
+                          ? 'doctor-dashboard-notification-list doctor-dashboard-notification-list--scroll'
+                          : 'doctor-dashboard-notification-list'
+                      }
                     >
                       {referralNotifications.length === 0 && (
-                        <li>
-                          <span style={{ fontSize: 12, color: '#9fb3c8' }}>No referred patients yet.</span>
+                        <li className="doctor-dashboard-empty-list-item">
+                          <EmptyState
+                            className="doctor-dashboard-empty-state"
+                            icon={<BellIcon size={22} />}
+                            title="No patient alerts"
+                            message="Referrals and new notifications will appear here."
+                          />
                         </li>
                       )}
                       {referralNotifications.map((n) => (
@@ -691,37 +704,28 @@ export const Dashboard = () => {
                         <button
                           type="button"
                           onClick={() => handleNotificationClick(n)}
-                          style={{
-                            width: '100%',
-                            textAlign: 'left',
-                            padding: '10px 12px',
-                            borderRadius: 8,
-                            border: '1px solid #e2e8f0',
-                            background: n.status === 'unread' ? '#ebf5fa' : '#fff',
-                            cursor: 'pointer',
-                            fontSize: 14,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 8,
-                          }}
+                          className={`doctor-dashboard-notification-item${
+                            n.status === 'unread' ? ' doctor-dashboard-notification-item--unread' : ''
+                          }`}
                         >
-                          <span style={{ minWidth: 0 }}>
-                            <span style={{ fontWeight: n.status === 'unread' ? 600 : 400, display: 'block' }}>
+                          <span className="doctor-dashboard-notification-copy">
+                            <span className={`doctor-dashboard-notification-name${
+                              n.status === 'unread' ? ' doctor-dashboard-notification-name--unread' : ''
+                            }`}>
                               {n.status === 'unread' && (
-                                <span style={{ marginRight: 6, color: '#0d47a1' }}>●</span>
+                                <span className="doctor-dashboard-notification-dot">●</span>
                               )}
                               {n.patientName}
                             </span>
                             {(n.patientMobile || n.emergencyContactPhone) && (
-                              <span style={{ display: 'block', marginTop: 2, fontSize: 12, color: '#627d98' }}>
+                              <span className="doctor-dashboard-notification-sub">
                                 {n.patientMobile ? `Mobile: ${n.patientMobile}` : ''}
                                 {n.patientMobile && n.emergencyContactPhone ? ' · ' : ''}
                                 {n.emergencyContactPhone ? `Emergency: ${n.emergencyContactPhone}` : ''}
                               </span>
                             )}
                           </span>
-                          <span style={{ fontSize: 12, color: '#627d98' }}>
+                          <span className="doctor-dashboard-notification-time">
                             {new Date(n.createdAt).toLocaleString('en-IN', {
                               day: '2-digit',
                               month: 'short',
@@ -738,79 +742,52 @@ export const Dashboard = () => {
               </Card>
             </div>
 
-          <div style={{ marginTop: 8 }}>
-            <Card className="dashboard-overview-card">
+          <div className="doctor-dashboard-section-spacer doctor-dashboard-section-spacer--tight">
+            <Card className="dashboard-overview-card doctor-dashboard-section-card doctor-dashboard-assistants-card">
             <button
               type="button"
               onClick={() => setAssistantsOpen((o) => !o)}
-              style={{
-                border: 'none',
-                background: 'none',
-                padding: 0,
-                margin: 0,
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer',
-              }}
+              className="doctor-dashboard-collapsible-header"
             >
               <p className="dashboard-kicker">
                 Assistants
               </p>
               <span
-                style={{
-                  display: 'inline-block',
-                  fontSize: 16,
-                  transform: assistantsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.16s ease',
-                  color: '#9fb3c8',
-                }}
+                className={`doctor-dashboard-collapsible-chevron${
+                  assistantsOpen ? ' doctor-dashboard-collapsible-chevron--open' : ''
+                }`}
               >
                 ▾
               </span>
             </button>
 
               {assistantsOpen && (
-                <>
+                <div className="doctor-dashboard-collapsible-body">
                   {assistants.length === 0 && (
-                    <p className="dashboard-body" style={{ marginTop: 8 }}>
-                      No assistants created yet.
-                    </p>
+                    <EmptyState
+                      className="doctor-dashboard-empty-state"
+                      icon={<UserIcon size={22} />}
+                      title="No assistants yet"
+                      message="Use Add assistant in the header to create staff logins."
+                    />
                   )}
                   {assistants.length > 0 && (
                     <ul
-                      style={{
-                        listStyle: 'none',
-                        padding: 0,
-                        marginTop: 10,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6,
-                        maxHeight: assistants.length > 5 ? 300 : undefined,
-                        overflowY: assistants.length > 5 ? 'auto' : undefined,
-                      }}
+                      className={
+                        assistants.length > 5
+                          ? 'doctor-dashboard-assistant-list doctor-dashboard-assistant-list--scroll'
+                          : 'doctor-dashboard-assistant-list'
+                      }
                     >
                       {assistants.map((c) => (
-                        <li
-                          key={c.id}
-                          style={{
-                            fontSize: 12,
-                            padding: '6px 8px',
-                            borderRadius: 12,
-                            backgroundColor: '#f5f9fc',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            gap: 8,
-                          }}
-                        >
+                        <li key={c.id} className="doctor-dashboard-assistant-item">
                           <div>
                             <strong>{c.name}</strong>
-                            <div style={{ color: '#607d8b' }}>{c.phone}</div>
+                            <div className="doctor-dashboard-assistant-phone">{c.phone}</div>
                           </div>
-                          <div style={{ textAlign: 'right', color: '#9fb3c8' }}>
-                            <div style={{ fontSize: 11 }}>Created by</div>
-                            <div style={{ fontSize: 11 }}>
+                          <div className="doctor-dashboard-assistant-meta">
+                            <div>Created by</div>
+                            <div>
                               {c.createdBy ? c.createdBy.name : '—'}
                             </div>
                           </div>
@@ -818,7 +795,7 @@ export const Dashboard = () => {
                       ))}
                     </ul>
                   )}
-                </>
+                </div>
               )}
             </Card>
           </div>
@@ -852,8 +829,7 @@ export const Dashboard = () => {
           </div>
         </section>
 
-        {/* Right: patient search card + separate daily caps card (doctor) */}
-        <div className="dashboard-sidebar">
+        <div className="dashboard-sidebar doctor-dashboard-sidebar">
           <section className="dashboard-search-panel">
             <div className="dashboard-search-copy">
               <p className="dashboard-kicker">
@@ -924,7 +900,10 @@ export const Dashboard = () => {
             </Card>
           )}
         </div>
-      </main>
+          </div>
+        </div>
+        </main>
+      </AppLayout>
 
       {showAddAssistant && (
         <div className="dialog-backdrop">
@@ -1003,7 +982,7 @@ export const Dashboard = () => {
         </div>
       )}
 
-    </div>
+    </>
   )
 }
 

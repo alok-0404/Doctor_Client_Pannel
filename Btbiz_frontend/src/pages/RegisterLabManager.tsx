@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { LoginHomeLink } from '../components/LoginHomeLink'
@@ -57,8 +59,8 @@ export const RegisterLabManager = () => {
   }
 
   return (
-    <div className="page-center">
-      <div className="ui-card login-layout">
+    <div className="page-center login-page">
+      <Card className="login-layout" elevated>
         <div className="login-panel">
           <div className="login-brand-row">
             <div className="login-brand">
@@ -67,62 +69,67 @@ export const RegisterLabManager = () => {
             <LoginHomeLink />
           </div>
 
-          <h1 className="login-heading">Lab Manager – Create account</h1>
-          <p className="login-tagline">
-            Register as a lab manager. After this you can add lab assistants and manage tests.
-          </p>
+          <PageHeader
+            className="login-page-header"
+            title="Lab Manager – Create account"
+            subtitle="Register as a lab manager. After this you can add lab assistants and manage tests."
+          />
 
           <form onSubmit={handleSubmit} className="login-form">
-            <TextField
-              id="name"
-              type="text"
-              label="Full name"
-              placeholder="Lab Manager Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <TextField
-              id="email"
-              type="email"
-              label="Email"
-              autoComplete="email"
-              placeholder="manager@lab.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <CountryCodePhoneInput
-              id="phone"
-              label="Registered WhatsApp number"
-              countryCode={countryCode}
-              onCountryCodeChange={setCountryCode}
-              phoneDigits={phoneDigits}
-              onPhoneDigitsChange={setPhoneDigits}
-            />
-            <TextField
-              id="password"
-              type="password"
-              label="Password"
-              autoComplete="new-password"
-              placeholder="Choose a strong password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              canTogglePassword
-            />
+            <div className="login-form-fields">
+              <TextField
+                id="name"
+                type="text"
+                label="Full name"
+                placeholder="Lab Manager Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <TextField
+                id="email"
+                type="email"
+                label="Email"
+                autoComplete="email"
+                placeholder="manager@lab.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <CountryCodePhoneInput
+                id="phone"
+                label="Registered WhatsApp number"
+                countryCode={countryCode}
+                onCountryCodeChange={setCountryCode}
+                phoneDigits={phoneDigits}
+                onPhoneDigitsChange={setPhoneDigits}
+              />
+              <TextField
+                id="password"
+                type="password"
+                label="Password"
+                autoComplete="new-password"
+                placeholder="Choose a strong password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                canTogglePassword
+              />
+            </div>
 
             {error && (
-              <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+              <p className="login-message login-message--error" role="alert">
                 {error}
               </p>
             )}
             {success && (
-              <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+              <p className="login-message login-message--success" role="status">
                 {success}
               </p>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? 'Creating account…' : 'Register as Lab Manager'}
-            </Button>
+            <div className="login-form-actions">
+              <Button type="submit" disabled={loading} fullWidth>
+                {loading ? 'Creating account…' : 'Register as lab manager'}
+              </Button>
+            </div>
 
             <div className="login-secondary-text">
               Already have an account?{' '}
@@ -138,9 +145,17 @@ export const RegisterLabManager = () => {
         </div>
 
         <div className="login-image-panel">
-          <div className="login-image-frame" />
+          <div className="login-image-frame">
+            <div className="login-image-overlay">
+              <p className="login-image-kicker">Lab workspace</p>
+              <p className="login-image-title">Run your diagnostic lab</p>
+              <p className="login-image-text">
+                Search patients, record tests, upload reports, and manage incoming orders.
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

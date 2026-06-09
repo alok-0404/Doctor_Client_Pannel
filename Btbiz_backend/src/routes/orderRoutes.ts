@@ -2,9 +2,11 @@ import { Router } from "express";
 import mongoose from "mongoose";
 
 import { authenticateDoctor } from "../middleware/authMiddleware";
+import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
+import { Visit } from "../models/Visit";
 
 type OrderRequestStatus = "PENDING" | "ACCEPTED" | "COMPLETED" | "CANCELLED";
 
@@ -22,6 +24,18 @@ function aggregateGroupedOrderStatus(statuses: OrderRequestStatus[]): OrderReque
 function aggregateGroupedPaymentStatus(statuses: Array<"PENDING" | "PAID">): "PENDING" | "PAID" {
   if (statuses.length > 0 && statuses.every((s) => s === "PAID")) return "PAID";
   return "PENDING";
+}
+
+function normalizeLabTestName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function labTestNamesMatch(a: string, b: string): boolean {
+  const na = normalizeLabTestName(a);
+  const nb = normalizeLabTestName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  return na.includes(nb) || nb.includes(na);
 }
 
 const router = Router();
@@ -411,6 +425,152 @@ router.patch("/test-requests/:requestId", async (req, res) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("update test request error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/** Mark payment for clinic-added diagnostic tests (manual lab workflow without an incoming app request). */
+router.post("/mark-clinic-diagnostic-paid", async (req, res) => {
+  try {
+    if (req.doctor?.role !== "LAB_ASSISTANT" && req.doctor?.role !== "LAB_MANAGER") {
+      res.status(403).json({ message: "Only lab can mark clinic tests as paid" });
+      return;
+    }
+
+    const body = req.body as { patientId?: string; visitId?: string; testNames?: string[] };
+    const { patientId, visitId, testNames } = body;
+
+    if (!patientId || !visitId || !Array.isArray(testNames) || testNames.length === 0) {
+      res.status(400).json({ message: "patientId, visitId, and testNames are required" });
+      return;
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(patientId) || !mongoose.Types.ObjectId.isValid(visitId)) {
+      res.status(400).json({ message: "Invalid patientId or visitId" });
+      return;
+    }
+
+    const visit = await Visit.findById(visitId).lean();
+    if (!visit) {
+      res.status(404).json({ message: "Visit not found" });
+      return;
+    }
+    if (visit.patient.toString() !== patientId) {
+      res.status(400).json({ message: "Visit does not belong to this patient" });
+      return;
+    }
+
+    const diagnosticTests = await DiagnosticTest.find({ visit: visitId }).lean();
+    const errors: string[] = [];
+    const toProcess: Array<{ testName: string; price: number }> = [];
+
+    for (const rawName of testNames) {
+      const name = String(rawName ?? "").trim();
+      if (!name) continue;
+      const dt = diagnosticTests.find((t) => labTestNamesMatch(String((t as any).testName ?? ""), name));
+      if (!dt) {
+        errors.push(`"${name}" is not on this visit.`);
+        continue;
+      }
+      const price = (dt as any).price;
+      if (price == null || Number(price) <= 0) {
+        errors.push(`Rate (₹) missing for "${(dt as any).testName}". Save rates first.`);
+        continue;
+      }
+      if (!(dt as any).reportPath) {
+        errors.push(`Report missing for "${(dt as any).testName}". Upload report first.`);
+        continue;
+      }
+      toProcess.push({ testName: String((dt as any).testName), price: Number(price) });
+    }
+
+    if (errors.length > 0) {
+      res.status(400).json({ message: errors.join(" ") });
+      return;
+    }
+    if (toProcess.length === 0) {
+      res.status(400).json({ message: "No valid tests to mark paid." });
+      return;
+    }
+
+    const providerIds: mongoose.Types.ObjectId[] = [req.doctor._id];
+    if (req.doctor.role === "LAB_ASSISTANT") {
+      const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+      const parentLabId = (assistant as any)?.createdByDoctorId;
+      if (parentLabId) providerIds.push(parentLabId);
+    }
+    const labProviderId = providerIds[providerIds.length - 1];
+
+    const existingRequests = await PatientTestRequest.find({ patient: patientId })
+      .select("testName paymentStatus status receiptNumber paidAt requestGroupId")
+      .lean();
+
+    const requestGroupId = `grp_clinic_${Date.now().toString(36).toUpperCase()}`;
+    const paidAt = new Date();
+    const suffix = requestGroupId.replace(/^grp_clinic_/, "").slice(-6).toUpperCase();
+    const batchReceiptNumber = `LAB-${suffix}-${Date.now().toString(36).toUpperCase()}`;
+
+    let marked = 0;
+    let created = 0;
+
+    for (const { testName } of toProcess) {
+      const alreadyPaid = existingRequests.find(
+        (r) => (r as any).paymentStatus === "PAID" && labTestNamesMatch(String((r as any).testName ?? ""), testName)
+      );
+      if (alreadyPaid) {
+        marked += 1;
+        continue;
+      }
+
+      const unpaid = existingRequests.find(
+        (r) =>
+          (r as any).paymentStatus !== "PAID" &&
+          !["CANCELLED", "COMPLETED"].includes(String((r as any).status ?? "")) &&
+          labTestNamesMatch(String((r as any).testName ?? ""), testName)
+      );
+
+      if (unpaid) {
+        const update: Record<string, unknown> = {
+          paymentStatus: "PAID",
+          paidAt,
+          preferredProvider: labProviderId,
+        };
+        if ((unpaid as any).status === "PENDING") {
+          update.status = "ACCEPTED";
+        }
+        if (!(unpaid as any).receiptNumber) {
+          update.receiptNumber = batchReceiptNumber;
+        }
+        await PatientTestRequest.findByIdAndUpdate((unpaid as any)._id, { $set: update });
+        marked += 1;
+      } else {
+        await PatientTestRequest.create({
+          patient: patientId,
+          preferredProvider: labProviderId,
+          requestGroupId,
+          testName,
+          source: "assistant",
+          serviceType: "LAB_VISIT",
+          paymentMode: "OFFLINE",
+          paymentStatus: "PAID",
+          status: "ACCEPTED",
+          paidAt,
+          receiptNumber: batchReceiptNumber,
+        });
+        created += 1;
+      }
+    }
+
+    res.status(200).json({
+      message: "Payment recorded",
+      marked,
+      created,
+      receiptNumber: batchReceiptNumber,
+      paidAt: paidAt.toISOString(),
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("mark clinic diagnostic paid error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

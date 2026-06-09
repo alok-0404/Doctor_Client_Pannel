@@ -637,6 +637,18 @@ export const orderService = {
   ): Promise<void> {
     await api.patch(`/orders/test-requests/${requestId}`, payload)
   },
+  async markClinicDiagnosticTestsPaid(
+    patientId: string,
+    visitId: string,
+    testNames: string[]
+  ): Promise<{ receiptNumber?: string; paidAt?: string }> {
+    const res = await api.post('/orders/mark-clinic-diagnostic-paid', {
+      patientId,
+      visitId,
+      testNames,
+    })
+    return res.data as { receiptNumber?: string; paidAt?: string }
+  },
 }
 
 export interface PatientSummary {

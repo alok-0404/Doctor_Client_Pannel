@@ -9,7 +9,15 @@ import {
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 import { completedAgeYears } from '../utils/age'
-import { DnaLoader } from '../components/ui/DnaLoader'
+import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { PublicLayout } from '../components/layout/PublicLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { StatCard } from '../components/ui/StatCard'
+import { TextField } from '../components/ui/TextField'
 
 type Mode = 'none' | 'family'
 type Step = 'details' | 'payment' | 'confirm'
@@ -89,6 +97,7 @@ function isOnlineFull(snap: DoctorAppointmentQuotaSnapshot | null): boolean {
 
 export const BookAppointment = () => {
   const navigate = useNavigate()
+  const [policyConsentChecked, setPolicyConsentChecked] = useState(false)
   const [policyAccepted, setPolicyAccepted] = useState(false)
   const [mode, setMode] = useState<Mode>('none')
   const [step, setStep] = useState<Step>('details')
@@ -469,7 +478,7 @@ export const BookAppointment = () => {
         memberId
       )
       const name = [result.patient.firstName, result.patient.lastName].filter(Boolean).join(' ')
-      patientStorage.set(result.token, result.patient.id, name || 'Patient')
+      patientStorage.set(result.token, result.patient.id, name || 'Patient', 'booking')
       navigate('/patient-profile')
     } catch (err: any) {
       const msg = err?.response?.data?.message
@@ -486,7 +495,7 @@ export const BookAppointment = () => {
           memberId
         )
         const name = [result.patient.firstName, result.patient.lastName].filter(Boolean).join(' ')
-        patientStorage.set(result.token, result.patient.id, name || 'Patient')
+        patientStorage.set(result.token, result.patient.id, name || 'Patient', 'booking')
         setProfileSessionReady(true)
         return true
       } catch (err) {
@@ -664,66 +673,64 @@ export const BookAppointment = () => {
   }
 
   const renderConsent = () => (
-    <div className="appt-card" style={{ maxWidth: 520 }}>
-      <h2 className="public-section-title" style={{ marginBottom: 12 }}>Privacy &amp; Terms</h2>
-      <p className="public-section-text" style={{ marginBottom: 16 }}>
+    <Card className="book-appointment-panel book-appointment-consent-card" elevated>
+      <h2 className="public-section-title book-appointment-consent-title">Privacy &amp; Terms</h2>
+      <p className="public-section-text book-appointment-consent-text">
         To book an appointment, we need you to accept our Privacy Policy and Terms &amp; Conditions.
         We may use your <strong>location</strong> to (1) show you how far you are from the doctor&apos;s clinic, and (2) share your location at the time of booking with your doctor so they can see where you were when you booked.
       </p>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
+      <label className="book-appointment-consent-label">
         <input
           type="checkbox"
-          checked={policyAccepted}
-          onChange={(e) => setPolicyAccepted(e.target.checked)}
-          style={{ marginTop: 4 }}
+          className="book-appointment-consent-checkbox"
+          checked={policyConsentChecked}
+          onChange={(e) => setPolicyConsentChecked(e.target.checked)}
         />
-        <span className="public-section-text" style={{ margin: 0 }}>
+        <span className="public-section-text book-appointment-consent-label-text">
           I accept the <strong>Privacy Policy</strong> and <strong>Terms &amp; Conditions</strong>, and I allow the use of my location to see distance from the clinic and to share my location with the doctor at booking.
         </span>
       </label>
-      <button
-        type="button"
-        className="public-cta"
-        disabled={!policyAccepted}
+      <Button
+        disabled={!policyConsentChecked}
         onClick={() => setPolicyAccepted(true)}
       >
-        Continue to Book Appointment
-      </button>
-    </div>
+        Continue to book appointment
+      </Button>
+    </Card>
   )
 
   const renderDistanceBlock = () => {
     if (!selectedConsultant) return null
     if (!hasClinicLocation) {
       return (
-        <p className="appt-timing-msg" style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
+        <p className="book-appointment-timing-msg book-appointment-distance-msg book-appointment-distance-msg--muted">
           Distance is not available for this consultant (clinic location not set).
         </p>
       )
     }
     if (locationLoading) {
-      return <p className="appt-timing-msg" style={{ background: '#fef3c7', borderColor: '#fcd34d' }}>Getting your location…</p>
+      return <p className="book-appointment-timing-msg book-appointment-distance-msg book-appointment-distance-msg--loading">Getting your location…</p>
     }
     if (locationError) {
       return (
-        <div style={{ marginTop: 8 }}>
-          <p className="appt-timing-msg" style={{ background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' }}>
+        <div className="book-appointment-distance-wrap">
+          <p className="book-appointment-timing-msg book-appointment-distance-msg book-appointment-distance-msg--error">
             {locationError}
           </p>
-          <button type="button" className="public-cta" style={{ marginTop: 8, padding: '6px 14px', fontSize: '0.9rem' }} onClick={fetchUserLocation}>
+          <Button size="sm" className="book-appointment-distance-retry" onClick={fetchUserLocation}>
             Try again
-          </button>
+          </Button>
         </div>
       )
     }
     if (distanceKmValue != null) {
       return (
-        <div className="appt-timing-msg" style={{ marginTop: 12 }}>
+        <div className="book-appointment-timing-msg book-appointment-distance-msg">
           <div>
             You are approximately <strong>{distanceKmValue.toFixed(1)} km</strong> from <strong>{selectedConsultant.name}</strong>&apos;s clinic.
           </div>
           {locationAccuracyMeters != null && (
-            <div style={{ marginTop: 6, fontSize: '0.9rem', color: '#475569' }}>
+            <div className="book-appointment-distance-accuracy">
               Location accuracy: <strong>±{Math.round(locationAccuracyMeters)} m</strong>
               {locationFetchedAt && (
                 <span> · Updated {locationFetchedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
@@ -731,10 +738,9 @@ export const BookAppointment = () => {
             </div>
           )}
           {userLocation && (
-            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div className="book-appointment-distance-actions">
               <a
-                className="public-cta"
-                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#0369a1' }}
+                className="ui-button ui-button-secondary ui-button-sm book-appointment-map-link book-appointment-map-link--user"
                 href={`https://www.google.com/maps?q=${userLocation.lat},${userLocation.lng}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -742,86 +748,80 @@ export const BookAppointment = () => {
                 View my location on map
               </a>
               <a
-                className="public-cta"
-                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#1e40af' }}
+                className="ui-button ui-button-secondary ui-button-sm book-appointment-map-link book-appointment-map-link--clinic"
                 href={`https://www.google.com/maps?q=${selectedConsultant.clinicLatitude},${selectedConsultant.clinicLongitude}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 View clinic on map
               </a>
-              <button
-                type="button"
-                className="public-cta"
-                style={{ padding: '6px 14px', fontSize: '0.9rem', background: '#334155' }}
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={fetchUserLocation}
               >
                 Refresh location
-              </button>
+              </Button>
             </div>
           )}
           {selectedConsultant.clinicAddress && (
-            <span style={{ display: 'block', marginTop: 10, fontSize: '0.9rem' }}>{selectedConsultant.clinicAddress}</span>
+            <span className="book-appointment-distance-address">{selectedConsultant.clinicAddress}</span>
           )}
         </div>
       )
     }
     return (
-      <div style={{ marginTop: 8 }}>
-        <button type="button" className="public-cta" style={{ padding: '6px 14px', fontSize: '0.9rem' }} onClick={fetchUserLocation}>
+      <div className="book-appointment-distance-wrap">
+        <Button size="sm" onClick={fetchUserLocation}>
           Use my location – show distance from clinic
-        </button>
+        </Button>
       </div>
     )
   }
 
   const renderModeChooser = () => (
-    <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 32 }}>
-      <button type="button" className="public-cta" onClick={selectFamily}>
-        New Patient
-      </button>
-    </div>
+    <Card className="book-appointment-panel book-appointment-mode-card" elevated interactive>
+      <h2 className="public-section-title book-appointment-panel-title">Choose booking type</h2>
+      <p className="public-section-text book-appointment-panel-lead">
+        Start with a new patient profile linked to your mobile number.
+      </p>
+      <div className="book-appointment-mode-chooser">
+        <Button onClick={selectFamily}>
+          New Patient
+        </Button>
+      </div>
+    </Card>
   )
 
   const renderFamilyForm = () => (
-    <div className="appt-card">
-      <h2 className="public-section-title" style={{ marginBottom: 6 }}>New Patient</h2>
-      <p className="public-section-text" style={{ marginBottom: 16 }}>
+    <Card className="book-appointment-panel" elevated>
+      <h2 className="public-section-title book-appointment-panel-title">New Patient</h2>
+      <p className="public-section-text book-appointment-panel-lead">
         Enter your <strong>primary mobile number</strong>, then select a family member (or add a new one).
       </p>
 
-      <div className="appt-two-cols">
-        <div className="appt-field">
-          <label>Primary Mobile No *</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '125px 1fr', gap: 8 }}>
-            <select value={familyCountryCode} onChange={(e) => setFamilyCountryCode(e.target.value)}>
-              <option value="+91">IN (+91)</option>
-              <option value="+1">US/CA (+1)</option>
-              <option value="+44">UK (+44)</option>
-              <option value="+61">AU (+61)</option>
-              <option value="+971">UAE (+971)</option>
-            </select>
-            <input
-              type="tel"
-              value={familyMobile}
-              onChange={(e) => setFamilyMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
-              placeholder="Enter mobile number"
-            />
-          </div>
-        </div>
-        <div className="appt-field" style={{ justifyContent: 'flex-end' }}>
-          <label>&nbsp;</label>
-          <button type="button" className="public-cta" onClick={handleFamilyLogin}>
+      <div className="book-appointment-form-grid">
+        <CountryCodePhoneInput
+          id="family-primary-mobile"
+          label="Primary Mobile No *"
+          countryCode={familyCountryCode}
+          onCountryCodeChange={setFamilyCountryCode}
+          phoneDigits={familyMobile}
+          onPhoneDigitsChange={setFamilyMobile}
+        />
+        <div className="book-appointment-field-action">
+          <Button onClick={handleFamilyLogin}>
             Load Family
-          </button>
+          </Button>
         </div>
       </div>
 
       {familyAccountId && (
         <>
-          <div className="appt-field">
-            <label>Select Family Member *</label>
+          <div className="book-appointment-select-field">
+            <label htmlFor="family-member-select">Select Family Member *</label>
             <select
+              id="family-member-select"
               value={selectedFamilyMemberId}
               onChange={(e) => handleSelectFamilyMember(e.target.value)}
             >
@@ -834,50 +834,47 @@ export const BookAppointment = () => {
             </select>
           </div>
 
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-            <button type="button" className="public-cta" style={{ padding: '8px 16px', fontSize: '0.95rem' }} onClick={() => setAddingMember((v) => !v)}>
+          <div className="book-appointment-member-toolbar">
+            <Button
+              variant="secondary"
+              className="book-appointment-member-btn book-appointment-member-btn--outline"
+              onClick={() => setAddingMember((v) => !v)}
+            >
               {addingMember ? 'Close Member Form' : '+ Add Family Member'}
-            </button>
-            <p className="public-section-text" style={{ margin: 0, alignSelf: 'center' }}>
+            </Button>
+            <p className="public-section-text book-appointment-member-toolbar-text">
               Members: <strong>{familyMembers.length}</strong>
             </p>
           </div>
 
           {familyMembers.length > 0 && (
-            <div className="appt-summary" style={{ marginBottom: 16 }}>
-              <p className="public-section-text" style={{ margin: '0 0 8px' }}>
+            <div className="book-appointment-member-summary">
+              <p className="public-section-text book-appointment-member-summary-lead">
                 Your family members:
               </p>
               <ul
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  maxHeight: familyMembers.length > 5 ? 320 : undefined,
-                  overflowY: familyMembers.length > 5 ? 'auto' : undefined,
-                  paddingRight: familyMembers.length > 5 ? 4 : undefined,
-                }}
+                className={
+                  familyMembers.length > 5
+                    ? 'book-appointment-member-list book-appointment-member-list--scroll'
+                    : 'book-appointment-member-list'
+                }
               >
                 {familyMembers.map((m) => (
-                  <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#0f172a' }}>
-                        {m.fullName} <span style={{ fontWeight: 400, color: '#64748b' }}>({m.relation})</span>
+                  <li key={m.id} className="book-appointment-member-row">
+                    <div className="book-appointment-member-meta">
+                      <div className="book-appointment-member-name">
+                        {m.fullName} <span className="book-appointment-member-relation">({m.relation})</span>
                       </div>
-                      <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                      <div className="book-appointment-member-details">
                         {m.patient?.gender && <span>{m.patient.gender}</span>}
                         {m.patient?.gender && m.patient?.address && <span> · </span>}
                         {m.patient?.address && <span>{m.patient.address}</span>}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      <button
-                        type="button"
-                        className="public-cta"
-                        style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                    <div className="book-appointment-member-actions">
+                      <Button
+                        size="sm"
+                        className="book-appointment-member-btn book-appointment-member-btn--book"
                         onClick={() => {
                           handleSelectFamilyMember(m.id, familyMembers)
                           setError(null)
@@ -885,31 +882,30 @@ export const BookAppointment = () => {
                         }}
                       >
                         BOOK Appointment
-                      </button>
-                      <button
-                        type="button"
-                        className="public-cta"
-                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#0369a1' }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="book-appointment-member-btn book-appointment-member-btn--history"
                         onClick={() => handleViewHistory(m.id)}
                       >
                         View records
-                      </button>
-                      <button
-                        type="button"
-                        className="public-cta"
-                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#4b5563' }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="book-appointment-member-btn book-appointment-member-btn--edit"
                         onClick={() => startEditMember(m)}
                       >
                         Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="public-cta"
-                        style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#b91c1c' }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="book-appointment-member-btn book-appointment-member-btn--delete"
                         onClick={() => openDeleteMemberModal(m)}
                       >
                         Delete
-                      </button>
+                      </Button>
                     </div>
                   </li>
                 ))}
@@ -918,31 +914,41 @@ export const BookAppointment = () => {
           )}
 
           {addingMember && (
-            <div className="appt-card" style={{ background: '#f8fafc', borderColor: '#e2e8f0', boxShadow: 'none' }}>
-              <h3 className="public-section-title" style={{ marginBottom: 12, fontSize: '1.1rem' }}>
+            <Card className="book-appointment-member-form" elevated>
+              <h3 className="public-section-title book-appointment-member-form-title">
                 {editingMemberId ? 'Edit Family Member' : 'Add Family Member'}
               </h3>
-              <div className="appt-field">
-                <label>Full Name *</label>
-                <input
-                  type="text"
-                  value={newMemberFullName}
-                  onChange={(e) => setNewMemberFullName(e.target.value)}
-                  placeholder="e.g. Rohan Sharma"
-                />
-              </div>
-              <div className="appt-two-cols">
-                <div className="appt-field">
-                  <label>Relation *</label>
-                  <select value={newMemberRelation} onChange={(e) => setNewMemberRelation(e.target.value as FamilyRelation)}>
+              <TextField
+                label="Full Name *"
+                id="new-member-full-name"
+                name="newMemberFullName"
+                type="text"
+                value={newMemberFullName}
+                onChange={(e) => setNewMemberFullName(e.target.value)}
+                placeholder="e.g. Rohan Sharma"
+              />
+              <div className="book-appointment-form-grid">
+                <div className="book-appointment-select-field">
+                  <label htmlFor="new-member-relation">Relation *</label>
+                  <select
+                    id="new-member-relation"
+                    name="newMemberRelation"
+                    value={newMemberRelation}
+                    onChange={(e) => setNewMemberRelation(e.target.value as FamilyRelation)}
+                  >
                     {RELATIONS.map((r) => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                   </select>
                 </div>
-                <div className="appt-field">
-                  <label>Gender</label>
-                  <select value={newMemberGender} onChange={(e) => setNewMemberGender(e.target.value as any)}>
+                <div className="book-appointment-select-field">
+                  <label htmlFor="new-member-gender">Gender</label>
+                  <select
+                    id="new-member-gender"
+                    name="newMemberGender"
+                    value={newMemberGender}
+                    onChange={(e) => setNewMemberGender(e.target.value as any)}
+                  >
                     <option value="">Select Gender</option>
                     {GENDERS.map((g) => (
                       <option key={g} value={g}>{g}</option>
@@ -950,45 +956,39 @@ export const BookAppointment = () => {
                   </select>
                 </div>
               </div>
-              <div className="appt-two-cols">
-                <div className="appt-field">
-                  <label>Date of Birth</label>
-                  <input type="date" value={newMemberDob} onChange={(e) => setNewMemberDob(e.target.value)} />
-                  <p style={{ margin: '8px 0 0', fontSize: '0.82rem', color: '#475569', lineHeight: 1.45 }}>
-                    Self: age must be <strong>18 years or above</strong>. For other relations, minors may be added; see disclaimer below if age is under 18.
-                  </p>
+              <div className="book-appointment-form-grid">
+                <div>
+                  <TextField
+                    label="Date of Birth"
+                    id="new-member-dob"
+                    name="newMemberDob"
+                    type="date"
+                    value={newMemberDob}
+                    onChange={(e) => setNewMemberDob(e.target.value)}
+                    hint="Self: age must be 18 years or above. For other relations, minors may be added; see disclaimer below if age is under 18."
+                    error={
+                      newMemberDobAge !== null && newMemberDobAge < 18 && newMemberRelation === 'SELF'
+                        ? MSG_SELF_MIN_AGE
+                        : undefined
+                    }
+                  />
                   {newMemberDobAge !== null && newMemberDobAge < 18 && newMemberRelation !== 'SELF' && (
-                    <p
-                      role="note"
-                      style={{
-                        margin: '10px 0 0',
-                        padding: '10px 12px',
-                        fontSize: '0.82rem',
-                        lineHeight: 1.45,
-                        color: '#92400e',
-                        background: '#fffbeb',
-                        border: '1px solid #fcd34d',
-                        borderRadius: 8,
-                      }}
-                    >
+                    <p role="note" className="book-appointment-minor-note">
                       {MSG_MINOR_FAMILY_DISCLAIMER}
                     </p>
                   )}
-                  {newMemberDobAge !== null && newMemberDobAge < 18 && newMemberRelation === 'SELF' && (
-                    <p style={{ margin: '10px 0 0', fontSize: '0.82rem', color: '#b91c1c', lineHeight: 1.45 }}>
-                      {MSG_SELF_MIN_AGE}
-                    </p>
-                  )}
                 </div>
-                <div className="appt-field">
-                  <label>Address</label>
-                  <input type="text" value={newMemberAddress} onChange={(e) => setNewMemberAddress(e.target.value)} />
-                </div>
+                <TextField
+                  label="Address"
+                  id="new-member-address"
+                  name="newMemberAddress"
+                  type="text"
+                  value={newMemberAddress}
+                  onChange={(e) => setNewMemberAddress(e.target.value)}
+                />
               </div>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="public-cta"
+              <div className="book-appointment-member-form-actions">
+                <Button
                   onClick={handleAddFamilyMember}
                   disabled={
                     newMemberDobAge !== null &&
@@ -997,35 +997,40 @@ export const BookAppointment = () => {
                   }
                 >
                   Save Member
-                </button>
-                <button
-                  type="button"
-                  className="public-cta"
-                  style={{ background: '#334155' }}
+                </Button>
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setAddingMember(false)
                     setEditingMemberId(null)
                   }}
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
-            </div>
+            </Card>
           )}
 
-          <div className="appt-field">
-            <label>Consultation Type</label>
-            <select value={familyConsultationType} onChange={(e) => setFamilyConsultationType(e.target.value)}>
+          <div className="book-appointment-select-field">
+            <label htmlFor="family-consultation-type">Consultation Type</label>
+            <select
+              id="family-consultation-type"
+              name="familyConsultationType"
+              value={familyConsultationType}
+              onChange={(e) => setFamilyConsultationType(e.target.value)}
+            >
               {CONSULTATION_TYPES.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </div>
 
-          <div className="appt-two-cols">
-            <div className="appt-field">
-              <label>Name of Consultant *</label>
+          <div className="book-appointment-form-grid">
+            <div className="book-appointment-select-field">
+              <label htmlFor="family-consultant">Name of Consultant *</label>
               <select
+                id="family-consultant"
+                name="familyConsultantId"
                 ref={familyConsultantRef}
                 value={familyConsultantId}
                 onChange={(e) => setFamilyConsultantId(e.target.value)}
@@ -1036,33 +1041,43 @@ export const BookAppointment = () => {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              {loadingConsultants && <DnaLoader label="Loading consultants..." size={38} />}
+              {loadingConsultants && (
+                <div className="book-appointment-skeleton-inline" aria-busy="true" aria-label="Loading consultants...">
+                  <Skeleton lines={2} />
+                </div>
+              )}
             </div>
-            <div className="appt-field">
-              <label>Patient OPD No (optional)</label>
-              <input
-                type="text"
-                value={familyOpdNo}
-                onChange={(e) => setFamilyOpdNo(e.target.value)}
-              />
-            </div>
+            <TextField
+              label="Patient OPD No (optional)"
+              id="family-opd-no"
+              name="familyOpdNo"
+              type="text"
+              value={familyOpdNo}
+              onChange={(e) => setFamilyOpdNo(e.target.value)}
+            />
           </div>
 
           {renderDistanceBlock()}
 
-          <div className="appt-two-cols">
-            <div className="appt-field">
-              <label>Patient Name *</label>
-              <input
-                type="text"
-                value={familyPatientName}
-                onChange={(e) => setFamilyPatientName(e.target.value)}
+          <div className="book-appointment-form-grid">
+            <TextField
+              label="Patient Name *"
+              id="family-patient-name"
+              name="familyPatientName"
+              type="text"
+              value={familyPatientName}
+              onChange={(e) => setFamilyPatientName(e.target.value)}
+              disabled={!selectedFamilyMemberId}
+            />
+            <div className="book-appointment-select-field">
+              <label htmlFor="family-gender">Gender *</label>
+              <select
+                id="family-gender"
+                name="familyGender"
+                value={familyGender}
+                onChange={(e) => setFamilyGender(e.target.value)}
                 disabled={!selectedFamilyMemberId}
-              />
-            </div>
-            <div className="appt-field">
-              <label>Gender *</label>
-              <select value={familyGender} onChange={(e) => setFamilyGender(e.target.value)} disabled={!selectedFamilyMemberId}>
+              >
                 <option value="">Select Gender</option>
                 {GENDERS.map((g) => (
                   <option key={g} value={g}>{g}</option>
@@ -1070,24 +1085,25 @@ export const BookAppointment = () => {
               </select>
             </div>
           </div>
-          <div className="appt-field">
-            <label>Address</label>
-            <input
-              type="text"
-              value={familyAddress}
-              onChange={(e) => setFamilyAddress(e.target.value)}
-              disabled={!selectedFamilyMemberId}
-            />
-          </div>
+          <TextField
+            label="Address"
+            id="family-address"
+            name="familyAddress"
+            type="text"
+            value={familyAddress}
+            onChange={(e) => setFamilyAddress(e.target.value)}
+            disabled={!selectedFamilyMemberId}
+          />
 
-          <div className="appt-two-cols">
-            <div className="appt-field">
-              <label>Appointment Date *</label>
-              <div className="appt-calendar">
-                <div className="appt-calendar-head">
-                  <button
-                    type="button"
-                    className="appt-calendar-nav"
+          <div className="book-appointment-form-grid">
+            <div className="book-appointment-select-field">
+              <label htmlFor="family-appointment-date">Appointment Date *</label>
+              <div className="book-appointment-calendar">
+                <div className="book-appointment-calendar-head">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="book-appointment-calendar-nav"
                     disabled={!canGoPrevMonth}
                     onClick={() => {
                       if (!canGoPrevMonth) return
@@ -1095,25 +1111,26 @@ export const BookAppointment = () => {
                     }}
                   >
                     Prev
-                  </button>
+                  </Button>
                   <strong>{calendarMonthLabel}</strong>
-                  <button
-                    type="button"
-                    className="appt-calendar-nav"
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="book-appointment-calendar-nav"
                     onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
                   >
                     Next
-                  </button>
+                  </Button>
                 </div>
-                <div className="appt-calendar-weekdays">
+                <div className="book-appointment-calendar-weekdays">
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => (
                     <span key={w}>{w}</span>
                   ))}
                 </div>
-                <div className="appt-calendar-grid">
+                <div className="book-appointment-calendar-grid">
                   {calendarCells.map((cell) => {
                     if (!cell.date || !cell.dateKey) {
-                      return <span key={cell.key} className="appt-calendar-empty" />
+                      return <span key={cell.key} className="book-appointment-calendar-empty" />
                     }
                     const dayStart = startOfDay(cell.date)
                     const isPast = dayStart < todayStart
@@ -1124,7 +1141,7 @@ export const BookAppointment = () => {
                         key={cell.key}
                         type="button"
                         disabled={isPast}
-                        className={`appt-calendar-day ${isSelected ? 'selected' : ''}`}
+                        className={`book-appointment-calendar-day ${isSelected ? 'selected' : ''}`}
                         onClick={() => {
                           setAppointmentDate(cell.dateKey!)
                           if (status === 'full') {
@@ -1140,24 +1157,31 @@ export const BookAppointment = () => {
                     )
                   })}
                 </div>
-                <div className="appt-calendar-legend">
+                <div className="book-appointment-calendar-legend">
                   <span><i className="dot available" /> Available</span>
                   <span><i className="dot full" /> Full</span>
                   <span><i className="dot unknown" /> Checking</span>
                 </div>
               </div>
               {dateAvailabilityLoading && (
-                <DnaLoader label="Checking month availability..." size={38} />
+                <div className="book-appointment-skeleton-inline" aria-busy="true" aria-label="Checking month availability...">
+                  <Skeleton lines={2} />
+                </div>
               )}
               {appointmentDate && (
-                <p style={{ margin: '8px 0 0', fontSize: '0.82rem', color: '#334155' }}>
+                <p className="book-appointment-selected-date">
                   Selected date: <strong>{appointmentDate}</strong>
                 </p>
               )}
             </div>
-            <div className="appt-field">
-              <label>Preferred time (approx)</label>
-              <select value={preferredSlot} onChange={(e) => setPreferredSlot(e.target.value)}>
+            <div className="book-appointment-select-field">
+              <label htmlFor="family-preferred-slot">Preferred time (approx)</label>
+              <select
+                id="family-preferred-slot"
+                name="preferredSlot"
+                value={preferredSlot}
+                onChange={(e) => setPreferredSlot(e.target.value)}
+              >
                 <option value="">Select slot</option>
                 {TIME_SLOTS.map((s) => (
                   <option key={s} value={s}>{s}</option>
@@ -1167,21 +1191,11 @@ export const BookAppointment = () => {
           </div>
 
           {familyConsultantId && appointmentDate && (
-            <div
-              className="public-section-text"
-              style={{
-                margin: '12px 0 0',
-                fontSize: '0.88rem',
-                lineHeight: 1.45,
-                color: '#334155',
-                padding: '10px 12px',
-                background: '#f1f5f9',
-                borderRadius: 8,
-                border: '1px solid #e2e8f0',
-              }}
-            >
+            <div className="public-section-text book-appointment-quota-box">
               {appointmentQuotaLoading ? (
-                <DnaLoader label="Checking slot availability..." size={38} />
+                <div className="book-appointment-skeleton-inline" aria-busy="true" aria-label="Checking slot availability...">
+                  <Skeleton lines={3} />
+                </div>
               ) : appointmentQuota ? (
                 <>
                   <strong>Slots (IST, this date)</strong>
@@ -1213,70 +1227,65 @@ export const BookAppointment = () => {
           )}
 
           {appointmentQuota && isOnlineFull(appointmentQuota) && (
-            <div style={{ marginTop: 10 }}>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#92400e' }}>
+            <div className="book-appointment-full-day">
+              <p className="book-appointment-full-day-text">
                 Today booking is closed. You can choose next day appointment.
               </p>
-              <button
-                type="button"
-                className="public-cta"
-                style={{ marginTop: 8, padding: '7px 12px', fontSize: '0.82rem', background: '#0369a1' }}
+              <Button
+                variant="secondary"
+                className="book-appointment-full-day-btn"
                 onClick={() => void handleSuggestNextAvailableDate()}
               >
                 Find next available date
-              </button>
+              </Button>
             </div>
           )}
 
           {bookingDayNotice && (
-            <p style={{ margin: '10px 0 0', fontSize: '0.84rem', color: '#0f766e' }}>
+            <p className="book-appointment-day-notice">
               {bookingDayNotice}
               {nextSuggestedDate ? ` (Selected: ${nextSuggestedDate})` : ''}
             </p>
           )}
 
-          <p className="appt-timing-msg">
+          <p className="book-appointment-timing-msg">
             You may come anytime between <strong>10 AM and 3 PM</strong>.
           </p>
 
-          <button type="button" className="public-cta" style={{ marginTop: 16 }} onClick={goToPayment}>
+          <Button className="book-appointment-next-btn" onClick={goToPayment}>
             Next
-          </button>
+          </Button>
 
         </>
       )}
-    </div>
+    </Card>
   )
 
   const renderPayment = () => (
-    <div className="appt-card" style={{ textAlign: 'center' }}>
-      <h2 className="public-section-title" style={{ marginBottom: 16 }}>Payment</h2>
-      <p className="public-section-text" style={{ marginBottom: 16 }}>
+    <Card className="book-appointment-panel book-appointment-payment-card" elevated>
+      <h2 className="public-section-title book-appointment-payment-title">Payment</h2>
+      <p className="public-section-text book-appointment-payment-fee">
         Consultation fee: <strong>₹500</strong>
       </p>
-      <p className="public-section-text" style={{ marginBottom: 24 }}>
+      <p className="public-section-text book-appointment-payment-lead">
         Choose your payment preference. You can pay now during online booking, or pay cash at the clinic on appointment day.
       </p>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="public-cta"
+      <div className="book-appointment-payment-actions">
+        <Button
           onClick={() => void handleConfirmAppointment('online_now')}
           disabled={submitting}
         >
           {submitting ? 'Processing…' : 'Pay ₹500 Online & Confirm'}
-        </button>
-        <button
-          type="button"
-          className="public-cta"
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => void handleConfirmAppointment('cash_at_clinic')}
           disabled={submitting}
-          style={{ background: '#334155' }}
         >
-          {submitting ? 'Processing…' : 'Pay Cash at Clinic & Confirm'}
-        </button>
+          {submitting ? 'Processing…' : 'Pay cash at clinic & confirm'}
+        </Button>
       </div>
-    </div>
+    </Card>
   )
 
   const getConfirmName = () => familyPatientName || selectedFamilyMember?.fullName || '—'
@@ -1284,63 +1293,110 @@ export const BookAppointment = () => {
   const getConfirmEmail = () => '—'
 
   const renderConfirm = () => (
-    <div className="appt-card" style={{ textAlign: 'center' }}>
-      <h2 className="public-section-title" style={{ marginBottom: 16 }}>Appointment Confirmed</h2>
-      <p className="public-section-text" style={{ marginBottom: 12 }}>
+    <Card className="book-appointment-panel book-appointment-confirm-card" elevated>
+      <h2 className="public-section-title book-appointment-confirm-title">Appointment Confirmed</h2>
+      <p className="public-section-text book-appointment-confirm-lead">
         Thank you. Your appointment has been booked.
       </p>
       {appointmentId && (
-        <p className="public-section-text" style={{ marginBottom: 12 }}>
+        <p className="public-section-text book-appointment-confirm-id">
           Appointment ID: <strong>{appointmentId}</strong>
         </p>
       )}
-      <div className="public-section-text" style={{ marginBottom: 16, textAlign: 'left', maxWidth: 360, marginLeft: 'auto', marginRight: 'auto' }}>
-        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Name:</strong> {getConfirmName()}</p>
-        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Mobile:</strong> {getConfirmMobile()}</p>
-        <p style={{ margin: '0 0 6px', fontSize: '0.95rem', color: '#475569' }}><strong>Email:</strong> {getConfirmEmail()}</p>
-        <p style={{ margin: 0, fontSize: '0.95rem', color: '#475569' }}>
+      <div className="public-section-text book-appointment-confirm-summary">
+        <p className="book-appointment-confirm-line"><strong>Name:</strong> {getConfirmName()}</p>
+        <p className="book-appointment-confirm-line"><strong>Mobile:</strong> {getConfirmMobile()}</p>
+        <p className="book-appointment-confirm-line"><strong>Email:</strong> {getConfirmEmail()}</p>
+        <p className="book-appointment-confirm-line">
           <strong>Payment:</strong> {selectedPaymentMode === 'cash_at_clinic' ? 'Cash at clinic (on appointment day)' : 'Paid online during booking'}
         </p>
       </div>
-      <p className="public-section-text" style={{ marginBottom: 24 }}>
+      <p className="public-section-text book-appointment-confirm-footer">
         You will be contacted by the clinic if any changes are required.
       </p>
 
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-        <Link to={profileSessionReady ? '/patient-profile' : '/patient-login'} className="public-cta">
-          {profileSessionReady ? 'View My Profile' : 'Login to View Profile'}
+      <div className="book-appointment-confirm-actions">
+        <Link to={profileSessionReady ? '/patient-profile' : '/patient-login'} className="ui-button ui-button-primary">
+          {profileSessionReady ? 'View my profile' : 'Login to view profile'}
         </Link>
-        <Link to="/" className="public-cta" style={{ background: '#334155' }}>
-          Back to Home
+        <Link to="/" className="ui-button ui-button-secondary">
+          Back to home
         </Link>
       </div>
-    </div>
+    </Card>
   )
 
   return (
-    <div className="public-home">
-      <header className="public-header">
-        <div className="public-header-inner">
-          <Link to="/" className="public-logo">MEDIGRAPH</Link>
-          <nav className="public-nav" aria-label="Main">
-            <Link to="/" className="public-nav-link">Home</Link>
-            <Link to="/book-appointment" className="public-nav-link">Book Appointment</Link>
-          </nav>
-        </div>
-      </header>
-      <main className="public-main" style={{ paddingTop: 32 }}>
-        <h1 className="public-section-title">Book Appointment</h1>
+    <>
+      <PublicLayout className="book-appointment-page">
+        <PageHeader
+          className="book-appointment-page-header"
+          title="Book Appointment"
+          subtitle={
+            !policyAccepted
+              ? 'Review privacy terms to continue with online booking.'
+              : step === 'confirm'
+                ? 'Your appointment is confirmed.'
+                : step === 'payment'
+                  ? 'Choose how you would like to pay.'
+                  : 'Enter family details and pick a date for your visit.'
+          }
+          breadcrumb={(
+            <Breadcrumb
+              items={[
+                { label: 'Home', href: '/' },
+                { label: 'Book Appointment' },
+              ]}
+            />
+          )}
+        />
+        {policyAccepted && (
+          <div className="book-appointment-stats" aria-label="Booking progress">
+            <StatCard
+              className={step === 'details' ? 'book-appointment-stat--active' : ''}
+              title="Step 1"
+              value="Patient details"
+              trend={{
+                label:
+                  step === 'details'
+                    ? 'Current step'
+                    : step === 'payment' || step === 'confirm'
+                      ? 'Completed'
+                      : 'Waiting',
+                direction: step === 'payment' || step === 'confirm' ? 'up' : 'neutral',
+              }}
+            />
+            <StatCard
+              className={step === 'payment' ? 'book-appointment-stat--active' : ''}
+              title="Step 2"
+              value="Payment"
+              trend={{
+                label: step === 'payment' ? 'Current step' : step === 'confirm' ? 'Completed' : 'Waiting',
+                direction: step === 'payment' ? 'neutral' : step === 'confirm' ? 'up' : 'neutral',
+              }}
+            />
+            <StatCard
+              className={step === 'confirm' ? 'book-appointment-stat--active' : ''}
+              title="Step 3"
+              value="Confirmed"
+              trend={{
+                label: step === 'confirm' ? 'Current step' : 'Waiting',
+                direction: step === 'confirm' ? 'up' : 'neutral',
+              }}
+            />
+          </div>
+        )}
         {!policyAccepted && renderConsent()}
         {policyAccepted && (
           <>
-            <p className="public-section-text" style={{ marginBottom: 20 }}>
+            <p className="public-section-text book-appointment-intro">
               Please choose how you want to book.
             </p>
             {step === 'details' && mode === 'none' && renderModeChooser()}
           </>
         )}
         {error && (
-          <p style={{ color: '#b91c1c', marginBottom: 16, fontSize: '0.9rem' }}>
+          <p className="book-appointment-error" role="alert">
             {error}
           </p>
         )}
@@ -1348,93 +1404,35 @@ export const BookAppointment = () => {
         {policyAccepted && step === 'payment' && renderPayment()}
         {policyAccepted && step === 'confirm' && renderConfirm()}
         {step !== 'confirm' && (
-          <p style={{ marginTop: 24, fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>
-            <Link to="/">Back to Home</Link>
+          <p className="book-appointment-back-link">
+            <Link to="/">Back to home</Link>
           </p>
         )}
-      </main>
-      <footer className="public-footer">
-        <div className="public-footer-inner">
-          <p className="public-footer-copy">© {new Date().getFullYear()} MEDIGRAPH. All rights reserved.</p>
-        </div>
-      </footer>
+      </PublicLayout>
       {deleteMemberTarget && (
-        <div className="appt-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-member-title">
-          <div className="appt-modal-card">
+        <div className="book-appointment-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-member-title">
+          <Card className="book-appointment-modal-card" elevated>
             <h3 id="delete-member-title">Delete family member?</h3>
             <p>
               Are you sure you want to delete <strong>{deleteMemberTarget.fullName}</strong> from this family list?
             </p>
-            <div className="appt-modal-actions">
-              <button type="button" className="appt-modal-btn cancel" onClick={closeDeleteMemberModal}>
+            <div className="book-appointment-modal-actions">
+              <Button variant="secondary" onClick={closeDeleteMemberModal}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="appt-modal-btn delete"
+              </Button>
+              <Button
+                className="ui-button-danger-outline"
                 onClick={() => {
                   void handleDeleteMember(deleteMemberTarget.id)
                 }}
               >
                 Yes, delete
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         </div>
       )}
-      <style>{`
-        .public-home { min-height: 100vh; display: flex; flex-direction: column; background: #f8fafc; color: #0f172a; }
-        .public-header { background: #fff; border-bottom: 1px solid #e2e8f0; }
-        .public-header-inner { max-width: 1100px; margin: 0 auto; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-        .public-logo { font-size: 1.35rem; font-weight: 700; color: #0f172a; text-decoration: none; }
-        .public-logo:hover { color: #1e40af; }
-        .public-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-        .public-nav-link { padding: 8px 12px; color: #475569; text-decoration: none; font-size: 0.95rem; border-radius: 8px; }
-        .public-nav-link:hover { color: #0f172a; background: #f1f5f9; }
-        .public-main { flex: 1; max-width: 800px; margin: 0 auto; padding: 40px 20px 60px; width: 100%; }
-        .public-section-title { font-size: 1.35rem; font-weight: 600; margin: 0 0 12px; color: #0f172a; }
-        .public-section-text { font-size: 1rem; color: #475569; margin: 0; line-height: 1.6; }
-        .public-cta { display: inline-block; padding: 10px 22px; background: #1e40af; color: #fff; font-weight: 600; border-radius: 10px; text-decoration: none; border: none; cursor: pointer; }
-        .public-cta:hover { background: #1e3a8a; }
-        .appt-card { background: #ffffff; border-radius: 16px; padding: 20px 18px 22px; border: 1px solid #e2e8f0; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05); margin-bottom: 24px; }
-        .appt-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-        .appt-field label { font-size: 0.9rem; color: #475569; }
-        .appt-field input, .appt-field select { padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.95rem; }
-        .appt-calendar { border: 1px solid #dbeafe; border-radius: 12px; padding: 10px; background: #f8fbff; }
-        .appt-calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .appt-calendar-nav { border: 1px solid #bfdbfe; background: #ffffff; color: #1d4ed8; border-radius: 8px; padding: 4px 10px; font-size: 0.8rem; cursor: pointer; }
-        .appt-calendar-nav:disabled { opacity: 0.45; cursor: not-allowed; }
-        .appt-calendar-weekdays, .appt-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-        .appt-calendar-weekdays span { text-align: center; font-size: 0.72rem; color: #64748b; }
-        .appt-calendar-empty { min-height: 34px; }
-        .appt-calendar-day { min-height: 34px; border: 1px solid #dbeafe; background: #ffffff; border-radius: 8px; cursor: pointer; color: #0f172a; font-size: 0.78rem; display: flex; align-items: center; justify-content: center; gap: 4px; }
-        .appt-calendar-day:hover { border-color: #60a5fa; }
-        .appt-calendar-day.selected { border-color: #1d4ed8; background: #eff6ff; font-weight: 700; }
-        .appt-calendar-day:disabled { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; cursor: not-allowed; }
-        .appt-calendar-legend { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.74rem; color: #475569; }
-        .dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; vertical-align: middle; }
-        .dot.available { background: #16a34a; }
-        .dot.full { background: #dc2626; }
-        .dot.unknown { background: #94a3b8; }
-        .appt-two-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        @media (max-width: 640px) { .appt-two-cols { grid-template-columns: 1fr; } }
-        .appt-readonly-value { padding: 8px 10px; border-radius: 8px; background: #f1f5f9; font-size: 0.95rem; color: #111827; }
-        .appt-timing-msg { font-size: 0.9rem; color: #475569; margin: 12px 0 0; padding: 10px 12px; background: #f0fdf4; border-radius: 8px; border: 1px solid #bbf7d0; }
-        .appt-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.52); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px; }
-        .appt-modal-card { width: min(460px, 100%); background: #fff; border-radius: 16px; border: 1px solid #dbeafe; box-shadow: 0 22px 45px rgba(15, 23, 42, 0.25); padding: 18px; }
-        .appt-modal-card h3 { margin: 0 0 8px; font-size: 1.1rem; color: #0f172a; }
-        .appt-modal-card p { margin: 0; color: #475569; line-height: 1.5; font-size: 0.95rem; }
-        .appt-modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 10px; }
-        .appt-modal-btn { border: none; border-radius: 10px; padding: 9px 14px; font-weight: 600; cursor: pointer; }
-        .appt-modal-btn.cancel { background: #e2e8f0; color: #0f172a; }
-        .appt-modal-btn.cancel:hover { background: #cbd5e1; }
-        .appt-modal-btn.delete { background: #b91c1c; color: #fff; }
-        .appt-modal-btn.delete:hover { background: #991b1b; }
-        .public-footer { margin-top: auto; background: #0f172a; color: #94a3b8; padding: 28px 20px; }
-        .public-footer-inner { max-width: 1100px; margin: 0 auto; text-align: center; }
-        .public-footer-copy { font-size: 0.875rem; margin: 0; color: #64748b; }
-      `}</style>
-    </div>
+    </>
   )
 }
 

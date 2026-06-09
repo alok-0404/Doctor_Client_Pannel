@@ -4,6 +4,8 @@ interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string
   id: string
   hint?: string
+  /** Optional validation message — styled as error when set. */
+  error?: string
   leftIcon?: ReactNode
   canTogglePassword?: boolean
 }
@@ -12,6 +14,7 @@ export const TextField: FC<TextFieldProps> = ({
   label,
   id,
   hint,
+  error,
   leftIcon,
   canTogglePassword = false,
   className = '',
@@ -25,8 +28,10 @@ export const TextField: FC<TextFieldProps> = ({
     ? (showPassword ? 'text' : 'password')
     : type
 
+  const hasError = Boolean(error)
+
   return (
-    <div className="ui-textfield">
+    <div className={`ui-textfield${hasError ? ' ui-textfield--error' : ''}`}>
       <label
         htmlFor={id}
         className="ui-textfield-label"
@@ -42,7 +47,9 @@ export const TextField: FC<TextFieldProps> = ({
         <input
           id={id}
           type={inputType}
-          className={`ui-textfield-input ${hasIcon ? 'with-icon' : ''} ${className}`}
+          className={`ui-textfield-input ${hasIcon ? 'with-icon' : ''}${canTogglePassword ? ' with-toggle' : ''} ${className}`.trim()}
+          aria-invalid={hasError || undefined}
+          aria-describedby={hasError || hint ? `${id}-hint` : undefined}
           {...props}
         />
         {canTogglePassword && (
@@ -84,9 +91,12 @@ export const TextField: FC<TextFieldProps> = ({
           </button>
         )}
       </div>
-      {hint && (
-        <p className="ui-textfield-hint">
-          {hint}
+      {(error || hint) && (
+        <p
+          id={`${id}-hint`}
+          className={`ui-textfield-hint${hasError ? ' ui-textfield-hint--error' : ''}`}
+        >
+          {error || hint}
         </p>
       )}
     </div>

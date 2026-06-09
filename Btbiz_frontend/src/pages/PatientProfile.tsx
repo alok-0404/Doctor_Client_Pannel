@@ -19,7 +19,14 @@ import {
   type ServiceProviderOption,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
+import { PublicLayout } from '../components/layout/PublicLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
 import { DnaLoader } from '../components/ui/DnaLoader'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { TextField } from '../components/ui/TextField'
 
 const PATIENT_PROFILE_CACHE_KEY = 'patient_profile_cache_v1'
 
@@ -183,15 +190,46 @@ function formatProviderOptionLabel(
 function PatientProfileAccordionSection({
   title,
   defaultOpen = false,
+  loading = false,
+  loadingVariant = 'details',
   children,
 }: {
   title: string
   defaultOpen?: boolean
-  children: React.ReactNode
+  loading?: boolean
+  /** Skeleton layout when `loading` is true. */
+  loadingVariant?: 'details' | 'appointments'
+  children?: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
+
+  const renderLoading = () => {
+    if (loadingVariant === 'appointments') {
+      return (
+        <div className="patient-profile-accordion-loading" aria-busy="true" aria-label="Loading appointments">
+          <div className="patient-profile-accordion-skeleton-list">
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className="patient-profile-appointment-card patient-profile-appointment-card--skeleton" elevated>
+                <Skeleton lines={2} />
+              </Card>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="patient-profile-accordion-loading" aria-busy="true" aria-label="Loading profile details">
+        <DnaLoader label="Loading details…" size={28} />
+        <Card className="patient-profile-details-card" elevated>
+          <Skeleton lines={5} />
+        </Card>
+      </div>
+    )
+  }
+
   return (
-    <section className="patient-profile-section patient-profile-accordion-section">
+    <Card className="patient-profile-accordion-section" elevated>
       <button
         type="button"
         className="patient-profile-accordion-trigger"
@@ -199,12 +237,51 @@ function PatientProfileAccordionSection({
         aria-expanded={open}
       >
         <span className="patient-profile-accordion-title">{title}</span>
-        <span className="patient-profile-accordion-icon" aria-hidden>
-          {open ? '▼' : '▶'}
-        </span>
+        <span
+          className={`patient-profile-accordion-chevron${open ? ' patient-profile-accordion-chevron--open' : ''}`}
+          aria-hidden="true"
+        />
       </button>
-      {open ? <div className="patient-profile-accordion-panel">{children}</div> : null}
-    </section>
+      {open ? (
+        <div className="patient-profile-accordion-panel">
+          {loading ? renderLoading() : children}
+        </div>
+      ) : null}
+    </Card>
+  )
+}
+
+type HealthTrendTooltipProps = {
+  active?: boolean
+  payload?: Array<{ name?: string; value?: number; color?: string; payload?: { fullDate?: string } }>
+  label?: string
+}
+
+function HealthTrendTooltip({ active, payload, label }: HealthTrendTooltipProps) {
+  if (!active || !payload?.length) return null
+  const title = payload[0]?.payload?.fullDate ?? label ?? ''
+
+  const formatValue = (name: string | undefined, value: number | undefined) => {
+    if (value == null) return '—'
+    if (name === 'Temperature') return `${value} °F`
+    if (name === 'Weight') return `${value} kg`
+    if (name === 'Sugar (Fasting)') return `${value} mg/dL`
+    return `${value} mmHg`
+  }
+
+  return (
+    <div className="patient-profile-chart-tooltip">
+      <p className="patient-profile-chart-tooltip-title">{title}</p>
+      <ul className="patient-profile-chart-tooltip-list">
+        {payload.map((entry) => (
+          <li key={String(entry.name)}>
+            <span className="patient-profile-chart-tooltip-dot" style={{ background: entry.color }} />
+            <span>{entry.name}</span>
+            <strong>{formatValue(entry.name, entry.value)}</strong>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -218,7 +295,7 @@ function ProviderDistanceActions({
   onUseLocation: () => void
 }) {
   return (
-    <div className="patient-profile-distance-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+    <div className="patient-profile-distance-actions">
       <button
         type="button"
         className="patient-profile-link-btn"
@@ -525,50 +602,8 @@ export const PatientProfile = () => {
     [pharmacyProviders, selectedPharmacyProviderId]
   )
 
-  const handleLogout = () => {
-    patientStorage.clear()
-    window.location.href = '/'
-  }
-
-  const patientName = patientStorage.getPatientName() ?? data?.patient?.firstName ?? 'Patient'
-
-  if (loading) {
-    return (
-      <div className="patient-profile">
-        <div className="patient-profile-loading">
-          <DnaLoader label="Loading your profile..." size={40} />
-        </div>
-        <style>{patientProfileStyles}</style>
-      </div>
-    )
-  }
-
-  if (error || !data) {
-    return (
-      <div className="patient-profile">
-        <div className="patient-profile-error">
-          <p>{error ?? 'Profile not found.'}</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12, justifyContent: 'center' }}>
-            <Link to="/patient-login">Sign in again</Link>
-            <Link to="/">Back to Home</Link>
-          </div>
-        </div>
-        <style>{patientProfileStyles}</style>
-      </div>
-    )
-  }
-
-  const {
-    patient,
-    visits,
-    pharmacyDispensations,
-    documents,
-    medicineRequests = [],
-    testRequests = [],
-  } = data
-
-  const labPaidRequests = testRequests.filter((t) => t.paymentStatus === 'PAID')
   const healthTrendData = useMemo(() => {
+    const visits = data?.visits ?? []
     return visits
       .slice()
       .sort((a, b) => new Date(a.visitDate).getTime() - new Date(b.visitDate).getTime())
@@ -589,7 +624,78 @@ export const PatientProfile = () => {
           p.weight != null ||
           p.temperature != null
       )
-  }, [visits])
+  }, [data?.visits])
+
+  const handleLogout = () => {
+    patientStorage.clear()
+    window.location.href = '/'
+  }
+
+  const patientName = patientStorage.getPatientName() ?? data?.patient?.firstName ?? 'Patient'
+
+  const profilePageHeader = (
+    <PageHeader
+      className="patient-profile-page-header"
+      title="My Health Profile"
+      subtitle={`Hello, ${patientName}`}
+      breadcrumb={(
+        <Breadcrumb
+          items={[
+            { label: 'Home', href: '/' },
+            { label: 'My Profile' },
+          ]}
+        />
+      )}
+      actions={(
+        <>
+          <Link to="/book-appointment" className="ui-button ui-button-secondary">
+            Book appointment
+          </Link>
+          <Button variant="secondary" onClick={handleLogout}>
+            Logout
+          </Button>
+        </>
+      )}
+    />
+  )
+
+  if (loading) {
+    return (
+      <PublicLayout className="patient-profile-page">
+        {profilePageHeader}
+        <div className="patient-profile-main">
+          <PatientProfileAccordionSection title="My Details" defaultOpen loading loadingVariant="details" />
+          <PatientProfileAccordionSection title="Appointments" loading loadingVariant="appointments" />
+        </div>
+      </PublicLayout>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <PublicLayout className="patient-profile-page">
+        {profilePageHeader}
+        <div className="patient-profile-error">
+          <p>{error ?? 'Profile not found.'}</p>
+          <div className="patient-profile-error-actions">
+            <Link to="/patient-login">Sign in again</Link>
+            <Link to="/">Back to home</Link>
+          </div>
+        </div>
+      </PublicLayout>
+    )
+  }
+
+  const {
+    patient,
+    visits,
+    pharmacyDispensations,
+    documents,
+    medicineRequests = [],
+    testRequests = [],
+  } = data
+
+  const labPaidRequests = testRequests.filter((t) => t.paymentStatus === 'PAID')
 
   const handleDocumentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -609,7 +715,10 @@ export const PatientProfile = () => {
 
   const handleAddMedicine = async (ev: React.FormEvent) => {
     ev.preventDefault()
-    if (!addMedicineName.trim()) return
+    if (!addMedicineName.trim()) {
+      toast.error('Please enter a medicine name.')
+      return
+    }
     setAddingMedicine(true)
     try {
       await patientPortalService.addMedicine({
@@ -639,7 +748,10 @@ export const PatientProfile = () => {
 
   const handleAddTest = async (ev: React.FormEvent) => {
     ev.preventDefault()
-    if (!addTestName.trim()) return
+    if (!addTestName.trim()) {
+      toast.error('Please enter a test name.')
+      return
+    }
     setAddingTest(true)
     try {
       await patientPortalService.addTest({
@@ -739,7 +851,7 @@ export const PatientProfile = () => {
 
           <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
             <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
-              Print / Save as PDF
+              Print / save as PDF
             </button>
           </div>
         </body>
@@ -882,7 +994,7 @@ export const PatientProfile = () => {
           </div>
           <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
             <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
-              Print / Save as PDF
+              Print / save as PDF
             </button>
           </div>
         </body>
@@ -953,7 +1065,7 @@ export const PatientProfile = () => {
           </div>
           <div style="margin-top:18px;">
             <button type="button" onclick="window.print()" style="padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#fff;cursor:pointer;">
-              Print / Save as PDF
+              Print / save as PDF
             </button>
           </div>
         </body>
@@ -1031,274 +1143,317 @@ export const PatientProfile = () => {
   const visibleDiagnosticTests = allDiagnosticTests.filter((entry) => !isDiagnosticLinkedToAnyRequest(entry))
 
   return (
-    <div className="patient-profile">
-      <header className="patient-profile-header">
-        <div className="patient-profile-header-inner">
-          <Link to="/" className="patient-profile-logo">
-            MEDIGRAPH
-          </Link>
-          <div className="patient-profile-header-right">
-            <span className="patient-profile-greeting">Hello, {patientName}</span>
-            <Link to="/book-appointment" className="patient-profile-nav-link">
-              Book Appointment
-            </Link>
-            <button
-              type="button"
-              className="patient-profile-logout"
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
+    <PublicLayout className="patient-profile-page">
+      {profilePageHeader}
 
-      <main className="patient-profile-main">
-        <h1 className="patient-profile-title">My Health Profile</h1>
-
+      <div className="patient-profile-main">
         <PatientProfileAccordionSection title="My Details" defaultOpen>
-          <div className="patient-profile-details">
-            <p><strong>Name:</strong> {[patient.firstName, patient.lastName].filter(Boolean).join(' ')}</p>
-            <p><strong>Mobile:</strong> {patient.mobileNumber}</p>
-            {patient.gender && <p><strong>Gender:</strong> {patient.gender}</p>}
-            {patient.dateOfBirth && <p><strong>Date of birth:</strong> {formatDate(patient.dateOfBirth)}</p>}
-            {patient.bloodGroup && <p><strong>Blood group:</strong> {patient.bloodGroup}</p>}
-            {patient.address && <p><strong>Address:</strong> {patient.address}</p>}
-          </div>
+          <Card className="patient-profile-details-card" elevated>
+            <div className="patient-profile-details">
+              <p className="public-section-text patient-profile-detail-line"><strong>Name:</strong> {[patient.firstName, patient.lastName].filter(Boolean).join(' ')}</p>
+              <p className="public-section-text patient-profile-detail-line"><strong>Mobile:</strong> {patient.mobileNumber}</p>
+              {patient.gender && <p className="public-section-text patient-profile-detail-line"><strong>Gender:</strong> {patient.gender}</p>}
+              {patient.dateOfBirth && <p className="public-section-text patient-profile-detail-line"><strong>Date of birth:</strong> {formatDate(patient.dateOfBirth)}</p>}
+              {patient.bloodGroup && <p className="public-section-text patient-profile-detail-line"><strong>Blood group:</strong> {patient.bloodGroup}</p>}
+              {patient.address && <p className="public-section-text patient-profile-detail-line"><strong>Address:</strong> {patient.address}</p>}
+            </div>
+          </Card>
         </PatientProfileAccordionSection>
 
         <PatientProfileAccordionSection title="Appointments">
           {visits.length === 0 ? (
-            <p className="patient-profile-empty">No appointments yet.</p>
+            <p className="public-section-text patient-profile-empty">No appointments yet.</p>
           ) : (
-            <ul className="patient-profile-list patient-profile-list-accordion">
+            <ul className="patient-profile-appointment-list">
               {visits.map((v) => (
-                <li key={v._id} className="patient-profile-card">
-                  <div>
-                    <strong>{formatDate(v.visitDate)}</strong>
-                    {v.doctor?.name && <span> — Dr. {v.doctor.name}</span>}
-                  </div>
-                  {v.reason && <p className="patient-profile-muted">{v.reason}</p>}
-                  {v.notes && <p className="patient-profile-muted">{v.notes}</p>}
+                <li key={v._id}>
+                  <Card className="patient-profile-appointment-card" elevated interactive>
+                    <div className="patient-profile-appointment-head">
+                      <strong>{formatDate(v.visitDate)}</strong>
+                      {v.doctor?.name && <span> — Dr. {v.doctor.name}</span>}
+                    </div>
+                    {v.reason && <p className="public-section-text patient-profile-muted">{v.reason}</p>}
+                    {v.notes && <p className="public-section-text patient-profile-muted">{v.notes}</p>}
+                  </Card>
                 </li>
               ))}
             </ul>
           )}
         </PatientProfileAccordionSection>
 
-        <section className="patient-profile-section">
-          <h2>Health Trend Graph</h2>
+        <section className="patient-profile-section patient-profile-health-trend-section">
+          <h2 className="patient-profile-section-title">Health Trend Graph</h2>
           {healthTrendData.length < 2 ? (
-            <p className="patient-profile-empty">
+            <p className="public-section-text patient-profile-empty patient-profile-health-trend-empty">
               At least 2 visit readings are needed to show trend graph.
             </p>
           ) : (
-            <div className="patient-profile-chart-card">
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={healthTrendData} margin={{ top: 12, right: 20, left: 10, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="dateKey" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(value: any, name: any) => {
-                      if (value == null) return ['—', name]
-                      if (name === 'Temperature') return [`${value} F`, name]
-                      if (name === 'Weight') return [`${value} kg`, name]
-                      if (name === 'Sugar (Fasting)') return [`${value} mg/dL`, name]
-                      return [`${value} mmHg`, name]
-                    }}
-                    labelFormatter={(label: any, payload: any) =>
-                      payload?.[0]?.payload?.fullDate ?? String(label ?? '')
-                    }
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="sugar"
-                    name="Sugar (Fasting)"
-                    stroke="#2563eb"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="systolic"
-                    name="BP Systolic"
-                    stroke="#ef4444"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="diastolic"
-                    name="BP Diastolic"
-                    stroke="#f97316"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="weight"
-                    name="Weight"
-                    stroke="#16a34a"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="temperature"
-                    name="Temperature"
-                    stroke="#7c3aed"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    connectNulls
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-              <p className="patient-profile-muted" style={{ marginTop: 10 }}>
-                Graph shows date-wise trend from your visit vitals and basic tests.
+            <Card className="patient-profile-health-trend-card" elevated>
+              <div className="patient-profile-chart-wrap">
+                <ResponsiveContainer width="100%" height={360}>
+                  <LineChart data={healthTrendData} margin={{ top: 16, right: 12, left: 4, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="4 4" stroke="rgba(148, 163, 184, 0.35)" vertical={false} />
+                    <XAxis
+                      dataKey="dateKey"
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      axisLine={{ stroke: '#e2e8f0' }}
+                      tickLine={false}
+                      dy={8}
+                    />
+                    <YAxis
+                      yAxisId="vitals"
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={44}
+                    />
+                    <YAxis
+                      yAxisId="body"
+                      orientation="right"
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={44}
+                    />
+                    <Tooltip content={<HealthTrendTooltip />} cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={40}
+                      iconType="circle"
+                      wrapperStyle={{ paddingTop: 16, fontSize: 12 }}
+                    />
+                    <Line
+                      yAxisId="vitals"
+                      type="monotone"
+                      dataKey="sugar"
+                      name="Sugar (Fasting)"
+                      stroke="#0d9488"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 2, fill: '#fff' }}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="vitals"
+                      type="monotone"
+                      dataKey="systolic"
+                      name="BP Systolic"
+                      stroke="#dc2626"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 2, fill: '#fff' }}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="vitals"
+                      type="monotone"
+                      dataKey="diastolic"
+                      name="BP Diastolic"
+                      stroke="#f97316"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 2, fill: '#fff' }}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="body"
+                      type="monotone"
+                      dataKey="weight"
+                      name="Weight"
+                      stroke="#2563eb"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 2, fill: '#fff' }}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="body"
+                      type="monotone"
+                      dataKey="temperature"
+                      name="Temperature"
+                      stroke="#7c3aed"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 2, fill: '#fff' }}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="public-section-text patient-profile-health-trend-caption">
+                Graph shows date-wise trend from your visit vitals and basic tests. Left axis: BP &amp; sugar · Right axis: weight &amp; temperature.
               </p>
-            </div>
+            </Card>
           )}
         </section>
 
-        <section className="patient-profile-section">
-          <div className="patient-profile-heading-with-hint">
-            <div className="patient-profile-section-heading-row">
-              <h2>Lab Tests</h2>
-              <select
-                value={selectedLabProviderId}
-                onChange={(e) => setSelectedLabProviderId(e.target.value)}
-                className="patient-profile-input patient-profile-input-small patient-profile-heading-select"
-                aria-label="Choose lab"
-              >
-                <option value="">Choose lab (auto-assign if not selected)</option>
-                {labProviders.map((lab) => (
-                  <option key={lab.id} value={lab.id}>
-                    {formatProviderOptionLabel(
-                      lab,
-                      providerGeoStatus,
+        <section className="patient-profile-section patient-profile-lab-section">
+          <h2 className="patient-profile-section-title">Lab Tests</h2>
+
+          <Card className="patient-profile-lab-toolbar-card" elevated>
+            <div className="patient-profile-lab-toolbar">
+              <div className="patient-profile-lab-select-field">
+                <label htmlFor="lab-provider-select">Choose lab</label>
+                <select
+                  id="lab-provider-select"
+                  value={selectedLabProviderId}
+                  onChange={(e) => setSelectedLabProviderId(e.target.value)}
+                  className="patient-profile-provider-select"
+                  aria-label="Choose lab"
+                >
+                  <option value="">Choose lab (auto-assign if not selected)</option>
+                  {labProviders.map((lab) => (
+                    <option key={lab.id} value={lab.id}>
+                      {formatProviderOptionLabel(
+                        lab,
+                        providerGeoStatus,
+                        patientCoords?.lat,
+                        patientCoords?.lng,
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <ProviderDistanceActions
+                loading={providersLoading}
+                onRefresh={() => void loadProviderLists()}
+                onUseLocation={() => void loadProviderLists({ forceGps: true })}
+              />
+              <ProviderDistanceHint
+                geo={providerGeoStatus}
+                providers={labProviders}
+                patientLat={patientCoords?.lat}
+                patientLng={patientCoords?.lng}
+                loading={providersLoading}
+              />
+              {selectedLabProvider && (
+                <p className="patient-profile-distance-selected public-section-text">
+                  {(() => {
+                    const km = providerDistanceKm(
+                      selectedLabProvider,
                       patientCoords?.lat,
                       patientCoords?.lng,
-                    )}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <ProviderDistanceActions
-              loading={providersLoading}
-              onRefresh={() => void loadProviderLists()}
-              onUseLocation={() => void loadProviderLists({ forceGps: true })}
-            />
-            <ProviderDistanceHint
-              geo={providerGeoStatus}
-              providers={labProviders}
-              patientLat={patientCoords?.lat}
-              patientLng={patientCoords?.lng}
-              loading={providersLoading}
-            />
-            {selectedLabProvider && (
-              <p className="patient-profile-distance-selected">
-                {(() => {
-                  const km = providerDistanceKm(
-                    selectedLabProvider,
-                    patientCoords?.lat,
-                    patientCoords?.lng,
-                  )
-                  if (typeof km === 'number') {
+                    )
+                    if (typeof km === 'number') {
+                      return (
+                        <>
+                          Selected: <strong>{selectedLabProvider.name}</strong> — {km.toFixed(1)} km from
+                          you
+                        </>
+                      )
+                    }
                     return (
                       <>
-                        Selected: <strong>{selectedLabProvider.name}</strong> — {km.toFixed(1)} km from
-                        you
+                        Selected: <strong>{selectedLabProvider.name}</strong>
+                        {providerGeoStatus === 'ok' ? ' — distance not available (shop location not set)' : ''}
                       </>
                     )
-                  }
-                  return (
-                    <>
-                      Selected: <strong>{selectedLabProvider.name}</strong>
-                      {providerGeoStatus === 'ok' ? ' — distance not available (shop location not set)' : ''}
-                    </>
-                  )
-                })()}
+                  })()}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card className="patient-profile-lab-form-card" elevated>
+            <h3 className="patient-profile-subtitle">Request a test</h3>
+            <form onSubmit={handleAddTest} className="patient-profile-lab-form">
+              <TextField
+                id="lab-test-name"
+                name="addTestName"
+                label="Test name"
+                type="text"
+                placeholder="Add test request (e.g. CBC, Sugar)"
+                value={addTestName}
+                onChange={(e) => setAddTestName(e.target.value)}
+              />
+              <TextField
+                id="lab-test-notes"
+                name="addTestNotes"
+                label="Notes (optional)"
+                type="text"
+                placeholder="Notes (optional)"
+                value={addTestNotes}
+                onChange={(e) => setAddTestNotes(e.target.value)}
+              />
+              <div className="patient-profile-lab-form-grid">
+                <div className="patient-profile-lab-select-field">
+                  <label htmlFor="lab-test-service-type">Service type</label>
+                  <select
+                    id="lab-test-service-type"
+                    name="addTestServiceType"
+                    value={addTestServiceType}
+                    onChange={(e) => setAddTestServiceType(e.target.value as 'LAB_VISIT' | 'HOME_SERVICE')}
+                  >
+                    <option value="LAB_VISIT">Lab visit</option>
+                    <option value="HOME_SERVICE">Home service</option>
+                  </select>
+                </div>
+                {addTestServiceType === 'HOME_SERVICE' ? (
+                  <div className="patient-profile-lab-select-field">
+                    <label htmlFor="lab-test-payment-mode">Payment</label>
+                    <select
+                      id="lab-test-payment-mode"
+                      name="addTestPaymentMode"
+                      value={addTestPaymentMode}
+                      onChange={(e) => setAddTestPaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
+                    >
+                      <option value="ONLINE">Pay online</option>
+                      <option value="OFFLINE">Cash on service</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="patient-profile-lab-select-field">
+                    <label htmlFor="lab-test-payment-mode">Payment</label>
+                    <select
+                      id="lab-test-payment-mode"
+                      name="addTestPaymentMode"
+                      value={addTestPaymentMode}
+                      onChange={(e) => setAddTestPaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
+                    >
+                      <option value="OFFLINE">Pay at lab (offline)</option>
+                      <option value="ONLINE">Pay online</option>
+                    </select>
+                  </div>
+                )}
+                <TextField
+                  id="lab-test-preferred-datetime"
+                  name="addTestPreferredDateTime"
+                  label="Preferred date & time (optional)"
+                  type="datetime-local"
+                  value={addTestPreferredDateTime}
+                  onChange={(e) => setAddTestPreferredDateTime(e.target.value)}
+                />
+                <TextField
+                  id="lab-test-eta-minutes"
+                  name="addTestEtaMinutes"
+                  label="Need in minutes (optional)"
+                  type="number"
+                  min={15}
+                  step={5}
+                  placeholder="Need in minutes (optional)"
+                  value={addTestEtaMinutes}
+                  onChange={(e) => setAddTestEtaMinutes(e.target.value)}
+                />
+              </div>
+              <div className="patient-profile-lab-form-actions">
+                <Button type="submit" disabled={addingTest}>
+                  {addingTest ? 'Adding…' : 'Add test'}
+                </Button>
+              </div>
+            </form>
+          </Card>
+
+          <Card className="patient-profile-lab-list-card" elevated>
+            <h3 className="patient-profile-subtitle">My test requests</h3>
+            <p className="public-section-text patient-profile-lab-list-lead">
+              Orders you send from this app. Tap a row to expand details — chevron on the right.
+            </p>
+            {testRequests.length === 0 ? (
+              <p className="public-section-text patient-profile-empty patient-profile-lab-empty">
+                No test requests yet. Use the form above to add one.
               </p>
-            )}
-          </div>
-          <form onSubmit={handleAddTest} className="patient-profile-add-form">
-            <input
-              type="text"
-              placeholder="Add test request (e.g. CBC, Sugar)"
-              value={addTestName}
-              onChange={(e) => setAddTestName(e.target.value)}
-              className="patient-profile-input"
-            />
-            <input
-              type="text"
-              placeholder="Notes (optional)"
-              value={addTestNotes}
-              onChange={(e) => setAddTestNotes(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <select
-              value={addTestServiceType}
-              onChange={(e) => setAddTestServiceType(e.target.value as 'LAB_VISIT' | 'HOME_SERVICE')}
-              className="patient-profile-input patient-profile-input-small"
-            >
-              <option value="LAB_VISIT">Lab visit</option>
-              <option value="HOME_SERVICE">Home service</option>
-            </select>
-            {addTestServiceType === 'HOME_SERVICE' ? (
-              <select
-                value={addTestPaymentMode}
-                onChange={(e) => setAddTestPaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
-                className="patient-profile-input patient-profile-input-small"
-              >
-                <option value="ONLINE">Pay online</option>
-                <option value="OFFLINE">Cash on service</option>
-              </select>
             ) : (
-              <select
-                value={addTestPaymentMode}
-                onChange={(e) => setAddTestPaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
-                className="patient-profile-input patient-profile-input-small"
-              >
-                <option value="OFFLINE">Pay at lab (offline)</option>
-                <option value="ONLINE">Pay online</option>
-              </select>
-            )}
-            <input
-              type="datetime-local"
-              value={addTestPreferredDateTime}
-              onChange={(e) => setAddTestPreferredDateTime(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <input
-              type="number"
-              min={15}
-              step={5}
-              placeholder="Need in minutes (optional)"
-              value={addTestEtaMinutes}
-              onChange={(e) => setAddTestEtaMinutes(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <button
-              type="submit"
-              disabled={addingTest || !addTestName.trim()}
-              className="patient-profile-add-btn"
-            >
-              {addingTest ? 'Adding…' : 'Add Test'}
-            </button>
-          </form>
-          {testRequests.length > 0 && (
-            <div className="patient-profile-subsection">
-              <h3 className="patient-profile-subtitle">My test requests</h3>
-              <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
-                Orders you send from this app. Once lab processes a request, report/receipt appears in the same card.
-              </p>
-              <ul className="patient-profile-list patient-profile-list-accordion">
+              <ul className="patient-profile-lab-request-list">
                 {testRequests.map((t) => {
                   const paymentLabel = formatTestPaymentLabel(t.paymentMode, t.serviceType)
                   const linkedDiagnostic = findLinkedDiagnosticForRequest(t)
@@ -1318,106 +1473,105 @@ export const PatientProfile = () => {
                       } as Record<string, string>
                     )[t.status ?? ''] ?? ''
                   return (
-                  <li key={t.id} className="patient-profile-card patient-profile-collapsible-card">
-                    <button
-                      type="button"
-                      className="patient-profile-card-header-btn"
-                      onClick={() => toggleCard(cardKey)}
-                      aria-expanded={expanded}
-                    >
-                      <div className="patient-profile-card-header-text">
-                        <div className="patient-profile-card-header-row">
-                          <strong>{t.testName}</strong>
-                          <span className="patient-profile-badge">Requested by me</span>
-                        </div>
-                        <div className="patient-profile-card-header-chips">
-                          <span className="patient-profile-status-chip">Order: {orderShort}</span>
-                          <span
-                            className="patient-profile-status-chip"
-                            style={{ background: '#f1f5f9', color: '#334155' }}
-                          >
-                            Payment: {t.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="patient-profile-accordion-icon" aria-hidden>
-                        {expanded ? '▼' : '▶'}
-                      </span>
-                    </button>
-                    {expanded ? (
-                      <div className="patient-profile-card-expand">
-                        {t.notes ? <p className="patient-profile-muted" style={{ margin: '0 0 8px' }}>{t.notes}</p> : null}
-                        <span className="patient-profile-muted" style={{ display: 'block', marginBottom: 8 }}>
-                          {t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}
-                          {' · '}
-                          {paymentLabel}
-                          {t.preferredProviderName ? ` · Lab: ${t.preferredProviderName}` : ''}
-                          {t.preferredDateTime && ` · Preferred ${formatDateTime(t.preferredDateTime)}`}
-                          {t.expectedFulfillmentMinutes ? ` · Need in ${t.expectedFulfillmentMinutes} min` : ''}
-                        </span>
-                        {showHomeAcceptMsg && (
-                          <p className="patient-profile-home-strip">
-                            Our representative will call you shortly, or reach your address in your preferred time window.
-                          </p>
-                        )}
-                        {t.paymentStatus === 'PAID' && (
-                          <div className="patient-profile-receipt-box">
-                            <strong>Receipt</strong>
-                            {t.receiptNumber && (
-                              <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
-                                No. <strong>{t.receiptNumber}</strong>
-                                {t.paidAt && <span className="patient-profile-muted"> · {formatDateTime(t.paidAt)}</span>}
-                              </p>
-                            )}
-                            <button
-                              type="button"
-                              className="patient-profile-link-btn"
-                              style={{ marginTop: 8 }}
-                              onClick={() =>
-                                handleViewLabReceipt({
-                                  testName: t.testName,
-                                  receiptNumber: t.receiptNumber,
-                                  paidAt: t.paidAt,
-                                  serviceType: t.serviceType,
-                                  price: linkedDiagnostic?.test?.price,
-                                })
-                              }
-                            >
-                              View / print receipt
-                            </button>
-                            {linkedDiagnostic?.test?.hasReport && (
-                              <button
-                                type="button"
-                                className="patient-profile-link-btn"
-                                style={{ marginTop: 8, marginLeft: 8 }}
-                                onClick={() =>
-                                  patientPortalService.openDiagnosticReport(linkedDiagnostic.visitId, linkedDiagnostic.test._id)
-                                }
-                              >
-                                View report
-                              </button>
-                            )}
+                  <li key={t.id}>
+                    <Card className="patient-profile-collapsible-card patient-profile-lab-request-card" elevated>
+                      <button
+                        type="button"
+                        className="patient-profile-card-header-btn"
+                        onClick={() => toggleCard(cardKey)}
+                        aria-expanded={expanded}
+                      >
+                        <div className="patient-profile-card-header-text">
+                          <div className="patient-profile-card-header-row">
+                            <strong>{t.testName}</strong>
+                            <span className="patient-profile-badge">Requested by me</span>
                           </div>
-                        )}
-                      </div>
-                    ) : null}
+                          <div className="patient-profile-card-header-chips">
+                            <span className="patient-profile-status-chip">Order: {orderShort}</span>
+                            <span
+                              className="patient-profile-status-chip"
+                              style={{ background: '#f1f5f9', color: '#334155' }}
+                            >
+                              Payment: {t.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
+                            </span>
+                          </div>
+                        </div>
+                        <span
+                          className={`patient-profile-accordion-chevron${expanded ? ' patient-profile-accordion-chevron--open' : ''}`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {expanded ? (
+                        <div className="patient-profile-card-expand">
+                          {t.notes ? <p className="public-section-text patient-profile-muted">{t.notes}</p> : null}
+                          <span className="public-section-text patient-profile-muted patient-profile-lab-request-meta">
+                            {t.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'}
+                            {' · '}
+                            {paymentLabel}
+                            {t.preferredProviderName ? ` · Lab: ${t.preferredProviderName}` : ''}
+                            {t.preferredDateTime && ` · Preferred ${formatDateTime(t.preferredDateTime)}`}
+                            {t.expectedFulfillmentMinutes ? ` · Need in ${t.expectedFulfillmentMinutes} min` : ''}
+                          </span>
+                          {showHomeAcceptMsg && (
+                            <p className="patient-profile-home-strip">
+                              Our representative will call you shortly, or reach your address in your preferred time window.
+                            </p>
+                          )}
+                          {t.paymentStatus === 'PAID' && (
+                            <div className="patient-profile-receipt-box">
+                              <strong>Receipt</strong>
+                              {t.receiptNumber && (
+                                <p className="patient-profile-receipt-line">
+                                  No. <strong>{t.receiptNumber}</strong>
+                                  {t.paidAt && <span className="patient-profile-muted"> · {formatDateTime(t.paidAt)}</span>}
+                                </p>
+                              )}
+                              <div className="patient-profile-lab-request-actions">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() =>
+                                    handleViewLabReceipt({
+                                      testName: t.testName,
+                                      receiptNumber: t.receiptNumber,
+                                      paidAt: t.paidAt,
+                                      serviceType: t.serviceType,
+                                      price: linkedDiagnostic?.test?.price,
+                                    })
+                                  }
+                                >
+                                  View / print receipt
+                                </Button>
+                                {linkedDiagnostic?.test?.hasReport && (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() =>
+                                      patientPortalService.openDiagnosticReport(linkedDiagnostic.visitId, linkedDiagnostic.test._id)
+                                    }
+                                  >
+                                    View report
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </Card>
                   </li>
                   )
                 })}
               </ul>
-            </div>
-          )}
-          {visibleDiagnosticTests.length === 0 && testRequests.length === 0 ? (
-            <p className="patient-profile-empty">No lab tests yet.</p>
-          ) : visibleDiagnosticTests.length > 0 ? (
-            <>
-              <h3 className="patient-profile-subtitle" style={{ marginTop: testRequests.length > 0 ? 20 : 0 }}>
-                Tests added directly by clinic
-              </h3>
-              <p className="patient-profile-muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
+            )}
+          </Card>
+          {visibleDiagnosticTests.length > 0 ? (
+            <Card className="patient-profile-lab-list-card" elevated>
+              <h3 className="patient-profile-subtitle">Tests added directly by clinic</h3>
+              <p className="public-section-text patient-profile-lab-list-lead">
                 Only tests that were not requested from this app are shown here.
               </p>
-              <ul className="patient-profile-list patient-profile-list-accordion">
+              <ul className="patient-profile-lab-request-list">
               {visibleDiagnosticTests.map(({ visitId, visitDate, doctorName, test }) => {
                 const visitCardKey = `visit-test-${test._id}`
                 const visitExpanded = !!expandedCards[visitCardKey]
@@ -1437,939 +1591,532 @@ export const PatientProfile = () => {
                   canSeeReport || hasPaid ? 'Tap to view report or receipt' : 'Payment pending for report access'
 
                 return (
-                <li key={test._id} className="patient-profile-card patient-profile-collapsible-card">
-                  <button
-                    type="button"
-                    className="patient-profile-card-header-btn"
-                    onClick={() => toggleCard(visitCardKey)}
-                    aria-expanded={visitExpanded}
-                  >
-                    <div className="patient-profile-card-header-text">
-                      <div className="patient-profile-card-header-row">
-                        <strong>{test.testName}</strong>
+                <li key={test._id}>
+                  <Card className="patient-profile-collapsible-card patient-profile-lab-request-card" elevated>
+                    <button
+                      type="button"
+                      className="patient-profile-card-header-btn"
+                      onClick={() => toggleCard(visitCardKey)}
+                      aria-expanded={visitExpanded}
+                    >
+                      <div className="patient-profile-card-header-text">
+                        <div className="patient-profile-card-header-row">
+                          <strong>{test.testName}</strong>
+                        </div>
+                        <span className="patient-profile-muted patient-profile-card-subline">
+                          {formatDate(visitDate)}
+                          {doctorName ? ` · Dr. ${doctorName}` : ''}
+                        </span>
+                        <span className="patient-profile-muted patient-profile-card-subline patient-profile-lab-clinic-hint">
+                          {headerHint}
+                        </span>
                       </div>
-                      <span className="patient-profile-muted patient-profile-card-subline">
-                        {formatDate(visitDate)}
-                        {doctorName ? ` · Dr. ${doctorName}` : ''}
-                      </span>
-                      <span className="patient-profile-muted patient-profile-card-subline" style={{ fontSize: 12 }}>
-                        {headerHint}
-                      </span>
-                    </div>
-                    <span className="patient-profile-accordion-icon" aria-hidden>
-                      {visitExpanded ? '▼' : '▶'}
-                    </span>
-                  </button>
-                  {visitExpanded ? (
-                    <div className="patient-profile-card-expand">
-                      {(() => {
-                        const buttons: React.ReactNode[] = []
-                        if (canSeeReport) {
-                          buttons.push(
-                            <button
-                              key="report"
-                              type="button"
-                              className="patient-profile-link-btn"
-                              onClick={() =>
-                                patientPortalService.openDiagnosticReport(visitId, test._id)
-                              }
-                            >
-                              View Report
-                            </button>
-                          )
-                        }
-                        if (hasPaid) {
-                          buttons.push(
-                            <button
-                              key="receipt"
-                              type="button"
-                              className="patient-profile-link-btn"
-                              onClick={() =>
-                                handleViewLabReceipt({
-                                  testName: test.testName,
-                                  receiptNumber: receiptMatch?.receiptNumber,
-                                  paidAt: paidMatch?.paidAt,
-                                  serviceType: (receiptMatch?.serviceType ?? paidMatch?.serviceType) as
-                                    | 'LAB_VISIT'
-                                    | 'HOME_SERVICE'
-                                    | undefined,
-                                  price: test.price,
-                                })
-                              }
-                            >
-                              View / print receipt
-                            </button>
-                          )
-                        }
-                        if (buttons.length === 0) {
+                      <span
+                        className={`patient-profile-accordion-chevron${visitExpanded ? ' patient-profile-accordion-chevron--open' : ''}`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {visitExpanded ? (
+                      <div className="patient-profile-card-expand">
+                        {(() => {
+                          const buttons: React.ReactNode[] = []
+                          if (canSeeReport) {
+                            buttons.push(
+                              <Button
+                                key="report"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  patientPortalService.openDiagnosticReport(visitId, test._id)
+                                }
+                              >
+                                View Report
+                              </Button>
+                            )
+                          }
+                          if (hasPaid) {
+                            buttons.push(
+                              <Button
+                                key="receipt"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  handleViewLabReceipt({
+                                    testName: test.testName,
+                                    receiptNumber: receiptMatch?.receiptNumber,
+                                    paidAt: paidMatch?.paidAt,
+                                    serviceType: (receiptMatch?.serviceType ?? paidMatch?.serviceType) as
+                                      | 'LAB_VISIT'
+                                      | 'HOME_SERVICE'
+                                      | undefined,
+                                    price: test.price,
+                                  })
+                                }
+                              >
+                                View / print receipt
+                              </Button>
+                            )
+                          }
+                          if (buttons.length === 0) {
+                            return (
+                              <p className="public-section-text patient-profile-muted patient-profile-lab-no-links">
+                                No report or receipt yet. After the lab marks payment as paid, links will appear here.
+                              </p>
+                            )
+                          }
                           return (
-                            <p className="patient-profile-muted" style={{ margin: 0 }}>
-                              No report or receipt yet. After the lab marks payment as paid, links will appear here.
-                            </p>
+                            <div className="patient-profile-lab-request-actions">
+                              {buttons}
+                            </div>
                           )
-                        }
-                        return (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                            {buttons}
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  ) : null}
+                        })()}
+                      </div>
+                    ) : null}
+                  </Card>
                 </li>
                 )
               })}
             </ul>
-            </>
+            </Card>
           ) : null}
         </section>
 
-        <section className="patient-profile-section">
-          <div className="patient-profile-heading-with-hint">
-            <div className="patient-profile-section-heading-row">
-              <h2>Medicine Requests</h2>
-              <select
-                value={selectedPharmacyProviderId}
-                onChange={(e) => setSelectedPharmacyProviderId(e.target.value)}
-                className="patient-profile-input patient-profile-input-small patient-profile-heading-select"
-                aria-label="Choose pharmacy"
-              >
-                <option value="">Choose pharmacy (auto-assign if not selected)</option>
-                {pharmacyProviders.map((ph) => (
-                  <option key={ph.id} value={ph.id}>
-                    {formatProviderOptionLabel(
-                      ph,
-                      providerGeoStatus,
+        <section className="patient-profile-section patient-profile-medicine-section">
+          <h2 className="patient-profile-section-title">Medicine Requests</h2>
+
+          <Card className="patient-profile-medicine-toolbar-card" elevated>
+            <div className="patient-profile-medicine-toolbar">
+              <div className="patient-profile-medicine-select-field">
+                <label htmlFor="pharmacy-provider-select">Choose pharmacy</label>
+                <select
+                  id="pharmacy-provider-select"
+                  value={selectedPharmacyProviderId}
+                  onChange={(e) => setSelectedPharmacyProviderId(e.target.value)}
+                  className="patient-profile-provider-select"
+                  aria-label="Choose pharmacy"
+                >
+                  <option value="">Choose pharmacy (auto-assign if not selected)</option>
+                  {pharmacyProviders.map((ph) => (
+                    <option key={ph.id} value={ph.id}>
+                      {formatProviderOptionLabel(
+                        ph,
+                        providerGeoStatus,
+                        patientCoords?.lat,
+                        patientCoords?.lng,
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <ProviderDistanceActions
+                loading={providersLoading}
+                onRefresh={() => void loadProviderLists()}
+                onUseLocation={() => void loadProviderLists({ forceGps: true })}
+              />
+              <ProviderDistanceHint
+                geo={providerGeoStatus}
+                providers={pharmacyProviders}
+                patientLat={patientCoords?.lat}
+                patientLng={patientCoords?.lng}
+                loading={providersLoading}
+              />
+              {selectedPharmacyProvider && (
+                <p className="patient-profile-distance-selected public-section-text">
+                  {(() => {
+                    const km = providerDistanceKm(
+                      selectedPharmacyProvider,
                       patientCoords?.lat,
                       patientCoords?.lng,
-                    )}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <ProviderDistanceActions
-              loading={providersLoading}
-              onRefresh={() => void loadProviderLists()}
-              onUseLocation={() => void loadProviderLists({ forceGps: true })}
-            />
-            <ProviderDistanceHint
-              geo={providerGeoStatus}
-              providers={pharmacyProviders}
-              patientLat={patientCoords?.lat}
-              patientLng={patientCoords?.lng}
-              loading={providersLoading}
-            />
-            {selectedPharmacyProvider && (
-              <p className="patient-profile-distance-selected">
-                {(() => {
-                  const km = providerDistanceKm(
-                    selectedPharmacyProvider,
-                    patientCoords?.lat,
-                    patientCoords?.lng,
-                  )
-                  if (typeof km === 'number') {
+                    )
+                    if (typeof km === 'number') {
+                      return (
+                        <>
+                          Selected: <strong>{selectedPharmacyProvider.name}</strong> — {km.toFixed(1)} km from
+                          you
+                        </>
+                      )
+                    }
                     return (
                       <>
-                        Selected: <strong>{selectedPharmacyProvider.name}</strong> — {km.toFixed(1)} km from
-                        you
+                        Selected: <strong>{selectedPharmacyProvider.name}</strong>
+                        {providerGeoStatus === 'ok'
+                          ? ' — distance not available (shop location not set)'
+                          : ''}
                       </>
                     )
-                  }
-                  return (
-                    <>
-                      Selected: <strong>{selectedPharmacyProvider.name}</strong>
-                      {providerGeoStatus === 'ok'
-                        ? ' — distance not available (shop location not set)'
-                        : ''}
-                    </>
-                  )
-                })()}
-              </p>
-            )}
-          </div>
-          <form onSubmit={handleAddMedicine} className="patient-profile-add-form">
-            <input
-              type="text"
-              placeholder="Medicine name"
-              value={addMedicineName}
-              onChange={(e) => setAddMedicineName(e.target.value)}
-              className="patient-profile-input"
-            />
-            <input
-              type="text"
-              placeholder="Dosage (optional)"
-              value={addMedicineDosage}
-              onChange={(e) => setAddMedicineDosage(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <input
-              type="text"
-              placeholder="Notes (optional)"
-              value={addMedicineNotes}
-              onChange={(e) => setAddMedicineNotes(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <select
-              value={addMedicineServiceType}
-              onChange={(e) => {
-                const next = e.target.value as 'PICKUP' | 'HOME_DELIVERY'
-                setAddMedicineServiceType(next)
-                // Rule: Home delivery always uses ONLINE payment in UI.
-                if (next === 'HOME_DELIVERY') setAddMedicinePaymentMode('ONLINE')
-              }}
-              className="patient-profile-input patient-profile-input-small"
-            >
-              <option value="PICKUP">Pickup from medical</option>
-              <option value="HOME_DELIVERY">Home delivery</option>
-            </select>
-            {addMedicineServiceType === 'HOME_DELIVERY' ? (
-              <select
-                value="ONLINE"
-                onChange={() => setAddMedicinePaymentMode('ONLINE')}
-                disabled
-                className="patient-profile-input patient-profile-input-small"
-              >
-                <option value="ONLINE">Pay online</option>
-              </select>
-            ) : (
-              <select
-                value={addMedicinePaymentMode}
-                onChange={(e) => setAddMedicinePaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
-                className="patient-profile-input patient-profile-input-small"
-              >
-                <option value="OFFLINE">Pay at medical (offline)</option>
-                <option value="ONLINE">Pay online</option>
-              </select>
-            )}
-            <input
-              type="number"
-              min={15}
-              step={5}
-              placeholder="Need in minutes (optional)"
-              value={addMedicineEtaMinutes}
-              onChange={(e) => setAddMedicineEtaMinutes(e.target.value)}
-              className="patient-profile-input patient-profile-input-small"
-            />
-            <button
-              type="submit"
-              disabled={addingMedicine || !addMedicineName.trim()}
-              className="patient-profile-add-btn"
-            >
-              {addingMedicine ? 'Adding…' : 'Add Medicine'}
-            </button>
-          </form>
-          {medicineRequests.length > 0 ? (
-            <ul className="patient-profile-list patient-profile-list-accordion">
-              {medicineRequests.map((m) => {
-                const medKey = `med-req-${m.id}`
-                const medExp = !!expandedCards[medKey]
-                const orderMed =
-                  (
-                    {
-                      PENDING: 'Waiting for pharmacy',
-                      ACCEPTED: 'Accepted by chemist',
-                      COMPLETED: 'Ready',
-                      CANCELLED: 'Cancelled',
-                    } as Record<string, string>
-                  )[m.status ?? ''] ?? ''
-                return (
-                <li key={m.id} className="patient-profile-card patient-profile-collapsible-card">
-                  <button
-                    type="button"
-                    className="patient-profile-card-header-btn"
-                    onClick={() => toggleCard(medKey)}
-                    aria-expanded={medExp}
+                  })()}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card className="patient-profile-medicine-form-card" elevated>
+            <h3 className="patient-profile-subtitle">Request medicine</h3>
+            <form onSubmit={handleAddMedicine} className="patient-profile-medicine-form">
+              <TextField
+                id="medicine-request-name"
+                name="addMedicineName"
+                label="Medicine name"
+                type="text"
+                placeholder="Medicine name"
+                value={addMedicineName}
+                onChange={(e) => setAddMedicineName(e.target.value)}
+              />
+              <div className="patient-profile-medicine-form-grid">
+                <TextField
+                  id="medicine-request-dosage"
+                  name="addMedicineDosage"
+                  label="Dosage (optional)"
+                  type="text"
+                  placeholder="Dosage (optional)"
+                  value={addMedicineDosage}
+                  onChange={(e) => setAddMedicineDosage(e.target.value)}
+                />
+                <TextField
+                  id="medicine-request-notes"
+                  name="addMedicineNotes"
+                  label="Notes (optional)"
+                  type="text"
+                  placeholder="Notes (optional)"
+                  value={addMedicineNotes}
+                  onChange={(e) => setAddMedicineNotes(e.target.value)}
+                />
+                <div className="patient-profile-medicine-select-field">
+                  <label htmlFor="medicine-service-type">Service type</label>
+                  <select
+                    id="medicine-service-type"
+                    name="addMedicineServiceType"
+                    value={addMedicineServiceType}
+                    onChange={(e) => {
+                      const next = e.target.value as 'PICKUP' | 'HOME_DELIVERY'
+                      setAddMedicineServiceType(next)
+                      // Rule: Home delivery always uses ONLINE payment in UI.
+                      if (next === 'HOME_DELIVERY') setAddMedicinePaymentMode('ONLINE')
+                    }}
                   >
-                    <div className="patient-profile-card-header-text">
-                      <div className="patient-profile-card-header-row">
-                        <strong>{m.medicineName}</strong>
-                        <span className="patient-profile-badge">Requested by me</span>
-                      </div>
-                      <div className="patient-profile-card-header-chips">
-                        <span className="patient-profile-status-chip">Order: {orderMed}</span>
+                    <option value="PICKUP">Pickup from medical</option>
+                    <option value="HOME_DELIVERY">Home delivery</option>
+                  </select>
+                </div>
+                {addMedicineServiceType === 'HOME_DELIVERY' ? (
+                  <div className="patient-profile-medicine-select-field">
+                    <label htmlFor="medicine-payment-mode">Payment</label>
+                    <select
+                      id="medicine-payment-mode"
+                      name="addMedicinePaymentMode"
+                      value="ONLINE"
+                      onChange={() => setAddMedicinePaymentMode('ONLINE')}
+                      disabled
+                    >
+                      <option value="ONLINE">Pay online</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="patient-profile-medicine-select-field">
+                    <label htmlFor="medicine-payment-mode">Payment</label>
+                    <select
+                      id="medicine-payment-mode"
+                      name="addMedicinePaymentMode"
+                      value={addMedicinePaymentMode}
+                      onChange={(e) => setAddMedicinePaymentMode(e.target.value as 'ONLINE' | 'OFFLINE')}
+                    >
+                      <option value="OFFLINE">Pay at medical (offline)</option>
+                      <option value="ONLINE">Pay online</option>
+                    </select>
+                  </div>
+                )}
+                <TextField
+                  id="medicine-request-eta"
+                  name="addMedicineEtaMinutes"
+                  label="Need in minutes (optional)"
+                  type="number"
+                  min={15}
+                  step={5}
+                  placeholder="Need in minutes (optional)"
+                  value={addMedicineEtaMinutes}
+                  onChange={(e) => setAddMedicineEtaMinutes(e.target.value)}
+                />
+              </div>
+              <div className="patient-profile-medicine-form-actions">
+                <Button type="submit" disabled={addingMedicine}>
+                  {addingMedicine ? 'Adding…' : 'Add medicine'}
+                </Button>
+              </div>
+            </form>
+          </Card>
+
+          <Card className="patient-profile-medicine-list-card" elevated>
+            <h3 className="patient-profile-subtitle">My medicine requests</h3>
+            <p className="public-section-text patient-profile-medicine-list-lead">
+              Orders you send from this app. Tap a row to expand — chevron on the right.
+            </p>
+            {medicineRequests.length === 0 ? (
+              <p className="public-section-text patient-profile-empty patient-profile-medicine-empty">
+                No medicine requests yet. Use the form above to add one.
+              </p>
+            ) : (
+              <ul className="patient-profile-medicine-request-list">
+                {medicineRequests.map((m) => {
+                  const medKey = `med-req-${m.id}`
+                  const medExp = !!expandedCards[medKey]
+                  const orderMed =
+                    (
+                      {
+                        PENDING: 'Waiting for pharmacy',
+                        ACCEPTED: 'Accepted by chemist',
+                        COMPLETED: 'Ready',
+                        CANCELLED: 'Cancelled',
+                      } as Record<string, string>
+                    )[m.status ?? ''] ?? ''
+                  return (
+                  <li key={m.id}>
+                    <Card className="patient-profile-collapsible-card patient-profile-medicine-request-card" elevated>
+                      <button
+                        type="button"
+                        className="patient-profile-card-header-btn"
+                        onClick={() => toggleCard(medKey)}
+                        aria-expanded={medExp}
+                      >
+                        <div className="patient-profile-card-header-text">
+                          <div className="patient-profile-card-header-row">
+                            <strong>{m.medicineName}</strong>
+                            <span className="patient-profile-badge">Requested by me</span>
+                          </div>
+                          <div className="patient-profile-card-header-chips">
+                            <span className="patient-profile-status-chip">Order: {orderMed}</span>
+                            <span
+                              className="patient-profile-status-chip"
+                              style={{ background: '#f1f5f9', color: '#334155' }}
+                            >
+                              Payment: {m.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
+                            </span>
+                          </div>
+                        </div>
                         <span
-                          className="patient-profile-status-chip"
-                          style={{ background: '#f1f5f9', color: '#334155' }}
-                        >
-                          Payment: {m.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="patient-profile-accordion-icon" aria-hidden>
-                      {medExp ? '▼' : '▶'}
-                    </span>
-                  </button>
-                  {medExp ? (
-                    <div className="patient-profile-card-expand">
-                      {(m.dosage || m.notes) && (
-                        <p className="patient-profile-muted" style={{ margin: '0 0 8px' }}>
-                          {m.dosage && <span>Dosage: {m.dosage}</span>}
-                          {m.dosage && m.notes ? ' · ' : ''}
-                          {m.notes && <span>{m.notes}</span>}
-                        </p>
-                      )}
-                      <span className="patient-profile-muted" style={{ display: 'block', marginBottom: 8 }}>
-                        {m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} ·{' '}
-                        {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
-                        {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
-                        {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
-                        {typeof m.totalAmount === 'number' ? ` · Amount ₹${m.totalAmount.toFixed(2)}` : ''}
-                      </span>
-                      {m.isSubstitute && m.substituteMedicineName && (
-                        <p
-                          className="patient-profile-muted"
-                          style={{
-                            margin: '0 0 8px',
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                            border: '1px solid #fcd34d',
-                            background: '#fffbeb',
-                            color: '#92400e',
-                            fontWeight: 600,
-                          }}
-                        >
-                          This tablet is substitute: {m.substituteMedicineName}
-                          {m.substituteNotes ? ` (${m.substituteNotes})` : ''}
-                        </p>
-                      )}
-                      {m.paymentStatus === 'PAID' && (
-                        <div className="patient-profile-receipt-box">
-                          <strong>Receipt</strong>
-                          {(m.receiptNumber || m.paidAt) && (
-                            <p style={{ margin: '6px 0 0', fontSize: '0.9rem' }}>
-                              {m.receiptNumber && (
-                                <>
-                                  No. <strong>{m.receiptNumber}</strong>
-                                </>
-                              )}
-                              {m.paidAt && (
-                                <span className="patient-profile-muted">
-                                  {m.receiptNumber ? ' · ' : ''}
-                                  {formatDateTime(m.paidAt)}
-                                </span>
-                              )}
+                          className={`patient-profile-accordion-chevron${medExp ? ' patient-profile-accordion-chevron--open' : ''}`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {medExp ? (
+                        <div className="patient-profile-card-expand">
+                          {(m.dosage || m.notes) && (
+                            <p className="public-section-text patient-profile-muted">
+                              {m.dosage && <span>Dosage: {m.dosage}</span>}
+                              {m.dosage && m.notes ? ' · ' : ''}
+                              {m.notes && <span>{m.notes}</span>}
                             </p>
                           )}
-                          <button
-                            type="button"
-                            className="patient-profile-link-btn"
-                            style={{ marginTop: 10, display: 'inline-block' }}
-                            onClick={() => handleViewMedicineOrderReceipt(m)}
-                          >
-                            View bill / Receipt
-                          </button>
+                          <span className="public-section-text patient-profile-muted patient-profile-medicine-request-meta">
+                            {m.serviceType === 'HOME_DELIVERY' ? 'Home delivery' : 'Pickup'} ·{' '}
+                            {formatMedicinePaymentLabel(m.paymentMode, m.serviceType)}
+                            {m.preferredProviderName ? ` · Pharmacy: ${m.preferredProviderName}` : ''}
+                            {m.expectedFulfillmentMinutes ? ` · Need in ${m.expectedFulfillmentMinutes} min` : ''}
+                            {typeof m.totalAmount === 'number' ? ` · Amount ₹${m.totalAmount.toFixed(2)}` : ''}
+                          </span>
+                          {m.isSubstitute && m.substituteMedicineName && (
+                            <p className="patient-profile-substitute-note">
+                              This tablet is substitute: {m.substituteMedicineName}
+                              {m.substituteNotes ? ` (${m.substituteNotes})` : ''}
+                            </p>
+                          )}
+                          {m.paymentStatus === 'PAID' && (
+                            <div className="patient-profile-receipt-box">
+                              <strong>Receipt</strong>
+                              {(m.receiptNumber || m.paidAt) && (
+                                <p className="patient-profile-receipt-line">
+                                  {m.receiptNumber && (
+                                    <>
+                                      No. <strong>{m.receiptNumber}</strong>
+                                    </>
+                                  )}
+                                  {m.paidAt && (
+                                    <span className="patient-profile-muted">
+                                      {m.receiptNumber ? ' · ' : ''}
+                                      {formatDateTime(m.paidAt)}
+                                    </span>
+                                  )}
+                                </p>
+                              )}
+                              <div className="patient-profile-medicine-request-actions">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => handleViewMedicineOrderReceipt(m)}
+                                >
+                                  View bill / receipt
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ) : null}
-                </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="patient-profile-empty">No medicine requests yet. Add above and doctor will see.</p>
-          )}
+                      ) : null}
+                    </Card>
+                  </li>
+                  )
+                })}
+              </ul>
+            )}
+          </Card>
         </section>
 
-        <section className="patient-profile-section">
-          <h2>Pharmacy (Dispensed)</h2>
+        <section className="patient-profile-section patient-profile-pharmacy-section">
+          <h2 className="patient-profile-section-title">Pharmacy (Dispensed)</h2>
           {!pharmacyDispensations?.length ? (
-            <p className="patient-profile-empty">No pharmacy records yet.</p>
+            <p className="public-section-text patient-profile-empty patient-profile-pharmacy-empty">
+              No pharmacy records yet.
+            </p>
           ) : (
-            <ul className="patient-profile-list patient-profile-list-accordion">
-              {pharmacyDispensations.map((d) => {
+            <Card className="patient-profile-pharmacy-list-card" elevated>
+              <h3 className="patient-profile-subtitle">Dispensed medicines</h3>
+              <p className="public-section-text patient-profile-pharmacy-list-lead">
+                Bills from your clinic pharmacy. Tap a record to see items and open receipt.
+              </p>
+              <ul className="patient-profile-pharmacy-disp-list">
+                {pharmacyDispensations.map((d) => {
                 const phKey = `pharm-disp-${d.id}`
                 const phExp = !!expandedCards[phKey]
                 const itemCount = d.items?.length ?? 0
                 return (
-                <li key={d.id} className="patient-profile-card patient-profile-collapsible-card">
-                  <button
-                    type="button"
-                    className="patient-profile-card-header-btn"
-                    onClick={() => toggleCard(phKey)}
-                    aria-expanded={phExp}
-                  >
-                    <div className="patient-profile-card-header-text">
-                      <div className="patient-profile-card-header-row">
-                        <strong>{formatDateTime(d.createdAt)}</strong>
-                      </div>
-                      <span className="patient-profile-muted patient-profile-card-subline">
-                        {d.dispensedBy} · ₹{d.totalAmount} · {d.paymentStatus}
-                        {itemCount ? ` · ${itemCount} line${itemCount === 1 ? '' : 's'}` : ''}
-                      </span>
-                      {d.receiptNumber && (
-                        <span className="patient-profile-muted patient-profile-card-subline" style={{ fontSize: 12 }}>
-                          Receipt {d.receiptNumber}
-                        </span>
-                      )}
-                    </div>
-                    <span className="patient-profile-accordion-icon" aria-hidden>
-                      {phExp ? '▼' : '▶'}
-                    </span>
-                  </button>
-                  {phExp ? (
-                    <div className="patient-profile-card-expand">
-                      {!!d.items?.length && (
-                        <div style={{ marginBottom: 12 }}>
-                          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#334155' }}>
-                            Medicines
-                          </p>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {d.items.map((it, i) => (
-                              <div
-                                key={`${d.id}-item-${i}`}
-                                style={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  gap: 12,
-                                  fontSize: 13,
-                                  color: '#0f172a',
-                                }}
-                              >
-                                <span style={{ fontWeight: 500 }}>
-                                  {it.medicineName}
-                                  {it.quantity ? ` x ${it.quantity}` : ''}
-                                </span>
-                                <span style={{ color: '#475569' }}>₹{it.amount}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        className="patient-profile-link-btn"
-                        style={{ marginTop: 4 }}
-                        onClick={() => handleViewPharmacyReceipt(d)}
-                      >
-                        View bill / Receipt
-                      </button>
-                    </div>
-                  ) : null}
-                </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
-
-        <section className="patient-profile-section">
-          <h2>My Reports & Documents</h2>
-          <div className="patient-profile-upload-row">
-            <label className="patient-profile-upload-btn">
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                onChange={handleDocumentUpload}
-                disabled={uploading}
-                style={{ display: 'none' }}
-              />
-              {uploading ? 'Uploading…' : '+ Add Document'}
-            </label>
-            <span className="patient-profile-muted">Doctor & assistant will see uploaded files</span>
-          </div>
-          {documents.length === 0 ? (
-            <p className="patient-profile-empty">No documents uploaded yet.</p>
-          ) : (
-            <ul
-              className={`patient-profile-list ${
-                documents.length > 3 ? 'patient-profile-doc-list-scroll' : ''
-              }`}
-            >
-              {documents.map((d) => {
-                const pendingVerify = d.patientPublishStatus === 'PENDING_ASSISTANT'
-                return (
-                <li key={d.id} className="patient-profile-card patient-profile-doc-row">
-                  <span>{d.originalName}</span>
-                  <span className="patient-profile-muted">
-                    {formatDate(d.uploadedAt)}
-                    {d.source === 'patient' && ' (uploaded by me)'}
-                    {d.isFileAvailable === false && ' (file unavailable on this server)'}
-                  </span>
-                  {pendingVerify ? (
-                    <span
-                      className="patient-profile-muted"
-                      style={{
-                        fontSize: 12,
-                        color: '#b45309',
-                        fontWeight: 600,
-                        textAlign: 'right',
-                        maxWidth: 220,
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      Assistant verification in progress — you can open this after your clinic releases it.
-                    </span>
-                  ) : (
+                <li key={d.id}>
+                  <Card className="patient-profile-collapsible-card patient-profile-pharmacy-disp-card" elevated>
                     <button
                       type="button"
-                      className="patient-profile-link-btn"
-                      disabled={d.isFileAvailable === false}
-                      onClick={() =>
-                        patientPortalService.openDocument(d.id, patient.id, {
-                          assistantVerified: Boolean(d.verifiedAt),
-                        })
-                      }
+                      className="patient-profile-card-header-btn"
+                      onClick={() => toggleCard(phKey)}
+                      aria-expanded={phExp}
                     >
-                      {d.isFileAvailable === false ? 'Unavailable' : 'View'}
+                      <div className="patient-profile-card-header-text">
+                        <div className="patient-profile-card-header-row">
+                          <strong>{formatDateTime(d.createdAt)}</strong>
+                        </div>
+                        <span className="patient-profile-muted patient-profile-card-subline">
+                          {d.dispensedBy} · ₹{d.totalAmount} · {d.paymentStatus}
+                          {itemCount ? ` · ${itemCount} line${itemCount === 1 ? '' : 's'}` : ''}
+                        </span>
+                        {d.receiptNumber && (
+                          <span className="patient-profile-muted patient-profile-card-subline patient-profile-pharmacy-receipt-ref">
+                            Receipt {d.receiptNumber}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`patient-profile-accordion-chevron${phExp ? ' patient-profile-accordion-chevron--open' : ''}`}
+                        aria-hidden="true"
+                      />
                     </button>
-                  )}
+                    {phExp ? (
+                      <div className="patient-profile-card-expand">
+                        {!!d.items?.length && (
+                          <div className="patient-profile-pharmacy-items">
+                            <p className="patient-profile-pharmacy-items-title">Medicines</p>
+                            <ul className="patient-profile-pharmacy-item-list">
+                              {d.items.map((it, i) => (
+                                <li key={`${d.id}-item-${i}`} className="patient-profile-pharmacy-item-row">
+                                  <span className="patient-profile-pharmacy-item-name">
+                                    {it.medicineName}
+                                    {it.quantity ? ` x ${it.quantity}` : ''}
+                                  </span>
+                                  <span className="patient-profile-pharmacy-item-amount">₹{it.amount}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <div className="patient-profile-pharmacy-disp-actions">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleViewPharmacyReceipt(d)}
+                          >
+                            View bill / receipt
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </Card>
                 </li>
                 )
               })}
-            </ul>
+              </ul>
+            </Card>
           )}
         </section>
-      </main>
 
-      <footer className="patient-profile-footer">
-        <Link to="/">Home</Link>
-        <Link to="/book-appointment">Book Appointment</Link>
-      </footer>
+        <section className="patient-profile-section patient-profile-documents-section">
+          <h2 className="patient-profile-section-title">My Reports & Documents</h2>
+          <Card className="patient-profile-doc-toolbar-card" elevated>
+            <div className="patient-profile-doc-upload-row">
+              <label className={`patient-profile-doc-upload-label${uploading ? ' patient-profile-doc-upload-label--disabled' : ''}`}>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={handleDocumentUpload}
+                  disabled={uploading}
+                  style={{ display: 'none' }}
+                />
+                <span className="ui-button ui-button-primary ui-button-sm">
+                  {uploading ? 'Uploading…' : '+ Add Document'}
+                </span>
+              </label>
+              <p className="public-section-text patient-profile-doc-upload-hint">
+                Doctor & assistant will see uploaded files
+              </p>
+            </div>
+          </Card>
+          {documents.length === 0 ? (
+            <p className="public-section-text patient-profile-empty patient-profile-doc-empty">
+              No documents uploaded yet.
+            </p>
+          ) : (
+            <Card className="patient-profile-doc-list-card" elevated>
+              <h3 className="patient-profile-subtitle">Your files</h3>
+              <p className="public-section-text patient-profile-doc-list-lead">
+                Open reports and uploads shared with your care team.
+              </p>
+              <ul className="patient-profile-doc-list">
+                {documents.map((d) => {
+                const pendingVerify = d.patientPublishStatus === 'PENDING_ASSISTANT'
+                return (
+                <li key={d.id}>
+                  <Card className="patient-profile-doc-card" elevated>
+                    <div className="patient-profile-doc-card-body">
+                      <div className="patient-profile-doc-card-info">
+                        <strong className="patient-profile-doc-name">{d.originalName}</strong>
+                        <span className="public-section-text patient-profile-muted patient-profile-doc-meta">
+                          {formatDate(d.uploadedAt)}
+                          {d.source === 'patient' && ' (uploaded by me)'}
+                          {d.isFileAvailable === false && ' (file unavailable on this server)'}
+                        </span>
+                      </div>
+                      {pendingVerify ? (
+                        <span className="patient-profile-doc-pending">
+                          Assistant verification in progress — you can open this after your clinic releases it.
+                        </span>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={d.isFileAvailable === false}
+                          onClick={() =>
+                            patientPortalService.openDocument(d.id, patient.id, {
+                              assistantVerified: Boolean(d.verifiedAt),
+                            })
+                          }
+                        >
+                          {d.isFileAvailable === false ? 'Unavailable' : 'View'}
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                </li>
+                )
+              })}
+              </ul>
+            </Card>
+          )}
+        </section>
+      </div>
 
-      <style>{patientProfileStyles}</style>
-    </div>
+    </PublicLayout>
   )
 }
-
-const patientProfileStyles = `
-  .patient-profile {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    background: #f8fafc;
-    color: #0f172a;
-  }
-  .patient-profile-loading,
-  .patient-profile-error {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    padding: 40px;
-  }
-  .patient-profile-error a {
-    color: #1e40af;
-  }
-  .patient-profile-header {
-    background: #fff;
-    border-bottom: 1px solid #e2e8f0;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-  .patient-profile-header-inner {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 14px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .patient-profile-logo {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #0f172a;
-    text-decoration: none;
-  }
-  .patient-profile-logo:hover {
-    color: #1e40af;
-  }
-  .patient-profile-header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .patient-profile-greeting {
-    color: #475569;
-    font-size: 0.95rem;
-  }
-  .patient-profile-nav-link {
-    color: #1e40af;
-    text-decoration: none;
-    font-weight: 500;
-  }
-  .patient-profile-nav-link:hover {
-    text-decoration: underline;
-  }
-  .patient-profile-logout {
-    padding: 6px 12px;
-    background: #f1f5f9;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    color: #475569;
-  }
-  .patient-profile-logout:hover {
-    background: #e2e8f0;
-  }
-  .patient-profile-main {
-    flex: 1;
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 32px 20px 48px;
-    width: 100%;
-  }
-  .patient-profile-title {
-    font-size: 1.75rem;
-    font-weight: 700;
-    margin: 0 0 24px;
-    color: #0f172a;
-  }
-  .patient-profile-section {
-    margin-bottom: 32px;
-  }
-  .patient-profile-chart-card {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 14px 14px 8px;
-  }
-  .patient-profile-section h2 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    margin: 0 0 12px;
-    color: #334155;
-  }
-  .patient-profile-accordion-section {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 0;
-    margin-bottom: 16px;
-    overflow: hidden;
-  }
-  .patient-profile-accordion-section .patient-profile-section {
-    margin-bottom: 0;
-  }
-  .patient-profile-accordion-trigger {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 16px;
-    background: #fff;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-  }
-  .patient-profile-accordion-trigger:hover {
-    background: #f8fafc;
-  }
-  .patient-profile-accordion-title {
-    font-size: 1.15rem;
-    font-weight: 600;
-    color: #334155;
-  }
-  .patient-profile-accordion-icon {
-    flex-shrink: 0;
-    font-size: 0.75rem;
-    color: #64748b;
-    width: 1.25rem;
-    text-align: center;
-  }
-  .patient-profile-accordion-panel {
-    padding: 0 16px 16px;
-    border-top: 1px solid #f1f5f9;
-  }
-  .patient-profile-accordion-panel .patient-profile-details {
-    border-radius: 10px;
-  }
-  .patient-profile-accordion-panel .patient-profile-empty {
-    border-radius: 10px;
-  }
-  .patient-profile-list-accordion {
-    max-height: none;
-  }
-  .patient-profile-collapsible-card {
-    padding: 0;
-    overflow: hidden;
-  }
-  .patient-profile-card-header-btn {
-    width: 100%;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 14px 16px;
-    background: #fff;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    color: inherit;
-  }
-  .patient-profile-card-header-btn:hover {
-    background: #f8fafc;
-  }
-  .patient-profile-card-header-text {
-    flex: 1;
-    min-width: 0;
-  }
-  .patient-profile-card-header-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-  .patient-profile-card-header-row .patient-profile-badge {
-    margin-left: 0;
-  }
-  .patient-profile-card-header-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-  .patient-profile-card-subline {
-    display: block;
-    margin-top: 4px;
-  }
-  .patient-profile-card-expand {
-    padding: 0 16px 14px;
-    border-top: 1px solid #f1f5f9;
-    background: #fafbfc;
-  }
-  .patient-profile-section-heading-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 10px;
-    margin-bottom: 10px;
-    width: 100%;
-  }
-  .patient-profile-section-heading-row h2 {
-    margin: 0;
-    flex: 0 1 auto;
-  }
-  .patient-profile-heading-with-hint {
-    width: 100%;
-    margin-bottom: 10px;
-  }
-  .patient-profile-distance-hint {
-    margin: 0 0 6px;
-    font-size: 0.78rem;
-    line-height: 1.35;
-    color: #64748b;
-    max-width: 42rem;
-  }
-  .patient-profile-distance-selected {
-    margin: 0 0 8px;
-    font-size: 0.82rem;
-    color: #334155;
-    max-width: 42rem;
-  }
-  .patient-profile-heading-select {
-    flex: 0 1 auto;
-    width: auto;
-    min-width: 0;
-    max-width: 200px;
-    margin-left: auto;
-    font-size: 0.875rem;
-    padding: 6px 10px;
-  }
-  .patient-profile-details {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 20px;
-  }
-  .patient-profile-details p {
-    margin: 0 0 8px;
-  }
-  .patient-profile-details p:last-child {
-    margin-bottom: 0;
-  }
-  .patient-profile-empty {
-    color: #64748b;
-    margin: 0;
-    padding: 16px;
-    background: #f8fafc;
-    border-radius: 8px;
-  }
-  .patient-profile-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    max-height: 420px;
-    overflow-y: auto;
-    padding-right: 6px;
-  }
-  .patient-profile-doc-list-scroll {
-    max-height: 280px;
-    overflow-y: auto;
-    padding-right: 6px;
-  }
-  .patient-profile-card {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 10px;
-  }
-  .patient-profile-muted {
-    color: #64748b;
-    font-size: 0.9rem;
-    margin: 4px 0 0;
-  }
-  .patient-profile-link-btn {
-    margin-top: 8px;
-    padding: 4px 0;
-    background: none;
-    border: none;
-    color: #1e40af;
-    cursor: pointer;
-    font-size: 0.9rem;
-    text-decoration: underline;
-  }
-  .patient-profile-link-btn:hover {
-    color: #1e3a8a;
-  }
-  .patient-profile-doc-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .patient-profile-doc-row span:first-child {
-    flex: 1;
-    min-width: 150px;
-  }
-  .patient-profile-footer {
-    background: #0f172a;
-    color: #94a3b8;
-    padding: 20px;
-    display: flex;
-    justify-content: center;
-    gap: 24px;
-  }
-  .patient-profile-footer a {
-    color: #cbd5e1;
-    text-decoration: none;
-  }
-  .patient-profile-footer a:hover {
-    color: #fff;
-  }
-  .patient-profile-add-form {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 16px;
-    align-items: center;
-    max-width: 560px;
-  }
-  .patient-profile-input {
-    padding: 8px 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    min-width: 110px;
-    max-width: 100%;
-  }
-  .patient-profile-add-form .patient-profile-input {
-    flex: 1 1 auto;
-    max-width: 260px;
-  }
-  .patient-profile-add-form .patient-profile-input-small {
-    max-width: 180px;
-  }
-  .patient-profile-input-small {
-    min-width: 88px;
-  }
-  .patient-profile-add-btn {
-    padding: 8px 16px;
-    background: #1e40af;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 500;
-    font-size: 0.9rem;
-  }
-  .patient-profile-add-btn:hover:not(:disabled) {
-    background: #1e3a8a;
-  }
-  .patient-profile-add-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .patient-profile-upload-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-  }
-  .patient-profile-upload-btn {
-    display: inline-block;
-    padding: 8px 16px;
-    background: #1e40af;
-    color: #fff;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
-  }
-  .patient-profile-upload-btn:hover {
-    background: #1e3a8a;
-  }
-  .patient-profile-subsection {
-    margin-top: 12px;
-  }
-  .patient-profile-subtitle {
-    font-size: 1rem;
-    font-weight: 600;
-    margin: 0 0 8px;
-    color: #475569;
-  }
-  .patient-profile-request-card {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .patient-profile-badge {
-    margin-left: auto;
-    font-size: 0.75rem;
-    background: #dbeafe;
-    color: #1e40af;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    font-weight: 500;
-  }
-  .patient-profile-status-chip {
-    font-size: 0.75rem;
-    background: #ecfeff;
-    color: #0f766e;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    font-weight: 600;
-  }
-  .patient-profile-home-strip {
-    margin: 10px 0 0;
-    padding: 10px 12px;
-    font-size: 0.88rem;
-    line-height: 1.45;
-    color: #1e3a8a;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 8px;
-  }
-  .patient-profile-receipt-box {
-    margin-top: 12px;
-    padding: 12px 14px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    font-size: 0.9rem;
-  }
-`

@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 import { Button } from '../components/ui/Button'
+import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { LoginHomeLink } from '../components/LoginHomeLink'
@@ -154,133 +156,152 @@ export const Login = () => {
   }
 
   return (
-    <div className="page-center">
-      <div className="ui-card login-layout">
-        {/* Left form panel (MEDIGRAPH brand) */}
-        <div className="login-panel">
-          <div className="login-brand-row">
-            <div className="login-brand">
-              <span className="login-logo-pill">MEDIGRAPH</span>
+    <>
+      <div className="page-center login-page">
+        <Card className="login-layout" elevated>
+          <div className="login-panel">
+            <div className="login-brand-row">
+              <div className="login-brand">
+                <span className="login-logo-pill">MEDIGRAPH</span>
+              </div>
+              <LoginHomeLink />
             </div>
-            <LoginHomeLink />
-          </div>
 
-          {/* Heading + tagline */}
-          <h1 className="login-heading">
-            Login
-          </h1>
-          <p className="login-tagline">
-            Empowering Healthcare, One Click at a Time
-          </p>
-
-          {/* Login form */}
-          <form
-            onSubmit={handleSubmit}
-            className="login-form"
-          >
-            <TextField
-              id="email"
-              type="email"
-              label="Username or Email"
-              autoComplete="email"
-              placeholder="doctor@medigraph.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              leftIcon={(
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path d="M2.94 6.34A2 2 0 0 1 4.6 5h10.8a2 2 0 0 1 1.66 1.34l-7.06 4.12-7.06-4.12Z" />
-                  <path d="M18 8.24v5.26A2.5 2.5 0 0 1 15.5 16h-11A2.5 2.5 0 0 1 2 13.5V8.24l7.06 4.12a1.5 1.5 0 0 0 1.48 0L18 8.24Z" />
-                </svg>
-              )}
-            />
-            <TextField
-              id="password"
-              type="password"
-              label="Password"
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              canTogglePassword
-              leftIcon={(
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path d="M10 2a4 4 0 0 0-4 4v2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4Zm-2 6V6a2 2 0 1 1 4 0v2H8Z" />
-                </svg>
-              )}
+            <PageHeader
+              className="login-page-header"
+              title="Login"
+              subtitle="Empowering Healthcare, One Click at a Time"
             />
 
-            {error && (
-              <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
-                {error}
-              </p>
-            )}
+            <form onSubmit={handleSubmit} className="login-form">
+              <div className="login-form-fields">
+                <TextField
+                  id="email"
+                  type="email"
+                  label="Username or Email"
+                  autoComplete="email"
+                  placeholder="doctor@medigraph.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  leftIcon={(
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path d="M2.94 6.34A2 2 0 0 1 4.6 5h10.8a2 2 0 0 1 1.66 1.34l-7.06 4.12-7.06-4.12Z" />
+                      <path d="M18 8.24v5.26A2.5 2.5 0 0 1 15.5 16h-11A2.5 2.5 0 0 1 2 13.5V8.24l7.06 4.12a1.5 1.5 0 0 0 1.48 0L18 8.24Z" />
+                    </svg>
+                  )}
+                />
+                <TextField
+                  id="password"
+                  type="password"
+                  label="Password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  canTogglePassword
+                  leftIcon={(
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path d="M10 2a4 4 0 0 0-4 4v2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4Zm-2 6V6a2 2 0 1 1 4 0v2H8Z" />
+                    </svg>
+                  )}
+                />
+              </div>
 
-            {!useSuperAdminFlow && (
-              <div className="login-links">
+              {error && (
+                <p className="login-message login-message--error" role="alert">
+                  {error}
+                </p>
+              )}
+
+              {!useSuperAdminFlow && (
+                <div className="login-links">
+                  <button
+                    type="button"
+                    className="login-link"
+                    onClick={() => {
+                      setShowForgot(true)
+                      setForgotStep('phone')
+                      setForgotError(null)
+                      setForgotSuccess(null)
+                    }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
+
+              <div className="login-form-actions">
+                <Button type="submit" disabled={loading} fullWidth>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </Button>
+              </div>
+
+              <div className="login-secondary-text">
+                Don&apos;t have an account?{' '}
                 <button
                   type="button"
                   className="login-link"
-                  onClick={() => {
-                    setShowForgot(true)
-                    setForgotStep('phone')
-                    setForgotError(null)
-                    setForgotSuccess(null)
-                  }}
+                  onClick={() => navigate('/register')}
                 >
-                  Forgot Password?
+                  Create an account
                 </button>
               </div>
-            )}
+            </form>
+          </div>
 
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full"
-            >
-              {loading ? 'Signing in…' : 'Sign In'}
-            </Button>
-
-            <div className="login-secondary-text">
-              Don&apos;t have an account?{' '}
-              <button
-                type="button"
-                className="login-link"
-                onClick={() => navigate('/register')}
-              >
-                Create an Account
-              </button>
+          <div className="login-image-panel">
+            <div className="login-image-frame">
+              <div className="login-image-overlay">
+                <p className="login-image-kicker">Healthcare SaaS</p>
+                <p className="login-image-title">Secure access for your clinic team</p>
+                <p className="login-image-text">
+                  Doctors, assistants, labs, and pharmacy — one unified workspace.
+                </p>
+              </div>
             </div>
-          </form>
-        </div>
-
-        {/* Right image / background panel */}
-        <div className="login-image-panel">
-          <div className="login-image-frame" />
-        </div>
+          </div>
+        </Card>
       </div>
 
       {showForgot && (
-        <div className="dialog-backdrop">
-          <div className="dialog-card">
-            <h2 className="dialog-title">
-              Reset password
-            </h2>
-            <p className="dialog-body">
-              OTP service is under integration right now. Abhi temporary bypass mode enabled hai.
-            </p>
+        <div
+          className="dialog-backdrop dialog-backdrop--header"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="login-forgot-title"
+        >
+          <div className="dialog-card dialog-card--forgot">
+            <div className="dialog-card-header">
+              <span className="dialog-card-icon" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+                  <path
+                    fill="currentColor"
+                    d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2Zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2Zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2Z"
+                  />
+                </svg>
+              </span>
+              <div className="dialog-card-copy">
+                <h2 id="login-forgot-title" className="dialog-title">
+                  Reset password
+                </h2>
+                <p className="dialog-body">
+                  OTP service is under integration right now. Abhi temporary bypass mode enabled hai.
+                </p>
+              </div>
+            </div>
 
             {forgotStep === 'phone' && (
-              <form onSubmit={handleStartForgot} className="login-form" style={{ marginTop: 12 }}>
+              <form onSubmit={handleStartForgot} className="login-form login-form--dialog">
                 <CountryCodePhoneInput
                   id="forgot-phone"
                   label="Registered WhatsApp number"
@@ -290,16 +311,16 @@ export const Login = () => {
                   onPhoneDigitsChange={setForgotPhoneDigits}
                 />
                 {forgotError && (
-                  <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+                  <p className="login-message login-message--error" role="alert">
                     {forgotError}
                   </p>
                 )}
                 {forgotSuccess && (
-                  <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+                  <p className="login-message login-message--success" role="status">
                     {forgotSuccess}
                   </p>
                 )}
-                <div className="dialog-actions">
+                <div className="dialog-actions dialog-actions--logout">
                   <button
                     type="button"
                     className="ui-button ui-button-secondary"
@@ -319,7 +340,7 @@ export const Login = () => {
             )}
 
             {forgotStep === 'otp' && (
-              <form onSubmit={handleCompleteForgot} className="login-form" style={{ marginTop: 12 }}>
+              <form onSubmit={handleCompleteForgot} className="login-form login-form--dialog">
                 <TextField
                   id="forgot-otp"
                   type="text"
@@ -339,16 +360,16 @@ export const Login = () => {
                   canTogglePassword
                 />
                 {forgotError && (
-                  <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
+                  <p className="login-message login-message--error" role="alert">
                     {forgotError}
                   </p>
                 )}
                 {forgotSuccess && (
-                  <p className="text-sm" style={{ color: '#2e7d32', marginTop: 4 }}>
+                  <p className="login-message login-message--success" role="status">
                     {forgotSuccess}
                   </p>
                 )}
-                <div className="dialog-actions">
+                <div className="dialog-actions dialog-actions--logout">
                   <button
                     type="button"
                     className="ui-button ui-button-secondary"
@@ -369,7 +390,7 @@ export const Login = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

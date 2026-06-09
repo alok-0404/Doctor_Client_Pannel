@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import type { ChangeEvent } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { Header } from './Header';
+import { AppLayout } from './layout/AppLayout';
+import { Breadcrumb } from './ui/Breadcrumb';
+import { authStorage } from '../utils/authStorage';
 
 interface ExtractedData {
   text: string;
@@ -75,8 +79,23 @@ const HandwritingExtractor: React.FC = () => {
     }
   };
 
+  const doctorName = authStorage.getName() ?? 'Doctor';
+
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <AppLayout
+      showSidebar
+      header={<Header doctorName={doctorName} />}
+      breadcrumb={(
+        <Breadcrumb
+          items={[
+            { label: 'Home', href: '/' },
+            { label: 'Handwriting OCR' },
+          ]}
+        />
+      )}
+    >
+      <main className="dashboard-main">
+        <div className="p-6 max-w-2xl mx-auto">
       <h2 className="text-2xl font-bold mb-4">📝 Handwriting OCR - TypeScript</h2>
       
       {/* Upload Area */}
@@ -102,7 +121,7 @@ const HandwritingExtractor: React.FC = () => {
         disabled={loading || !file}
         className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400 hover:bg-blue-700 transition"
       >
-        {loading ? '⏳ Processing...' : '🔍 Extract Handwriting'}
+        {loading ? 'Processing…' : 'Extract handwriting'}
       </button>
 
       {/* Result Card */}
@@ -132,7 +151,9 @@ const HandwritingExtractor: React.FC = () => {
           </p>
         </div>
       )}
-    </div>
+        </div>
+      </main>
+    </AppLayout>
   );
 };
 

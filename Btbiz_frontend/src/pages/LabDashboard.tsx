@@ -2,11 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
 import { authStorage } from '../utils/authStorage'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { EmptyState } from '../components/ui/EmptyState'
+import { CalendarIcon, LabIcon } from '../components/ui/icons'
 import { Card } from '../components/ui/Card'
+import { DataTable } from '../components/ui/DataTable'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { StatCard } from '../components/ui/StatCard'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
-import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   patientService,
   orderService,
@@ -100,6 +107,49 @@ function patientIdsMatch(a: string | undefined, b: string | undefined): boolean 
   return String(a).trim() === String(b).trim()
 }
 
+function labTestNamesMatch(a: string, b: string): boolean {
+  const na = normalizeLabTestName(a)
+  const nb = normalizeLabTestName(b)
+  if (!na || !nb) return false
+  if (na === nb) return true
+  return na.includes(nb) || nb.includes(na)
+}
+
+function getWorkspaceRateCheck(tests: DiagnosticTestItem[]): LabRequestRateCheck {
+  if (tests.length === 0) {
+    return { ok: false, message: 'Add at least one test on this visit first.' }
+  }
+  let total = 0
+  for (const dt of tests) {
+    if (dt.price == null || Number(dt.price) <= 0) {
+      return {
+        ok: false,
+        message: `Rate (₹) missing: enter and save the rate for "${dt.testName}", then use Mark paid.`,
+      }
+    }
+    if (!dt.hasReport) {
+      return {
+        ok: false,
+        message: `Report file missing: upload a report for "${dt.testName}" before marking paid.`,
+      }
+    }
+    total += Number(dt.price)
+  }
+  return { ok: true, total }
+}
+
+function workspaceTestsAlreadyPaid(
+  tests: DiagnosticTestItem[],
+  testRequests: FullPatientHistory['testRequests']
+): boolean {
+  if (tests.length === 0) return false
+  const paid = (testRequests ?? []).filter((r) => r.paymentStatus === 'PAID')
+  if (paid.length === 0) return false
+  return tests.every((dt) =>
+    paid.some((r) => labTestNamesMatch(String(r.testName ?? ''), dt.testName))
+  )
+}
+
 /** +91… numbers must use the last 10 digits for search, not the first 10 (which included country code). */
 function normalizeMobileDigitsForSearch(raw: string): string {
   const d = raw.replace(/\D/g, '')
@@ -144,6 +194,7 @@ export const LabDashboard = () => {
   const [requestFocusedTestNames, setRequestFocusedTestNames] = useState<string[] | null>(null)
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
   const [savingManualRates, setSavingManualRates] = useState(false)
+  const [markingWorkspacePaid, setMarkingWorkspacePaid] = useState(false)
   const [addTestLoading, setAddTestLoading] = useState(false)
   const [addTestError, setAddTestError] = useState<string | null>(null)
   const [uploadingReportForTestId, setUploadingReportForTestId] = useState<string | null>(null)
@@ -605,6 +656,56 @@ export const LabDashboard = () => {
     }
   }
 
+  const handleMarkPaidWorkspace = async () => {
+    if (!patient?.id || !selectedVisitId) return
+    const check = getWorkspaceRateCheck(focusedDiagnosticTests)
+    if (!check.ok) {
+      toast.error(
+        <div>
+          <strong style={{ display: 'block', marginBottom: 6, fontWeight: 700 }}>Mark paid blocked</strong>
+          <span style={{ fontWeight: 400 }}>{check.message}</span>
+        </div>,
+        { autoClose: 6500, closeOnClick: true }
+      )
+      return
+    }
+    setConfirmState({
+      message: `Mark these lab tests as paid? Saved rates total ₹${check.total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      onConfirm: async () => {
+        setMarkingWorkspacePaid(true)
+        try {
+          const result = await orderService.markClinicDiagnosticTestsPaid(
+            patient.id,
+            selectedVisitId,
+            focusedDiagnosticTests.map((t) => t.testName)
+          )
+          const h = await patientService.getFullHistory(patient.id)
+          setHistory(h)
+          await loadIncomingTestRequests(true)
+          if (result.receiptNumber) {
+            setReceiptData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    paidAmount: check.total,
+                    paymentStatus: 'Paid',
+                    paidAt: result.paidAt,
+                  }
+                : prev
+            )
+          }
+          toast.success('Marked as paid. Patient can now view report and receipt.', { autoClose: 3000 })
+        } catch (err: unknown) {
+          const e = err as { response?: { data?: { message?: string } } }
+          const msg = e?.response?.data?.message?.trim()
+          toast.error(msg || 'Could not mark as paid. Please try again.')
+        } finally {
+          setMarkingWorkspacePaid(false)
+        }
+      },
+    })
+  }
+
   const handleMarkPaidIncomingRequest = async (r: LabOrderRequest) => {
     if (r.paymentStatus === 'PAID') return
     if (!r.patientId) {
@@ -732,92 +833,147 @@ export const LabDashboard = () => {
   )
 
   return (
-    <div className="app-shell">
-      <Header doctorName={name} />
-      {role === 'LAB_MANAGER' && (
-        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 16px 12px' }}>
-          <button
-            type="button"
-            className="ui-button ui-button-secondary ui-button-sm"
-            onClick={() => navigate('/lab-manager')}
-          >
-            Manage lab assistants
-          </button>
-        </div>
-      )}
-      <main className="dashboard-main" style={{ maxWidth: '100%' }}>
-        <section style={{ maxWidth: 1280, margin: '0 auto' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(340px, 400px) minmax(0, 1fr)',
-              gap: 20,
-              alignItems: 'start',
-            }}
-          >
-            <div>
-              <Card className="dashboard-overview-card" style={{ marginBottom: 0, position: 'sticky', top: 88 }}>
-            <p className="dashboard-kicker">Patient test orders</p>
-            <h2 className="dashboard-heading">Incoming test requests</h2>
-            <p className="dashboard-body" style={{ marginBottom: 12 }}>
-              Requests created by patients are shown here with home service and payment preference.
-            </p>
-            {requestsLoading ? (
-              <DnaLoader label="Loading requests..." />
-            ) : incomingTestRequests.length === 0 ? (
-              <p className="dashboard-body" style={{ marginBottom: 0 }}>
-                No patient test requests found right now.
-              </p>
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 16,
-                  maxHeight: incomingTestRequests.length > 5 ? 420 : undefined,
-                  overflowY: incomingTestRequests.length > 5 ? 'auto' : undefined,
-                  paddingRight: incomingTestRequests.length > 5 ? 6 : undefined,
-                }}
-              >
-                {renderRequestSection('TODAY', todayRequests, 'No requests today.')}
-                {renderRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
-                {renderRequestSection('OLDER', olderRequests, 'No older requests.')}
+    <>
+      <AppLayout
+        showSidebar
+        header={(
+          <>
+            <Header doctorName={name} />
+            {role === 'LAB_MANAGER' && (
+              <div className="lab-dashboard-manager-bar">
+                <button
+                  type="button"
+                  className="ui-button ui-button-secondary ui-button-sm"
+                  onClick={() => navigate('/lab-manager')}
+                >
+                  Manage lab assistants
+                </button>
               </div>
             )}
+          </>
+        )}
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Lab' },
+            ]}
+          />
+        )}
+      >
+        <main className="dashboard-main lab-dashboard-main">
+          <section className="lab-dashboard-section">
+            <PageHeader
+              className="lab-dashboard-page-header"
+              title="Lab Dashboard"
+              subtitle="Fulfill incoming test requests, search patients, and manage rates, reports, and receipts."
+            />
+
+          <div className="lab-dashboard-stats">
+            <StatCard
+              title="Incoming requests"
+              value={requestsLoading ? <Skeleton width={56} height={30} /> : incomingTestRequests.length}
+              trend={{ label: `${todayRequests.length} today`, direction: 'neutral' }}
+            />
+            <StatCard
+              title="Today"
+              value={requestsLoading ? <Skeleton width={40} height={30} /> : todayRequests.length}
+            />
+            <StatCard
+              title="Active patient"
+              value={
+                searchLoading
+                  ? <Skeleton width={120} height={30} />
+                  : patient
+                    ? [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Selected'
+                    : '—'
+              }
+            />
+            <StatCard
+              title="Tests on visit"
+              value={
+                searchLoading
+                  ? <Skeleton width={40} height={30} />
+                  : patient && selectedVisitId
+                    ? focusedDiagnosticTests.length
+                    : '—'
+              }
+            />
+          </div>
+
+          <div className="lab-dashboard-grid">
+            <div className="lab-dashboard-column lab-dashboard-column--requests">
+              <Card className="dashboard-overview-card lab-dashboard-requests-card">
+                <p className="dashboard-kicker">Patient test orders</p>
+                <h2 className="dashboard-heading">Incoming test requests</h2>
+                <p className="dashboard-body lab-dashboard-card-intro">
+                  Requests created by patients are shown here with home service and payment preference.
+                </p>
+                {requestsLoading ? (
+                  <div className="lab-dashboard-skeleton-stack" aria-busy="true" aria-label="Loading requests">
+                    <Skeleton variant="rect" height={88} />
+                    <Skeleton variant="rect" height={88} />
+                    <Skeleton lines={3} />
+                  </div>
+                ) : incomingTestRequests.length === 0 ? (
+                  <EmptyState
+                    className="lab-dashboard-empty-state"
+                    icon={<LabIcon size={22} />}
+                    title="No test requests"
+                    message="Patient lab orders will show up here when submitted."
+                  />
+                ) : (
+                  <div
+                    className={
+                      incomingTestRequests.length > 5
+                        ? 'lab-dashboard-requests-list lab-dashboard-requests-list--scroll'
+                        : 'lab-dashboard-requests-list'
+                    }
+                  >
+                    {renderRequestSection('TODAY', todayRequests, 'No requests today.')}
+                    {renderRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
+                    {renderRequestSection('OLDER', olderRequests, 'No older requests.')}
+                  </div>
+                )}
               </Card>
             </div>
 
-            <div>
-          <Card className="dashboard-overview-card">
-            <p className="dashboard-kicker">Diagnostic panel</p>
-            <h2 className="dashboard-heading">Search patient by mobile</h2>
-            <p className="dashboard-body" style={{ marginBottom: 16 }}>
-              Enter the patient&apos;s 10-digit mobile number to view details and
-              add lab tests for a visit.
-            </p>
-            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <TextField
-                id="lab-mobile-search"
-                label="Mobile number"
-                value={mobileSearch}
-                onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="10-digit number"
-                type="tel"
-                maxLength={10}
-              />
-              <div style={{ alignSelf: 'flex-end' }}>
-                <Button type="submit" disabled={searchLoading}>
-                  {searchLoading ? 'Searching…' : 'Search'}
-                </Button>
-              </div>
-            </form>
-            {searchError && (
-              <p style={{ color: 'var(--color-error)', marginTop: 8, fontSize: 14 }}>
-                {searchError}
-              </p>
-            )}
-            {searchLoading && <DnaLoader label="Searching patient..." size={42} />}
-          </Card>
+            <div className="lab-dashboard-column lab-dashboard-column--workspace">
+              <Card className="dashboard-overview-card">
+                <p className="dashboard-kicker">Diagnostic panel</p>
+                <h2 className="dashboard-heading">Search patient by mobile</h2>
+                <p className="dashboard-body lab-dashboard-card-intro">
+                  Enter the patient&apos;s 10-digit mobile number to view details and
+                  add lab tests for a visit.
+                </p>
+                <form onSubmit={handleSearch} className="lab-dashboard-search-form">
+                  <TextField
+                    id="lab-mobile-search"
+                    label="Mobile number"
+                    value={mobileSearch}
+                    onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="10-digit number"
+                    type="tel"
+                    maxLength={10}
+                  />
+                  <div className="lab-dashboard-search-action">
+                    <Button type="submit" disabled={searchLoading}>
+                      {searchLoading ? 'Searching…' : 'Search'}
+                    </Button>
+                  </div>
+                </form>
+                {searchError && (
+                  <p className="lab-dashboard-error">
+                    {searchError}
+                  </p>
+                )}
+                {searchLoading && (
+                  <div className="lab-dashboard-skeleton-stack lab-dashboard-skeleton-stack--compact" aria-busy="true" aria-label="Searching patient">
+                    <Skeleton lines={2} />
+                    <Skeleton variant="rect" height={72} />
+                  </div>
+                )}
+              </Card>
 
           {patient && history && (
             <div ref={labWorkspaceRef}>
@@ -894,9 +1050,12 @@ export const LabDashboard = () => {
                   <p className="dashboard-kicker">Lab tests</p>
                   <h2 className="dashboard-heading">Select visit</h2>
                   {!history.visits?.length ? (
-                    <p className="dashboard-body">
-                      No visits found for this patient. Tests are added per visit.
-                    </p>
+                    <EmptyState
+                      className="lab-dashboard-empty-state ui-empty-state--compact"
+                      icon={<CalendarIcon size={20} />}
+                      title="No visits yet"
+                      message="Tests are recorded per visit. Check in the patient at the assistant desk first."
+                    />
                   ) : (
                     <>
                       <div style={{ marginBottom: 16 }}>
@@ -951,124 +1110,91 @@ export const LabDashboard = () => {
                         </div>
                       )}
                       <div
-                        style={{
-                          overflowX: 'auto',
-                          overflowY: focusedDiagnosticTests.length > 5 ? 'auto' : undefined,
-                          maxHeight: focusedDiagnosticTests.length > 5 ? 320 : undefined,
-                          marginBottom: 16,
-                        }}
+                        className={
+                          focusedDiagnosticTests.length > 5
+                            ? 'lab-dashboard-table-scroll lab-dashboard-table-scroll--tall'
+                            : 'lab-dashboard-table-scroll'
+                        }
                       >
-                        <table
-                          style={{
-                            width: '100%',
-                            borderCollapse: 'collapse',
-                            fontSize: 14,
-                            background: '#fff',
-                            borderRadius: 8,
-                            overflow: 'hidden',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                          }}
+                        <DataTable
+                          className="lab-dashboard-data-table"
+                          stickyHeader={focusedDiagnosticTests.length > 5}
+                          columns={[
+                            { label: '#', align: 'left', className: 'lab-dashboard-th-index' },
+                            { label: 'Test name', align: 'left' },
+                            { label: 'Rate (₹)', align: 'right' },
+                            { label: 'Report', align: 'left' },
+                            { label: 'Added on', align: 'left' },
+                          ]}
                         >
-                          <thead>
-                            <tr style={{ background: '#f0f4f8', borderBottom: '2px solid #d9e2ec' }}>
-                              <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>#</th>
-                              <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Test name</th>
-                              <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#102a43' }}>Rate (₹)</th>
-                              <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Report</th>
-                              <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#102a43' }}>Added on</th>
+                          {focusedDiagnosticTests.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="lab-dashboard-table-empty">
+                                No tests match this accepted request yet.
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {focusedDiagnosticTests.length === 0 ? (
-                              <tr>
-                                <td colSpan={5} style={{ padding: '16px 12px', color: '#627d98', textAlign: 'center' }}>
-                                  No tests match this accepted request yet.
+                          ) : (
+                            focusedDiagnosticTests.map((t, idx) => (
+                              <tr key={t._id}>
+                                <td className="lab-dashboard-td-muted">{idx + 1}</td>
+                                <td className="lab-dashboard-td-name">{t.testName}</td>
+                                <td className="lab-dashboard-td-rate">
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="Enter rate"
+                                    className="lab-dashboard-table-input lab-dashboard-table-input--rate"
+                                    value={manualRateByTestId[t._id] ?? ''}
+                                    onChange={(e) => {
+                                      const cleaned = e.target.value.replace(/[^\d.]/g, '')
+                                      setManualRateByTestId((prev) => ({ ...prev, [t._id]: cleaned }))
+                                    }}
+                                  />
+                                </td>
+                                <td className="lab-dashboard-td-report">
+                                  {t.hasReport ? (
+                                    <button
+                                      type="button"
+                                      className="lab-dashboard-view-report-btn"
+                                      onClick={() => handleViewReport(t._id)}
+                                    >
+                                      View
+                                    </button>
+                                  ) : (
+                                    <div className="lab-dashboard-report-upload">
+                                      <input
+                                        type="file"
+                                        accept=".pdf,.jpg,.jpeg,.png"
+                                        className="lab-dashboard-file-input"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0]
+                                          if (file) handleReportUpload(t._id, file)
+                                        }}
+                                      />
+                                      {uploadingReportForTestId === t._id && (
+                                        <span className="lab-dashboard-uploading-label">Uploading...</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="lab-dashboard-td-muted">
+                                  {t.createdAt
+                                    ? new Date(t.createdAt).toLocaleString('en-IN', {
+                                        day: '2-digit',
+                                        month: 'short',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '—'}
                                 </td>
                               </tr>
-                            ) : (
-                              focusedDiagnosticTests.map((t, idx) => (
-                                <tr
-                                  key={t._id}
-                                  style={{
-                                    borderBottom: '1px solid #e2e8f0',
-                                  }}
-                                >
-                                  <td style={{ padding: '10px 12px', color: '#627d98' }}>{idx + 1}</td>
-                                  <td style={{ padding: '10px 12px', fontWeight: 500 }}>{t.testName}</td>
-                                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500, minWidth: 140 }}>
-                                    <input
-                                      type="text"
-                                      inputMode="decimal"
-                                      placeholder="Enter rate"
-                                      value={manualRateByTestId[t._id] ?? ''}
-                                      onChange={(e) => {
-                                        const cleaned = e.target.value.replace(/[^\d.]/g, '')
-                                        setManualRateByTestId((prev) => ({ ...prev, [t._id]: cleaned }))
-                                      }}
-                                      style={{
-                                        width: 110,
-                                        padding: '6px 8px',
-                                        fontSize: 13,
-                                        textAlign: 'right',
-                                        borderRadius: 6,
-                                        border: '1px solid #d9e2ec',
-                                      }}
-                                    />
-                                  </td>
-                                  <td style={{ padding: '10px 12px', color: '#486581' }}>
-                                    {t.hasReport ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleViewReport(t._id)}
-                                        style={{
-                                          padding: '4px 12px',
-                                          fontSize: 12,
-                                          background: '#0d47a1',
-                                          color: '#fff',
-                                          border: 'none',
-                                          borderRadius: 6,
-                                          cursor: 'pointer',
-                                          fontWeight: 500,
-                                        }}
-                                      >
-                                        View
-                                      </button>
-                                    ) : (
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <input
-                                          type="file"
-                                          accept=".pdf,.jpg,.jpeg,.png"
-                                          style={{ fontSize: 11, width: 120 }}
-                                          onChange={(e) => {
-                                            const file = e.target.files?.[0]
-                                            if (file) handleReportUpload(t._id, file)
-                                          }}
-                                        />
-                                        {uploadingReportForTestId === t._id && (
-                                          <span style={{ fontSize: 11, color: '#627d98' }}>Uploading...</span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td style={{ padding: '10px 12px', color: '#627d98', fontSize: 13 }}>
-                                    {t.createdAt
-                                      ? new Date(t.createdAt).toLocaleString('en-IN', {
-                                          day: '2-digit',
-                                          month: 'short',
-                                          year: 'numeric',
-                                          hour: '2-digit',
-                                          minute: '2-digit',
-                                        })
-                                      : '—'}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
+                            ))
+                          )}
+                        </DataTable>
                       </div>
                       {focusedDiagnosticTests.length > 0 && (
-                        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                           <Button
                             type="button"
                             variant="secondary"
@@ -1077,15 +1203,29 @@ export const LabDashboard = () => {
                           >
                             {savingManualRates ? 'Saving rates…' : 'Save rates'}
                           </Button>
+                          <Button
+                            type="button"
+                            disabled={
+                              markingWorkspacePaid ||
+                              workspaceTestsAlreadyPaid(focusedDiagnosticTests, history?.testRequests)
+                            }
+                            onClick={() => void handleMarkPaidWorkspace()}
+                          >
+                            {markingWorkspacePaid
+                              ? 'Marking paid…'
+                              : workspaceTestsAlreadyPaid(focusedDiagnosticTests, history?.testRequests)
+                                ? 'Paid'
+                                : 'Mark paid'}
+                          </Button>
                           <span style={{ fontSize: 12, color: '#64748b' }}>
-                            For each test: enter rate (₹) and upload the report file, then Save rates — Mark paid is blocked until both are done.
+                            For each test: enter rate (₹), upload report, Save rates, then Mark paid — required before the patient can access the report.
                           </span>
                         </div>
                       )}
                       {focusedDiagnosticTests.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
                           <Button type="button" onClick={openLabReceipt}>
-                            View bill / Receipt
+                            View bill / receipt
                           </Button>
                         </div>
                       )}
@@ -1182,7 +1322,8 @@ export const LabDashboard = () => {
             </div>
           </div>
         </section>
-      </main>
+        </main>
+      </AppLayout>
 
       {/* Receipt modal - print-friendly */}
       {showReceipt && receiptData && (
@@ -1238,22 +1379,20 @@ export const LabDashboard = () => {
               Visit: {new Date(receiptData.visit.visitDate).toLocaleDateString('en-IN')}
               {receiptData.visit.reason ? ` – ${receiptData.visit.reason}` : ''}
             </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12, marginBottom: 12, fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 0' }}>Test</th>
-                  <th style={{ textAlign: 'right', padding: '8px 0' }}>Price (₹)</th>
+            <DataTable
+              className="lab-dashboard-receipt-table"
+              columns={[
+                { label: 'Test', align: 'left' },
+                { label: 'Price (₹)', align: 'right' },
+              ]}
+            >
+              {receiptData.tests.map((t, i) => (
+                <tr key={i}>
+                  <td>{t.testName}</td>
+                  <td className="lab-dashboard-td-right">₹{t.price}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {receiptData.tests.map((t, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '6px 0' }}>{t.testName}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 0' }}>₹{t.price}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </DataTable>
             <p style={{ margin: '8px 0 4px', fontSize: 14, fontWeight: 600 }}>Total: ₹{receiptData.total}</p>
             <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>Paid: ₹{receiptData.paidAmount} · Status: {receiptData.paymentStatus}</p>
             {receiptData.paidAt && (
@@ -1266,7 +1405,7 @@ export const LabDashboard = () => {
                 type="button"
                 onClick={() => window.print()}
               >
-                Print / Save as PDF
+                Print / save as PDF
               </Button>
               <Button
                 type="button"
@@ -1327,6 +1466,6 @@ export const LabDashboard = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

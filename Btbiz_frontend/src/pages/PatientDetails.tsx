@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
 import { authStorage } from '../utils/authStorage'
 import { PatientCard, type PatientDetailsData } from '../components/PatientCard'
+import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
-import { DnaLoader } from '../components/ui/DnaLoader'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
 import { patientService } from '../services/api'
 
 function formatVisitDate(d: string | Date): string {
@@ -26,11 +30,30 @@ function ageFromDob(dob: string | Date | undefined): number | undefined {
 
 export const PatientDetails = () => {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<PatientDetailsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const doctorName = authStorage.getName() ?? 'Doctor'
+
+  const withStaffLayout = (content: ReactNode) => (
+    <AppLayout
+      showSidebar
+      header={<Header doctorName={doctorName} />}
+      breadcrumb={(
+        <Breadcrumb
+          items={[
+            { label: 'Home', href: '/' },
+            { label: 'Search Patients', href: '/search-patients' },
+            { label: 'Patient Details' },
+          ]}
+        />
+      )}
+    >
+      {content}
+    </AppLayout>
+  )
 
   useEffect(() => {
     if (!id) {
@@ -163,45 +186,69 @@ export const PatientDetails = () => {
   }, [id])
 
   if (loading) {
-    return (
-      <div className="app-shell">
-        <Header doctorName={doctorName} />
-        <main className="details-main" style={{ padding: 24 }}>
-          <DnaLoader label="Loading patient profile..." size={36} />
-        </main>
-      </div>
+    return withStaffLayout(
+      <main className="details-main patient-details-main">
+        <section className="patient-details-section">
+          <PageHeader
+            className="patient-details-page-header"
+            title="Patient Details"
+            subtitle="Loading demographics, visits, and clinical history."
+          />
+          <Card className="patient-details-loading-card">
+            <div className="patient-details-skeleton-stack" aria-busy="true" aria-label="Loading patient profile">
+              <Skeleton lines={3} />
+              <Skeleton variant="rect" height={48} />
+              <Skeleton variant="rect" height={180} />
+              <Skeleton variant="rect" height={120} />
+            </div>
+          </Card>
+        </section>
+      </main>
     )
   }
 
   if (error || !data) {
-    return (
-      <div className="app-shell">
-        <Header doctorName={doctorName} />
-        <main className="details-main" style={{ padding: 24 }}>
-          <p className="dashboard-body" style={{ color: '#c62828' }}>{error ?? 'Patient not found'}</p>
-        </main>
-      </div>
+    return withStaffLayout(
+      <main className="details-main patient-details-main">
+        <section className="patient-details-section">
+          <PageHeader
+            className="patient-details-page-header"
+            title="Patient Details"
+            subtitle="We could not load this patient record."
+          />
+          <Card className="patient-details-error-card">
+            <p className="patient-details-error" role="alert">
+              {error ?? 'Patient not found'}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => navigate('/search-patients')}
+            >
+              Back to search
+            </Button>
+          </Card>
+        </section>
+      </main>
     )
   }
 
-  return (
-    <div className="app-shell">
-      <Header doctorName={doctorName} />
-      <main className="details-main">
-        <div className="details-header-row">
-          <Card className="details-header-card">
-            <div className="details-header-copy">
-              <p className="dashboard-kicker">Patient record</p>
-              <h2 className="details-title">Patient details</h2>
-              <p className="details-subtitle">
-                Demographics, visit history with vitals (recorded by assistant), and notes.
-              </p>
-            </div>
-            <p className="details-header-meta">Mobile: {data.mobile}</p>
-          </Card>
-        </div>
+  return withStaffLayout(
+    <main className="details-main patient-details-main">
+      <section className="patient-details-section">
+        <PageHeader
+          className="patient-details-page-header"
+          title={data.name}
+          subtitle="Demographics, visit history with vitals (recorded by assistant), tests, and documents."
+          actions={(
+            <p className="patient-details-header-meta">
+              Mobile: <strong>{data.mobile}</strong>
+              {data.lastVisit ? ` · Last visit: ${data.lastVisit}` : ''}
+            </p>
+          )}
+        />
         <PatientCard data={data} patientId={id!} />
-      </main>
-    </div>
+      </section>
+    </main>
   )
 }

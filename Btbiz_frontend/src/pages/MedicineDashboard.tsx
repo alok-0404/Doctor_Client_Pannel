@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
 import { ClinicLocationSetup } from '../components/ClinicLocationSetup'
 import { authStorage } from '../utils/authStorage'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { EmptyState } from '../components/ui/EmptyState'
+import { PharmacyIcon } from '../components/ui/icons'
 import { Card } from '../components/ui/Card'
+import { DataTable } from '../components/ui/DataTable'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
+import { StatCard } from '../components/ui/StatCard'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
-import { DnaLoader } from '../components/ui/DnaLoader'
 import {
   patientService,
   pharmacyService,
@@ -693,79 +700,135 @@ export const MedicineDashboard = () => {
   )
 
   return (
-    <div className="app-shell">
-      <Header doctorName={name} />
-      <div style={{ maxWidth: 1280, margin: '12px auto 0', padding: '0 16px' }}>
-        <ClinicLocationSetup />
-      </div>
-      <main className="dashboard-main" style={{ maxWidth: '100%' }}>
-        <section style={{ maxWidth: 1280, margin: '0 auto' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(340px, 400px) minmax(0, 1fr)',
-              gap: 20,
-              alignItems: 'start',
-            }}
-          >
-            <div>
-              <Card className="dashboard-overview-card" style={{ marginBottom: 0, position: 'sticky', top: 88 }}>
-            <p className="dashboard-kicker">Patient medicine orders</p>
-            <h2 className="dashboard-heading">Incoming requests</h2>
-            <p className="dashboard-body" style={{ marginBottom: 12 }}>
-              Patient requests from their profile are shown here with name, mobile, payment and delivery preference.
-            </p>
-            {requestsLoading ? (
-              <DnaLoader label="Loading requests..." />
-            ) : incomingRequests.length === 0 ? (
-              <p className="dashboard-body">No medicine requests yet.</p>
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 16,
-                  maxHeight: incomingRequests.length > 5 ? 420 : undefined,
-                  overflowY: incomingRequests.length > 5 ? 'auto' : undefined,
-                  paddingRight: incomingRequests.length > 5 ? 6 : undefined,
-                }}
-              >
-                {renderPharmacyRequestSection('TODAY', todayRequests, 'No requests today.')}
-                {renderPharmacyRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
-                {renderPharmacyRequestSection('OLDER', olderRequests, 'No older requests.')}
-              </div>
-            )}
+    <AppLayout
+      showSidebar
+      header={(
+        <>
+          <Header doctorName={name} />
+          <div className="medicine-dashboard-clinic-setup">
+            <ClinicLocationSetup />
+          </div>
+        </>
+      )}
+      breadcrumb={(
+        <Breadcrumb
+          items={[
+            { label: 'Home', href: '/' },
+            { label: 'Pharmacy' },
+          ]}
+        />
+      )}
+    >
+      <main className="dashboard-main medicine-dashboard-main">
+        <section className="medicine-dashboard-section">
+          <PageHeader
+            className="medicine-dashboard-page-header"
+            title="Pharmacy Dashboard"
+            subtitle="Search patients, fulfill incoming orders, and manage bills, payments, and receipts."
+          />
+
+          <div className="medicine-dashboard-stats">
+            <StatCard
+              title="Incoming requests"
+              value={requestsLoading ? <Skeleton width={56} height={30} /> : incomingRequests.length}
+              trend={{ label: `${todayRequests.length} today`, direction: 'neutral' }}
+            />
+            <StatCard
+              title="Today"
+              value={requestsLoading ? <Skeleton width={40} height={30} /> : todayRequests.length}
+            />
+            <StatCard
+              title="Active patient"
+              value={
+                searchLoading
+                  ? <Skeleton width={120} height={30} />
+                  : patient
+                    ? [patient.firstName, patient.lastName].filter(Boolean).join(' ') || 'Selected'
+                    : '—'
+              }
+            />
+            <StatCard
+              title="Current bill total"
+              value={
+                searchLoading
+                  ? <Skeleton width={88} height={30} />
+                  : patient
+                    ? `₹${totalAmount.toFixed(2)}`
+                    : '—'
+              }
+            />
+          </div>
+
+          <div className="medicine-dashboard-grid">
+            <div className="medicine-dashboard-column medicine-dashboard-column--requests">
+              <Card className="dashboard-overview-card medicine-dashboard-requests-card">
+                <p className="dashboard-kicker">Patient medicine orders</p>
+                <h2 className="dashboard-heading">Incoming requests</h2>
+                <p className="dashboard-body medicine-dashboard-card-intro">
+                  Patient requests from their profile are shown here with name, mobile, payment and delivery preference.
+                </p>
+                {requestsLoading ? (
+                  <div className="medicine-dashboard-skeleton-stack" aria-busy="true" aria-label="Loading requests">
+                    <Skeleton variant="rect" height={88} />
+                    <Skeleton variant="rect" height={88} />
+                    <Skeleton lines={3} />
+                  </div>
+                ) : incomingRequests.length === 0 ? (
+                  <EmptyState
+                    className="medicine-dashboard-empty-state"
+                    icon={<PharmacyIcon size={22} />}
+                    title="No medicine requests"
+                    message="Patient orders from their profile will appear here."
+                  />
+                ) : (
+                  <div
+                    className={
+                      incomingRequests.length > 5
+                        ? 'medicine-dashboard-requests-list medicine-dashboard-requests-list--scroll'
+                        : 'medicine-dashboard-requests-list'
+                    }
+                  >
+                    {renderPharmacyRequestSection('TODAY', todayRequests, 'No requests today.')}
+                    {renderPharmacyRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
+                    {renderPharmacyRequestSection('OLDER', olderRequests, 'No older requests.')}
+                  </div>
+                )}
               </Card>
             </div>
 
-            <div>
-          <Card className="dashboard-overview-card">
-            <p className="dashboard-kicker">Medicine</p>
-            <h2 className="dashboard-heading">Search patient by mobile</h2>
-            <p className="dashboard-body" style={{ marginBottom: 16 }}>
-              Enter the patient&apos;s 10-digit mobile number to view details and create a medicine bill (MRP, discount, payment, receipt).
-            </p>
-            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <TextField
-                id="med-mobile-search"
-                label="Mobile number"
-                value={mobileSearch}
-                onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                placeholder="10-digit number"
-                type="tel"
-                maxLength={15}
-              />
-              <div style={{ alignSelf: 'flex-end' }}>
-                <Button type="submit" disabled={searchLoading}>
-                  {searchLoading ? 'Searching…' : 'Search'}
-                </Button>
-              </div>
-            </form>
-            {searchError && (
-              <p style={{ color: 'var(--color-error)', marginTop: 8, fontSize: 14 }}>{searchError}</p>
-            )}
-            {searchLoading && <DnaLoader label="Searching patient..." size={42} />}
-          </Card>
+            <div className="medicine-dashboard-column medicine-dashboard-column--workspace">
+              <Card className="dashboard-overview-card">
+                <p className="dashboard-kicker">Medicine</p>
+                <h2 className="dashboard-heading">Search patient by mobile</h2>
+                <p className="dashboard-body medicine-dashboard-card-intro">
+                  Enter the patient&apos;s 10-digit mobile number to view details and create a medicine bill (MRP, discount, payment, receipt).
+                </p>
+                <form onSubmit={handleSearch} className="medicine-dashboard-search-form">
+                  <TextField
+                    id="med-mobile-search"
+                    label="Mobile number"
+                    value={mobileSearch}
+                    onChange={(e) => setMobileSearch(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                    placeholder="10-digit number"
+                    type="tel"
+                    maxLength={15}
+                  />
+                  <div className="medicine-dashboard-search-action">
+                    <Button type="submit" disabled={searchLoading}>
+                      {searchLoading ? 'Searching…' : 'Search'}
+                    </Button>
+                  </div>
+                </form>
+                {searchError && (
+                  <p className="medicine-dashboard-error">{searchError}</p>
+                )}
+                {searchLoading && (
+                  <div className="medicine-dashboard-skeleton-stack medicine-dashboard-skeleton-stack--compact" aria-busy="true" aria-label="Searching patient">
+                    <Skeleton lines={2} />
+                    <Skeleton variant="rect" height={72} />
+                  </div>
+                )}
+              </Card>
 
           {patient && history && (
             <div ref={pharmacyWorkspaceRef}>
@@ -845,115 +908,78 @@ export const MedicineDashboard = () => {
                     Amount = (MRP × Qty) − Discount per row. You cannot save the bill or mark paid without a valid price per line.
                   </p>
                   <div
-                    style={{
-                      overflowX: 'auto',
-                      overflowY: rows.length > 5 ? 'auto' : undefined,
-                      maxHeight: rows.length > 5 ? 320 : undefined,
-                      marginBottom: 12,
-                    }}
+                    className={
+                      rows.length > 5
+                        ? 'medicine-dashboard-table-scroll medicine-dashboard-table-scroll--tall'
+                        : 'medicine-dashboard-table-scroll'
+                    }
                   >
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                      <thead>
-                        <tr style={{ background: '#f0f4f8', borderBottom: '2px solid #d9e2ec' }}>
-                          <th style={{ padding: '8px', textAlign: 'left' }}>Medicine name</th>
-                          <th style={{ padding: '8px', textAlign: 'right' }}>MRP (₹)</th>
-                          <th style={{ padding: '8px', textAlign: 'right' }}>Discount (₹)</th>
-                          <th style={{ padding: '8px', textAlign: 'right' }}>Qty</th>
-                          <th style={{ padding: '8px', width: 40 }} />
+                    <DataTable
+                      className="medicine-dashboard-data-table"
+                      stickyHeader={rows.length > 5}
+                      columns={[
+                        { label: 'Medicine name', align: 'left' },
+                        { label: 'MRP (₹)', align: 'right' },
+                        { label: 'Discount (₹)', align: 'right' },
+                        { label: 'Qty', align: 'right' },
+                        { label: '', align: 'right', className: 'medicine-dashboard-th-action' },
+                      ]}
+                    >
+                      {rows.map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            <input
+                              type="text"
+                              className="medicine-dashboard-table-input medicine-dashboard-table-input--wide"
+                              value={r.medicineName}
+                              onChange={(e) => updateRow(r.id, 'medicineName', e.target.value)}
+                              placeholder="Name"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="medicine-dashboard-table-input medicine-dashboard-table-input--number"
+                              value={r.mrp}
+                              onChange={(e) => updateRow(r.id, 'mrp', e.target.value)}
+                              placeholder="0"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="medicine-dashboard-table-input medicine-dashboard-table-input--number"
+                              value={r.discount}
+                              onChange={(e) => updateRow(r.id, 'discount', e.target.value)}
+                              placeholder="0"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={1}
+                              className="medicine-dashboard-table-input medicine-dashboard-table-input--qty"
+                              value={r.quantity}
+                              onChange={(e) => updateRow(r.id, 'quantity', e.target.value)}
+                            />
+                          </td>
+                          <td className="medicine-dashboard-table-action">
+                            <button
+                              type="button"
+                              className="medicine-dashboard-remove-row"
+                              onClick={() => removeRow(r.id)}
+                              title="Remove row"
+                            >
+                              ×
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => (
-                          <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '6px 8px' }}>
-                              <input
-                                type="text"
-                                value={r.medicineName}
-                                onChange={(e) => updateRow(r.id, 'medicineName', e.target.value)}
-                                placeholder="Name"
-                                style={{
-                                  width: '100%',
-                                  padding: '6px 8px',
-                                  border: '1px solid #e2e8f0',
-                                  borderRadius: 6,
-                                  fontSize: 13,
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: '6px 8px' }}>
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                value={r.mrp}
-                                onChange={(e) => updateRow(r.id, 'mrp', e.target.value)}
-                                placeholder="0"
-                                style={{
-                                  width: 80,
-                                  padding: '6px 8px',
-                                  border: '1px solid #e2e8f0',
-                                  borderRadius: 6,
-                                  fontSize: 13,
-                                  textAlign: 'right',
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: '6px 8px' }}>
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                value={r.discount}
-                                onChange={(e) => updateRow(r.id, 'discount', e.target.value)}
-                                placeholder="0"
-                                style={{
-                                  width: 70,
-                                  padding: '6px 8px',
-                                  border: '1px solid #e2e8f0',
-                                  borderRadius: 6,
-                                  fontSize: 13,
-                                  textAlign: 'right',
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: '6px 8px' }}>
-                              <input
-                                type="number"
-                                min={1}
-                                value={r.quantity}
-                                onChange={(e) => updateRow(r.id, 'quantity', e.target.value)}
-                                style={{
-                                  width: 56,
-                                  padding: '6px 8px',
-                                  border: '1px solid #e2e8f0',
-                                  borderRadius: 6,
-                                  fontSize: 13,
-                                  textAlign: 'right',
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: '6px 8px' }}>
-                              <button
-                                type="button"
-                                onClick={() => removeRow(r.id)}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  color: '#64748b',
-                                  cursor: 'pointer',
-                                  fontSize: 18,
-                                  padding: 0,
-                                  lineHeight: 1,
-                                }}
-                                title="Remove row"
-                              >
-                                ×
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                      ))}
+                    </DataTable>
                   </div>
                   <button
                     type="button"
@@ -1102,28 +1128,26 @@ export const MedicineDashboard = () => {
             <p style={{ margin: '0 0 4px', fontSize: 13 }}>Patient: <strong>{receiptData.patient.name}</strong></p>
             <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b' }}>Mobile: {receiptData.patient.mobile}</p>
             <p style={{ margin: '0 0 8px', fontSize: 12, color: '#94a3b8' }}>Dispensed by: {receiptData.dispensedBy}</p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12, marginBottom: 12, fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 0' }}>Medicine</th>
-                  <th style={{ textAlign: 'right', padding: '8px 0' }}>MRP</th>
-                  <th style={{ textAlign: 'right', padding: '8px 0' }}>Disc</th>
-                  <th style={{ textAlign: 'right', padding: '8px 0' }}>Qty</th>
-                  <th style={{ textAlign: 'right', padding: '8px 0' }}>Amount</th>
+            <DataTable
+              className="medicine-dashboard-receipt-table"
+              columns={[
+                { label: 'Medicine', align: 'left' },
+                { label: 'MRP', align: 'right' },
+                { label: 'Disc', align: 'right' },
+                { label: 'Qty', align: 'right' },
+                { label: 'Amount', align: 'right' },
+              ]}
+            >
+              {receiptData.items.map((it, i) => (
+                <tr key={i}>
+                  <td>{it.medicineName}</td>
+                  <td className="medicine-dashboard-td-right">₹{it.mrp}</td>
+                  <td className="medicine-dashboard-td-right">₹{it.discount}</td>
+                  <td className="medicine-dashboard-td-right">{it.quantity}</td>
+                  <td className="medicine-dashboard-td-right">₹{it.amount}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {receiptData.items.map((it, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '6px 0' }}>{it.medicineName}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 0' }}>₹{it.mrp}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 0' }}>₹{it.discount}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 0' }}>{it.quantity}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 0' }}>₹{it.amount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </DataTable>
             <p style={{ margin: '8px 0 4px', fontSize: 13 }}>Subtotal: ₹{receiptData.subtotal} · Discount: ₹{receiptData.totalDiscount}</p>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Total: ₹{receiptData.totalAmount}</p>
             <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b' }}>Paid: ₹{receiptData.paidAmount} · Status: {receiptData.paymentStatus}</p>
@@ -1133,7 +1157,7 @@ export const MedicineDashboard = () => {
               </p>
             )}
             <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
-              <Button type="button" onClick={() => window.print()}>Print / Save as PDF</Button>
+              <Button type="button" onClick={() => window.print()}>Print / save as PDF</Button>
               <Button type="button" variant="secondary" onClick={() => setShowReceipt(false)}>Close</Button>
             </div>
           </div>
@@ -1187,6 +1211,6 @@ export const MedicineDashboard = () => {
           </div>
         </div>
       )}
-    </div>
+    </AppLayout>
   )
 }

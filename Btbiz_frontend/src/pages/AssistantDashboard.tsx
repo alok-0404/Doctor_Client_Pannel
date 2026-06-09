@@ -1,8 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { io } from 'socket.io-client'
 import { Header } from '../components/Header'
+import { AppLayout } from '../components/layout/AppLayout'
+import { Breadcrumb } from '../components/ui/Breadcrumb'
+import { EmptyState } from '../components/ui/EmptyState'
+import { CalendarIcon, DocumentIcon, UserIcon } from '../components/ui/icons'
 import { authStorage } from '../utils/authStorage'
 import { Card } from '../components/ui/Card'
+import { DataTable } from '../components/ui/DataTable'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Skeleton } from '../components/ui/Skeleton'
 import { TextField } from '../components/ui/TextField'
 import { Button } from '../components/ui/Button'
 import { DnaLoader } from '../components/ui/DnaLoader'
@@ -1058,46 +1065,48 @@ export const AssistantDashboard = () => {
   }
 
   return (
-    <div className="app-shell">
-      <Header clinicName="Check‑in desk" doctorName={name} />
-      <main className="search-main" style={{ padding: 24, maxWidth: '100%', width: '100%' }}>
-        <div style={{ width: '100%', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Card className="dashboard-overview-card">
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: pendingDocsLoading || pendingDocs.length > 0 || pendingDocsError ? 14 : 0,
-            }}
-          >
-            <div style={{ flex: '1 1 240px' }}>
+    <>
+      <AppLayout
+        showSidebar
+        header={<Header clinicName="Check‑in desk" doctorName={name} />}
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Assistant Desk' },
+            ]}
+          />
+        )}
+      >
+        <main className="search-main assistant-desk-main">
+        <section className="assistant-desk-section">
+          <PageHeader
+            className="assistant-desk-page-header"
+            title="Assistant Desk"
+            subtitle="Check in patients, record vitals, upload prescriptions for verification, and refer to the doctor."
+          />
+
+        <Card className="dashboard-overview-card assistant-desk-card assistant-desk-card--prescriptions">
+          <div className="assistant-desk-card-header">
+            <div className="assistant-desk-card-header-copy">
               <p className="dashboard-kicker">
                 Prescriptions waiting for release
                 {pendingDocs.length > 0 ? ` (${pendingDocs.length})` : ''}
               </p>
-              <p className="dashboard-body" style={{ marginTop: 4, fontSize: 13, color: '#627d98', lineHeight: 1.45 }}>
+              <p className="dashboard-body assistant-desk-card-intro">
                 Staff uploads stay hidden from the patient until you verify structured medicines / tests and release.
                 Open any row to continue — oldest uploads are listed first by default.
               </p>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-              <label htmlFor="pending-docs-sort" className="text-sm" style={{ color: '#475569' }}>
+            <div className="assistant-desk-card-toolbar">
+              <label htmlFor="pending-docs-sort" className="assistant-desk-toolbar-label">
                 Sort by upload
               </label>
               <select
                 id="pending-docs-sort"
                 value={pendingDocsSort}
                 onChange={(e) => setPendingDocsSort(e.target.value as 'asc' | 'desc')}
-                style={{
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  border: '1px solid #cbd5e1',
-                  fontSize: 13,
-                  background: '#fff',
-                }}
+                className="assistant-desk-select"
               >
                 <option value="asc">Oldest first</option>
                 <option value="desc">Newest first</option>
@@ -1113,142 +1122,72 @@ export const AssistantDashboard = () => {
             </div>
           </div>
           {pendingDocsError && (
-            <p className="text-sm" style={{ color: '#b91c1c', margin: '0 0 10px' }}>
+            <p className="assistant-desk-error" role="alert">
               {pendingDocsError}
             </p>
           )}
           {pendingDocsLoading && pendingDocs.length === 0 && !pendingDocsError && (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
-              <DnaLoader />
+            <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading pending prescriptions">
+              <Skeleton variant="rect" height={44} />
+              <Skeleton variant="rect" height={44} />
+              <Skeleton lines={2} />
             </div>
           )}
           {!pendingDocsLoading && pendingDocs.length === 0 && !pendingDocsError && (
-            <p className="text-sm" style={{ margin: 0, color: '#64748b' }}>
-              No prescriptions waiting for release right now.
-            </p>
+            <EmptyState
+              className="assistant-desk-empty-state"
+              icon={<DocumentIcon size={22} />}
+              title="No prescriptions waiting"
+              message="Uploaded files pending verification will appear in this queue."
+            />
           )}
           {pendingDocs.length > 0 && (
             <div
-              style={{
-                overflowX: 'auto',
-                overflowY: pendingDocs.length > 5 ? 'auto' : undefined,
-                maxHeight: pendingDocs.length > 5 ? 320 : undefined,
-                border: '1px solid #e2e8f0',
-                borderRadius: 8,
-              }}
+              className={
+                pendingDocs.length > 5
+                  ? 'assistant-desk-table-scroll assistant-desk-table-scroll--tall'
+                  : 'assistant-desk-table-scroll'
+              }
             >
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', color: '#64748b' }}>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    >
-                      Patient
-                    </th>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    >
-                      Mobile
-                    </th>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    >
-                      File
-                    </th>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    >
-                      Uploaded
-                    </th>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    >
-                      Status
-                    </th>
-                    <th
-                      style={{
-                        padding: '10px 12px',
-                        borderBottom: '1px solid #e2e8f0',
-                        width: 140,
-                        background: '#f8fafc',
-                        position: 'sticky',
-                        top: 0,
-                        zIndex: 1,
-                      }}
-                    />
+              <DataTable
+                className="assistant-desk-data-table"
+                columns={[
+                  { label: 'Patient' },
+                  { label: 'Mobile' },
+                  { label: 'File' },
+                  { label: 'Uploaded' },
+                  { label: 'Status' },
+                  { label: '', align: 'center' },
+                ]}
+                stickyHeader={pendingDocs.length > 5}
+              >
+                {pendingDocs.map((row) => (
+                  <tr key={row.documentId}>
+                    <td>{row.patientName}</td>
+                    <td>{row.mobileNumber}</td>
+                    <td>{row.originalName}</td>
+                    <td className="assistant-desk-td-nowrap">
+                      {new Date(row.uploadedAt).toLocaleString('en-IN', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </td>
+                    <td>
+                      <span className="assistant-desk-status-pending">Pending assistant</span>
+                    </td>
+                    <td className="assistant-desk-td-actions">
+                      <Button type="button" variant="secondary" onClick={() => openVerifyFromPendingQueue(row)}>
+                        Open verify
+                      </Button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {pendingDocs.map((row) => (
-                    <tr key={row.documentId}>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
-                        {row.patientName}
-                      </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
-                        {row.mobileNumber}
-                      </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
-                        {row.originalName}
-                      </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
-                        {new Date(row.uploadedAt).toLocaleString('en-IN', {
-                          dateStyle: 'medium',
-                          timeStyle: 'short',
-                        })}
-                      </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
-                        <span style={{ color: '#92400e', fontWeight: 600 }}>Pending assistant</span>
-                      </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
-                        <Button type="button" variant="secondary" onClick={() => openVerifyFromPendingQueue(row)}>
-                          Open verify
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </DataTable>
             </div>
           )}
         </Card>
         {referredToDoctorName && (
-          <div style={{ marginBottom: 0 }}>
-          <Card className="dashboard-overview-card assistant-availability-card">
+          <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--availability">
             <p className="dashboard-kicker">Your doctor&apos;s availability</p>
             <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
               Mark doctor unavailable or busy so patients can be informed in real time. You can update this on behalf of the doctor.
@@ -1400,11 +1339,17 @@ export const AssistantDashboard = () => {
                   Call or message only patients who are within <strong>500 meters</strong> of the clinic to inform that the doctor is not available.
                 </p>
                 {todayPatientsLoading ? (
-                  <DnaLoader label="Loading today's appointments..." />
+                  <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading patients to contact">
+                    <Skeleton variant="rect" height={56} />
+                    <Skeleton variant="rect" height={56} />
+                  </div>
                 ) : todayPatientsToContact.length === 0 ? (
-                  <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>
-                    No patients are within <strong>500 meters</strong> of the clinic right now.
-                  </p>
+                  <EmptyState
+                    className="assistant-desk-empty-state assistant-desk-empty-state--compact"
+                    icon={<UserIcon size={22} />}
+                    title="No nearby patients"
+                    message="No patients are within 500 meters of the clinic right now."
+                  />
                 ) : (
                   <ul
                     style={{
@@ -1472,16 +1417,24 @@ export const AssistantDashboard = () => {
               </div>
             )}
           </Card>
-          </div>
         )}
 
-        <div style={{ marginBottom: 0 }}>
-          <Card className="dashboard-overview-card assistant-availability-card">
+        <div className="assistant-desk-grid">
+          <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--today">
             <p className="dashboard-kicker">Today&apos;s appointments (assistant view)</p>
             {todayPatientsLoading ? (
-              <DnaLoader label="Loading appointments..." />
+              <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading appointments">
+                <Skeleton variant="rect" height={56} />
+                <Skeleton variant="rect" height={56} />
+                <Skeleton lines={2} />
+              </div>
             ) : todayAppointments.length === 0 ? (
-              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No appointments scheduled for today.</p>
+              <EmptyState
+                className="assistant-desk-empty-state assistant-desk-empty-state--compact"
+                icon={<CalendarIcon size={22} />}
+                title="No appointments today"
+                message="Today's bookings will appear here for check-in."
+              />
             ) : (
               <ul
                 style={{
@@ -1554,15 +1507,21 @@ export const AssistantDashboard = () => {
               </ul>
             )}
           </Card>
-        </div>
 
-        <div style={{ marginBottom: 0 }}>
-          <Card className="dashboard-overview-card assistant-availability-card">
+          <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--checked-in">
             <p className="dashboard-kicker">Today checked-in patients (audit)</p>
             {checkedInLoading ? (
-              <DnaLoader label="Loading checked-in list..." />
+              <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading checked-in list">
+                <Skeleton variant="rect" height={56} />
+                <Skeleton variant="rect" height={56} />
+              </div>
             ) : checkedInToday.length === 0 ? (
-              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No checked-in patients yet today.</p>
+              <EmptyState
+                className="assistant-desk-empty-state assistant-desk-empty-state--compact"
+                icon={<UserIcon size={22} />}
+                title="No check-ins yet"
+                message="Patients you check in today will be listed here."
+              />
             ) : (
               <ul
                 style={{
@@ -1608,15 +1567,21 @@ export const AssistantDashboard = () => {
               </ul>
             )}
           </Card>
-        </div>
 
-        <div style={{ marginBottom: 0 }}>
-          <Card className="dashboard-overview-card assistant-availability-card">
+          <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--upcoming">
             <p className="dashboard-kicker">Upcoming appointments (assistant view)</p>
             {upcomingPatientsLoading ? (
-              <DnaLoader label="Loading upcoming appointments..." />
+              <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading upcoming appointments">
+                <Skeleton variant="rect" height={56} />
+                <Skeleton variant="rect" height={56} />
+              </div>
             ) : upcomingAppointments.length === 0 ? (
-              <p className="dashboard-body" style={{ fontSize: 13, color: '#627d98' }}>No upcoming appointments.</p>
+              <EmptyState
+                className="assistant-desk-empty-state assistant-desk-empty-state--compact"
+                icon={<CalendarIcon size={22} />}
+                title="No upcoming appointments"
+                message="Future scheduled visits will show in this list."
+              />
             ) : (
               <ul
                 style={{
@@ -1668,10 +1633,8 @@ export const AssistantDashboard = () => {
           </Card>
         </div>
 
-        {/* Existing assistant workspace below */}
-
         {step === 'search' && (
-          <Card className="search-card assistant-workspace-card">
+          <Card className="search-card assistant-workspace-card assistant-desk-card assistant-desk-card--workspace">
             <header className="search-header">
               <p className="dashboard-kicker">Assistant workspace</p>
               <h2 className="search-title">Find or register patient</h2>
@@ -1692,28 +1655,22 @@ export const AssistantDashboard = () => {
               {searchError && (
                 <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>{searchError}</p>
               )}
-              <div className="search-footer">
+              <div className="search-footer assistant-desk-search-footer">
                 <Button type="submit" disabled={searchLoading}>
                   {searchLoading ? 'Searching…' : 'Search'}
                 </Button>
               </div>
+              {searchLoading && (
+                <div className="assistant-desk-skeleton-stack assistant-desk-skeleton-stack--compact" aria-busy="true" aria-label="Searching patient">
+                  <Skeleton lines={2} />
+                </div>
+              )}
               {familyOptions && familyOptions.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <p className="dashboard-body" style={{ fontSize: 13, marginBottom: 8, color: '#0d47a1', fontWeight: 600 }}>
+                <Card className="assistant-desk-family-card">
+                  <p className="assistant-desk-family-label">
                     Several family members use this number — choose who is visiting:
                   </p>
-                  <ul
-                    style={{
-                      listStyle: 'none',
-                      padding: 0,
-                      margin: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                      maxHeight: familyOptions.length > 5 ? 260 : undefined,
-                      overflowY: familyOptions.length > 5 ? 'auto' : undefined,
-                    }}
-                  >
+                  <ul className="assistant-desk-list assistant-desk-list--scroll">
                     {familyOptions.map((m) => (
                       <li key={m.id}>
                         <Button
@@ -1728,15 +1685,14 @@ export const AssistantDashboard = () => {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </Card>
               )}
             </form>
           </Card>
         )}
 
         {step === 'new_patient' && (
-          <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <Card className="search-card assistant-workspace-card">
+          <Card className="search-card assistant-workspace-card assistant-desk-card assistant-desk-card--workspace">
               <header className="search-header">
                 <p className="dashboard-kicker">New patient</p>
                 <h2 className="search-title">Register patient</h2>
@@ -1782,12 +1738,11 @@ export const AssistantDashboard = () => {
                   <Button type="submit" disabled={saveLoading}>{saveLoading ? 'Saving…' : 'Register & continue to vitals'}</Button>
                 </div>
               </form>
-            </Card>
-          </div>
+          </Card>
         )}
 
         {step === 'checkin' && patientId && (
-          <Card className="search-card assistant-workspace-card assistant-checkin-card">
+          <Card className="search-card assistant-workspace-card assistant-checkin-card assistant-desk-card assistant-desk-card--checkin">
             <header className="search-header">
               <p className="dashboard-kicker">Check-in & refer to doctor</p>
               <h2 className="search-title">
@@ -1829,6 +1784,7 @@ export const AssistantDashboard = () => {
 
             <div className="assistant-checkin-grid">
               <div className="assistant-checkin-col">
+                <Card className="assistant-desk-subpanel">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault()
@@ -1867,9 +1823,11 @@ export const AssistantDashboard = () => {
                     {saveLoading ? 'Saving…' : 'Update patient details'}
                   </Button>
                 </form>
+                </Card>
               </div>
 
               <div className="assistant-checkin-col">
+                <Card className="assistant-desk-subpanel">
                 <form onSubmit={handleReferToDoctor} className="search-form" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <p className="dashboard-kicker" style={{ marginTop: 0 }}>
                     {hasTodayVisit ? 'Upload documents for today\'s visit' : 'Mandatory vitals (before doctor)'}
@@ -2021,12 +1979,14 @@ export const AssistantDashboard = () => {
                     </Button>
                   </div>
                 </form>
+                </Card>
               </div>
             </div>
           </Card>
         )}
-        </div>
-      </main>
+        </section>
+        </main>
+      </AppLayout>
 
       {verifyModalOpen && docPendingReleaseId && (
         <div
@@ -2446,6 +2406,6 @@ export const AssistantDashboard = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
