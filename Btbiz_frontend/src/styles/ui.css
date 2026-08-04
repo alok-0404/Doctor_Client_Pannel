@@ -6637,3 +6637,53 @@ body {
   }
 }
 
+/* Sticky WhatsApp bot FAB (public pages) */
+.public-whatsapp-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #25d366;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(37, 211, 102, 0.45);
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.public-whatsapp-fab:hover {
+  background: #1ebe57;
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 10px 28px rgba(37, 211, 102, 0.55);
+  color: #fff;
+}
+
+.public-whatsapp-fab:focus-visible {
+  outline: 3px solid rgba(14, 143, 126, 0.45);
+  outline-offset: 3px;
+}
+
+.public-whatsapp-fab-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .public-whatsapp-fab {
+    right: 16px;
+    bottom: 18px;
+    width: 52px;
+    height: 52px;
+  }
+
+  .public-whatsapp-fab-icon {
+    width: 26px;
+    height: 26px;
+  }
+}
+
