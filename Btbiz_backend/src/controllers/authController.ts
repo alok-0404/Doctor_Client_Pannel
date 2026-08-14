@@ -14,6 +14,7 @@ import {
   registerPharmacy,
   startDoctorPasswordReset
 } from "../services/authService";
+import { trackEvent } from "../services/analyticsService";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
@@ -145,6 +146,14 @@ export const doctorLogin = async (req: Request, res: Response): Promise<void> =>
 
     const authResponse = await loginDoctor({ email, password });
 
+    trackEvent({
+      eventType: "user.login",
+      success: true,
+      actorRole: authResponse.doctor.role,
+      userId: authResponse.doctor.id,
+      route: "/auth/login",
+    });
+
     res.status(200).json({
       message: "Login successful",
       accessToken: authResponse.accessToken,
@@ -152,20 +161,44 @@ export const doctorLogin = async (req: Request, res: Response): Promise<void> =>
     });
   } catch (error) {
     if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        route: "/auth/login",
+        metadata: { reason: "INVALID_CREDENTIALS" },
+      });
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
     if (error instanceof Error && error.message === "ACCOUNT_PENDING_APPROVAL") {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        route: "/auth/login",
+        metadata: { reason: "ACCOUNT_PENDING_APPROVAL" },
+      });
       res.status(403).json({ message: "Your account is pending super admin approval" });
       return;
     }
     if (error instanceof Error && error.message === "ACCOUNT_REJECTED") {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        route: "/auth/login",
+        metadata: { reason: "ACCOUNT_REJECTED" },
+      });
       res.status(403).json({ message: "Your account registration was rejected by super admin" });
       return;
     }
 
     // eslint-disable-next-line no-console
     console.error("doctorLogin error:", error);
+    trackEvent({
+      eventType: "api.error",
+      success: false,
+      route: "/auth/login",
+      metadata: { message: error instanceof Error ? error.message : "unknown" },
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -253,6 +286,12 @@ export const superAdminLogin = async (
     const emailMatches = email.trim().toLowerCase() === env.superAdmin.email.trim().toLowerCase();
     const passwordMatches = password === env.superAdmin.password;
     if (!emailMatches || !passwordMatches) {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        actorRole: "SUPER_ADMIN",
+        route: "/auth/super-admin/login",
+      });
       res.status(401).json({ message: "Invalid super admin credentials" });
       return;
     }
@@ -267,6 +306,13 @@ export const superAdminLogin = async (
       { expiresIn: env.jwt.expiresIn as "1h" | "7d" | "24h" }
     );
 
+    trackEvent({
+      eventType: "user.login",
+      success: true,
+      actorRole: "SUPER_ADMIN",
+      route: "/auth/super-admin/login",
+    });
+
     res.status(200).json({
       accessToken,
       doctor: {
@@ -277,6 +323,12 @@ export const superAdminLogin = async (
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("superAdminLogin error:", error);
+    trackEvent({
+      eventType: "api.error",
+      success: false,
+      route: "/auth/super-admin/login",
+      metadata: { message: error instanceof Error ? error.message : "unknown" },
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 };

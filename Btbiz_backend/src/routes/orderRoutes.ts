@@ -7,6 +7,7 @@ import { Doctor } from "../models/Doctor";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 import { Visit } from "../models/Visit";
+import { trackEvent } from "../services/analyticsService";
 
 type OrderRequestStatus = "PENDING" | "ACCEPTED" | "COMPLETED" | "CANCELLED";
 
@@ -216,6 +217,15 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
         } else {
           await PatientMedicineRequest.findByIdAndUpdate(requestId, { $set: update });
         }
+        if (body.paymentStatus === "PAID" && (existing as any).paymentStatus !== "PAID") {
+          trackEvent({
+            eventType: "payment.marked_paid",
+            actorRole: req.doctor?.role,
+            userId: req.doctor?._id?.toString(),
+            route: "/orders/medicine-requests/:id",
+            metadata: { kind: "pharmacy", requestId },
+          });
+        }
         res.status(200).json({ message: "Medicine request updated" });
         return;
       }
@@ -251,10 +261,25 @@ router.patch("/medicine-requests/:requestId", async (req, res) => {
       res.status(404).json({ message: "Medicine request not found" });
       return;
     }
+    if (body.paymentStatus === "PAID") {
+      trackEvent({
+        eventType: "payment.marked_paid",
+        actorRole: req.doctor?.role,
+        userId: req.doctor?._id?.toString(),
+        route: "/orders/medicine-requests/:id",
+        metadata: { kind: "pharmacy", requestGroupId: requestId },
+      });
+    }
     res.status(200).json({ message: "Medicine request group updated" });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("update medicine request error:", error);
+    trackEvent({
+      eventType: "api.error",
+      success: false,
+      route: "/orders/medicine-requests/:id",
+      metadata: { message: error instanceof Error ? error.message : "unknown" },
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -405,6 +430,15 @@ router.patch("/test-requests/:requestId", async (req, res) => {
           }
           await PatientTestRequest.findByIdAndUpdate(requestId, { $set: update });
         }
+        if (body.paymentStatus === "PAID" && (existing as any).paymentStatus !== "PAID") {
+          trackEvent({
+            eventType: "payment.marked_paid",
+            actorRole: req.doctor?.role,
+            userId: req.doctor?._id?.toString(),
+            route: "/orders/test-requests/:id",
+            metadata: { kind: "lab", requestId },
+          });
+        }
         res.status(200).json({ message: "Test request updated" });
         return;
       }
@@ -421,10 +455,25 @@ router.patch("/test-requests/:requestId", async (req, res) => {
 
     applyPaidFieldsForLabGroup(requestId, groupRows as any[]);
     await PatientTestRequest.updateMany({ requestGroupId: requestId }, { $set: update });
+    if (body.paymentStatus === "PAID") {
+      trackEvent({
+        eventType: "payment.marked_paid",
+        actorRole: req.doctor?.role,
+        userId: req.doctor?._id?.toString(),
+        route: "/orders/test-requests/:id",
+        metadata: { kind: "lab", requestGroupId: requestId },
+      });
+    }
     res.status(200).json({ message: "Test request group updated" });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("update test request error:", error);
+    trackEvent({
+      eventType: "api.error",
+      success: false,
+      route: "/orders/test-requests/:id",
+      metadata: { message: error instanceof Error ? error.message : "unknown" },
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 });

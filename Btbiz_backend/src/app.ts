@@ -15,6 +15,7 @@ import pharmacyRoutes from "./routes/pharmacyRoutes";
 import superAdminRoutes from "./routes/superAdminRoutes";
 import orderRoutes from "./routes/orderRoutes";
 import { tenantMiddleware } from "./tenant";
+import { trackEvent } from "./services/analyticsService";
 
 const app = express();
 
@@ -143,9 +144,15 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // Error handler so 500 responses still have CORS and JSON
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   // eslint-disable-next-line no-console
   console.error("Unhandled error:", err);
+  trackEvent({
+    eventType: "api.error",
+    success: false,
+    route: req.originalUrl,
+    metadata: { message: err.message },
+  });
   if (!res.headersSent) {
     res.status(500).json({ message: "Internal server error" });
   }

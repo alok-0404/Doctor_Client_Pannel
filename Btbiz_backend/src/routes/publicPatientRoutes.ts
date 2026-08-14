@@ -26,6 +26,7 @@ import {
   verifyPatientOtp,
   selectPatientProfile,
 } from "../services/patientAuthService";
+import { trackEvent } from "../services/analyticsService";
 import {
   findExistingUploadFilePath,
   getUploadsRootDir,
@@ -209,18 +210,44 @@ router.post("/verify", async (req: Request, res: Response): Promise<void> => {
       return;
     }
     const result = await verifyPatientOtp(mobile.trim(), otp.trim());
+    trackEvent({
+      eventType: "user.login",
+      success: true,
+      actorRole: "PATIENT",
+      route: "/public/patient/verify",
+    });
     res.status(200).json(result);
   } catch (error: any) {
     if (error.message === "INVALID_OR_EXPIRED_OTP") {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        actorRole: "PATIENT",
+        route: "/public/patient/verify",
+        metadata: { reason: "INVALID_OR_EXPIRED_OTP" },
+      });
       res.status(400).json({ message: "Invalid or expired OTP" });
       return;
     }
     if (error.message === "NO_PROFILE_FOUND") {
+      trackEvent({
+        eventType: "user.login",
+        success: false,
+        actorRole: "PATIENT",
+        route: "/public/patient/verify",
+        metadata: { reason: "NO_PROFILE_FOUND" },
+      });
       res.status(404).json({ message: "No profile found" });
       return;
     }
     // eslint-disable-next-line no-console
     console.error("verify error:", error);
+    trackEvent({
+      eventType: "api.error",
+      success: false,
+      route: "/public/patient/verify",
+      metadata: { message: error instanceof Error ? error.message : "unknown" },
+    });
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -556,6 +583,14 @@ router.post(
       }
       const entry = await PatientMedicineRequest.create(createPayload);
 
+      trackEvent({
+        eventType: "pharmacy.order.created",
+        actorRole: "PATIENT",
+        userId: String(patientId),
+        route: "/public/patient/medicines",
+        metadata: { requestId: entry._id.toString() },
+      });
+
       res.status(201).json({
         medicine: {
           id: entry._id.toString(),
@@ -575,6 +610,12 @@ router.post(
     } catch (error: unknown) {
       // eslint-disable-next-line no-console
       console.error("patient add medicine error:", error);
+      trackEvent({
+        eventType: "api.error",
+        success: false,
+        route: "/public/patient/medicines",
+        metadata: { message: error instanceof Error ? error.message : "unknown" },
+      });
       const err = error as { name?: string; errors?: Record<string, { message?: string }> };
       if (err?.name === "ValidationError" && err.errors) {
         const msg = Object.values(err.errors)
@@ -714,6 +755,14 @@ router.post(
           typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
             ? Math.round(expectedFulfillmentMinutes)
             : undefined,
+      });
+
+      trackEvent({
+        eventType: "lab.order.created",
+        actorRole: "PATIENT",
+        userId: String(patientId),
+        route: "/public/patient/tests",
+        metadata: { requestId: entry._id.toString() },
       });
 
       res.status(201).json({

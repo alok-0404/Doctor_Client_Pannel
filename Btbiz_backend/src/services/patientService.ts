@@ -12,6 +12,7 @@ import { FamilyMember } from "../models/FamilyMember";
 import type { AppointmentChannel } from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
+import { trackEvent } from "./analyticsService";
 import {
   findExistingUploadFilePath,
   isRemoteUploadPath,
@@ -122,7 +123,7 @@ export const createVisit = async (payload: CreateVisitPayload) => {
   const visitDate = payload.visitDate ? new Date(payload.visitDate) : new Date();
   const channel: AppointmentChannel = payload.appointmentChannel ?? "ONLINE_BOOKING";
   await assertDailyAppointmentQuotaAllowed(payload.doctorId, visitDate, channel);
-  return Visit.create({
+  const visit = await Visit.create({
     patient: patient._id,
     doctor: doctor._id,
     recordedBy: payload.recordedById
@@ -141,6 +142,19 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     patientLongitude: payload.patientLongitude,
     appointmentChannel: channel
   });
+
+  trackEvent({
+    eventType: "appointment.created",
+    actorRole: payload.recordedById ? "ASSISTANT" : "PATIENT",
+    userId: payload.recordedById ?? payload.patientId,
+    metadata: {
+      visitId: visit._id.toString(),
+      doctorId: payload.doctorId,
+      channel,
+    },
+  });
+
+  return visit;
 };
 
 export interface UpdateVisitVitalsPayload {

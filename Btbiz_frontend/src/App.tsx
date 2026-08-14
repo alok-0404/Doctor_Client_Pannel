@@ -17,6 +17,7 @@ import { AssistantDashboard } from './pages/AssistantDashboard.tsx'
 import { LabDashboard } from './pages/LabDashboard'
 import { LabManagerDashboard } from './pages/LabManagerDashboard'
 import { SuperAdminDashboard } from './pages/SuperAdminDashboard'
+import { SuperAdminIntelligence } from './pages/SuperAdminIntelligence'
 import { PatientSearch } from './pages/PatientSearch'
 import { PatientDetails } from './pages/PatientDetails'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -108,6 +109,14 @@ export const App = () => {
         element={(
           <ProtectedRoute allowedRoles={['LAB_MANAGER']}>
             <LabManagerDashboard />
+          </ProtectedRoute>
+        )}
+      />
+      <Route
+        path="/super-admin/intelligence"
+        element={(
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+            <SuperAdminIntelligence />
           </ProtectedRoute>
         )}
       />

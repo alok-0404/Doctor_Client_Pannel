@@ -14,10 +14,30 @@ import {
   updatePartnerTenant,
 } from "../services/tenantService";
 import { geocodeAllPartnersMissingCoords } from "../services/providerLocationService";
+import {
+  getIntelligenceSummary,
+  IntelligencePeriod,
+} from "../services/analyticsService";
 
 const router = Router();
 
 router.use(authenticateSuperAdmin);
+
+const INTELLIGENCE_PERIODS = new Set<IntelligencePeriod>(["today", "7d", "30d"]);
+
+// GET /super-admin/intelligence/summary?period=today|7d|30d
+router.get("/intelligence/summary", async (req, res) => {
+  try {
+    const raw = String(req.query.period ?? "7d").trim() as IntelligencePeriod;
+    const period = INTELLIGENCE_PERIODS.has(raw) ? raw : "7d";
+    const summary = await getIntelligenceSummary(period);
+    res.status(200).json(summary);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("super-admin/intelligence/summary error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 // GET /super-admin/overview
 router.get("/overview", async (_req, res) => {

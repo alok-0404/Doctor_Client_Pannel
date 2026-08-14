@@ -16,6 +16,7 @@ export const GlobalBackButton = () => {
     '/lab-manager',
     '/medicine',
     '/super-admin',
+    '/super-admin/intelligence',
   ])
 
   /** Pages using AppLayout sidebar — back button sits in main column, not over sidebar brand. */
@@ -26,6 +27,7 @@ export const GlobalBackButton = () => {
     '/lab-manager',
     '/medicine',
     '/super-admin',
+    '/super-admin/intelligence',
     '/ocr',
     '/search-patients',
   ])

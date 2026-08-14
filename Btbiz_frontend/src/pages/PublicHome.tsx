@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import { Link } from 'react-router-dom'
 import { PublicLayout } from '../components/layout/PublicLayout'
+import { FestivalCelebration } from '../components/FestivalCelebration'
 import { patientStorage } from '../utils/patientStorage'
 import { Card } from '../components/ui/Card'
 import { StatCard } from '../components/ui/StatCard'
@@ -65,6 +66,7 @@ export const PublicHome = () => {
 
   return (
     <PublicLayout className="public-home-landing">
+        <FestivalCelebration />
         <section className="public-home-hero">
           <div className="public-home-container public-home-hero-grid">
             <div className="public-home-hero-copy">

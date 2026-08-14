@@ -432,6 +432,49 @@ export const authService = {
     })
     return res.data as { results: Array<{ kind: string; updated: number; failed: number }> }
   },
+
+  async getIntelligenceSummary(
+    period: IntelligencePeriod = '7d',
+  ): Promise<IntelligenceSummary> {
+    const res = await api.get('/super-admin/intelligence/summary', {
+      params: { period },
+    })
+    return res.data as IntelligenceSummary
+  },
+}
+
+export type IntelligencePeriod = 'today' | '7d' | '30d'
+
+export interface IntelligenceSummary {
+  period: IntelligencePeriod
+  from: string
+  to: string
+  healthScore: number
+  kpis: {
+    appointments: number
+    logins: number
+    labOrders: number
+    pharmacyOrders: number
+    payments: number
+    apiErrors: number
+  }
+  trends?: IntelligenceTrendPoint[]
+  meta?: {
+    loginFails?: number
+    source?: string
+    trendGranularity?: 'hour' | 'day'
+  }
+}
+
+export interface IntelligenceTrendPoint {
+  label: string
+  key: string
+  appointments: number
+  labOrders: number
+  pharmacyOrders: number
+  payments: number
+  logins: number
+  apiErrors: number
 }
 
 export interface DoctorNotificationItem {

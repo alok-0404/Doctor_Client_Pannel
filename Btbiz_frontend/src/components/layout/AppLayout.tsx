@@ -27,6 +27,7 @@ const APP_NAV_ITEMS: AppNavItem[] = [
   { label: 'Lab', path: '/lab', roles: ['LAB_ASSISTANT', 'LAB_MANAGER'] },
   { label: 'Lab Assistants', path: '/lab-manager', roles: ['LAB_MANAGER'] },
   { label: 'Super Admin', path: '/super-admin', roles: ['SUPER_ADMIN'] },
+  { label: 'Intelligence', path: '/super-admin/intelligence', roles: ['SUPER_ADMIN'] },
 ]
 
 export interface AppLayoutProps {
