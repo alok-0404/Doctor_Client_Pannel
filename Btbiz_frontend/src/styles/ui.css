@@ -1165,6 +1165,8 @@ body {
 
 .ui-button--full-width {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .ui-button:disabled {
@@ -1504,6 +1506,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.landing-role-actions .ui-button {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
 }
 
 .landing-register-link {
