@@ -21,23 +21,10 @@ import {
 } from '../services/api'
 import { authStorage } from '../utils/authStorage'
 
-/** Online / portal / bot bookings — API returns reason & notes, not always source: WHATSAPP. */
-function isWhatsappOrOnlineBooking(a: DoctorAppointmentItem): boolean {
+/** WhatsApp badge only when the appointment was booked via the WhatsApp bot. */
+function isWhatsappBooking(a: DoctorAppointmentItem): boolean {
   const source = String(a.source ?? '').toUpperCase()
-  if (source.includes('WHATSAPP') || source.includes('BOT')) return true
-
-  const reason = String(a.reason ?? '').toUpperCase().replace(/\s+/g, '_')
-  if (
-    reason === 'NEW_CONSULTATION' ||
-    reason === 'REVIEW_APPOINTMENT' ||
-    reason === 'NEW_APPOINTMENT' ||
-    reason === 'FAMILY_APPOINTMENT'
-  ) {
-    return true
-  }
-
-  const notes = String(a.notes ?? '').toUpperCase()
-  return notes.includes('OPD NO:') || notes.includes('PREFERRED TIME:')
+  return source.includes('WHATSAPP') || source.includes('BOT')
 }
 
 export const Dashboard = () => {
@@ -424,7 +411,7 @@ export const Dashboard = () => {
                               <span className="doctor-dashboard-appointment-reason">
                                 {a.reason || 'Appointment'}
                               </span>
-                              {isWhatsappOrOnlineBooking(a) && (
+                              {isWhatsappBooking(a) && (
                                 <span className="doctor-dashboard-badge doctor-dashboard-badge--whatsapp">
                                   WhatsApp
                                 </span>
@@ -495,7 +482,7 @@ export const Dashboard = () => {
                                 <span className="doctor-dashboard-appointment-reason">
                                   {a.reason || 'Appointment'}
                                 </span>
-                                {isWhatsappOrOnlineBooking(a) && (
+                                {isWhatsappBooking(a) && (
                                   <span className="doctor-dashboard-badge doctor-dashboard-badge--whatsapp">
                                     WhatsApp
                                   </span>

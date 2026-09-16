@@ -1688,6 +1688,7 @@ export const publicAppointmentService = {
     address?: string
     patientLatitude?: number
     patientLongitude?: number
+    source?: 'WEBSITE' | 'WHATSAPP'
   }): Promise<{ appointmentId: string; patientId: string }> {
     const res = await api.post('/public/appointments/family', payload)
     return res.data as any

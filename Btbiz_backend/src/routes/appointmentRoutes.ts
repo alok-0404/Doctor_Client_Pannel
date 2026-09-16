@@ -6,6 +6,7 @@ import { Doctor } from "../models/Doctor";
 import { Visit } from "../models/Visit";
 import { Patient } from "../models/Patient";
 import { findPatientsByMobile } from "../services/patientService";
+import { resolveBookingSource } from "../utils/bookingSource";
 
 const router = Router();
 
@@ -66,6 +67,7 @@ function mapVisitToAppointment(
     visitDate: v.visitDate,
     reason: v.reason,
     notes: v.notes,
+    source: resolveBookingSource(v),
     patientLatitude: patientLat,
     patientLongitude: patientLng,
     distanceKm: distanceKmValue

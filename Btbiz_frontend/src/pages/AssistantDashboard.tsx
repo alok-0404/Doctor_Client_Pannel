@@ -1052,10 +1052,7 @@ export const AssistantDashboard = () => {
 
   const isBotBookedAppointment = (a: DoctorAppointmentItem): boolean => {
     const source = String(a.source ?? '').toUpperCase()
-    const reason = String(a.reason ?? '').toUpperCase()
-    if (source.includes('WHATSAPP') || source.includes('BOT')) return true
-    // Bot and public booking payloads commonly store consultation type as reason.
-    return reason === 'NEW_CONSULTATION' || reason === 'REVIEW_APPOINTMENT'
+    return source.includes('WHATSAPP') || source.includes('BOT')
   }
 
   const getAssistantAppointmentSubtitle = (a: DoctorAppointmentItem): string | null => {

@@ -653,6 +653,7 @@ export const BookAppointment = () => {
           gender: familyGender || undefined,
           address: familyAddress || undefined,
           ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
+          source: 'WEBSITE',
         })
       } else {
         setError('Please select New Patient.')

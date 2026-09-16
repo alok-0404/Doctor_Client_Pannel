@@ -21,6 +21,7 @@ import { env } from "../config/env";
 import { getPublicBaseUrl } from "../config/publicBaseUrl";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
+import { parseBookingSource } from "../utils/bookingSource";
 import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 
 const router = Router();
@@ -1140,6 +1141,7 @@ router.post("/appointments/old", async (req, res) => {
       address?: string;
       patientLatitude?: number;
       patientLongitude?: number;
+      source?: string;
     };
 
     if (!body.mobileNumber || !body.consultationType || !body.consultantId || !body.opdNumber || !body.appointmentDate) {
@@ -1181,7 +1183,8 @@ router.post("/appointments/old", async (req, res) => {
       notes: notesParts.join(". "),
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
-      appointmentChannel: "ONLINE_BOOKING"
+      appointmentChannel: "ONLINE_BOOKING",
+      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP"
     });
 
     res.status(201).json({
@@ -1228,6 +1231,7 @@ router.post("/appointments/new", async (req, res) => {
       preferredSlot?: string;
       patientLatitude?: number;
       patientLongitude?: number;
+      source?: string;
     };
 
     if (!body.consultantId || !body.patientName || !body.mobileNumber || !body.gender || !body.appointmentDate) {
@@ -1274,7 +1278,8 @@ router.post("/appointments/new", async (req, res) => {
       notes: notesParts.join(". "),
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
-      appointmentChannel: "ONLINE_BOOKING"
+      appointmentChannel: "ONLINE_BOOKING",
+      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP"
     });
 
     res.status(201).json({
@@ -1538,6 +1543,7 @@ router.post("/appointments/family", async (req, res) => {
       address?: string;
       patientLatitude?: number;
       patientLongitude?: number;
+      source?: string;
     };
 
     if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
@@ -1589,7 +1595,8 @@ router.post("/appointments/family", async (req, res) => {
       notes: notesParts.join(". ") || undefined,
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
-      appointmentChannel: "ONLINE_BOOKING"
+      appointmentChannel: "ONLINE_BOOKING",
+      bookingSource: parseBookingSource(body.source) ?? "WEBSITE"
     });
 
     // Doctor is notified only when assistant refers (vitals/refer flow), not on online booking.

@@ -5121,8 +5121,8 @@ body {
   box-shadow: 0 4px 14px color-mix(in srgb, var(--primary, #0d9488) 12%, transparent);
 }
 
-.book-appointment-intro {
-  margin-bottom: 20px;
+.book-appointment-page .public-section-text.book-appointment-intro {
+  margin: 0 0 20px;
 }
 
 .book-appointment-error {
@@ -5139,7 +5139,8 @@ body {
 }
 
 .book-appointment-consent-card {
-  max-width: 520px;
+  max-width: none;
+  width: 100%;
 }
 
 .book-appointment-consent-title {
@@ -5171,6 +5172,7 @@ body {
   gap: 16px;
   justify-content: center;
   flex-wrap: wrap;
+  margin-top: 20px;
   margin-bottom: 0;
 }
 

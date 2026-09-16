@@ -4,6 +4,7 @@ import { tenantPlugin } from "../tenant/tenantPlugin";
 import { PatientId } from "./Patient";
 
 export type AppointmentChannel = "ONLINE_BOOKING" | "WALK_IN";
+export type BookingSource = "WHATSAPP" | "WEBSITE" | "WALK_IN";
 
 export interface IVisit extends Document {
   patient: PatientId;
@@ -27,6 +28,8 @@ export interface IVisit extends Document {
   /** Optional accuracy (meters) for last known patient location. */
   patientLocationAccuracyMeters?: number;
   appointmentChannel?: AppointmentChannel;
+  /** How the appointment was booked — WhatsApp bot vs website vs walk-in. */
+  bookingSource?: BookingSource;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,6 +77,11 @@ const VisitSchema = new Schema<IVisit>(
       type: String,
       enum: ["ONLINE_BOOKING", "WALK_IN"],
       default: "ONLINE_BOOKING",
+      index: true
+    },
+    bookingSource: {
+      type: String,
+      enum: ["WHATSAPP", "WEBSITE", "WALK_IN"],
       index: true
     }
   },

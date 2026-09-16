@@ -249,7 +249,8 @@ export const createVisit = async (
       weightKg: body.weightKg,
       temperature: body.temperature,
       otherVitalsNotes: body.otherVitalsNotes,
-      appointmentChannel: "WALK_IN"
+      appointmentChannel: "WALK_IN",
+      bookingSource: "WALK_IN"
     });
 
     const patient = await Patient.findById(visit.patient).select("firstName lastName").lean();

@@ -9,7 +9,7 @@ import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
 import { FamilyMember } from "../models/FamilyMember";
-import type { AppointmentChannel } from "../models/Visit";
+import type { AppointmentChannel, BookingSource } from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
 import { trackEvent } from "./analyticsService";
@@ -105,6 +105,8 @@ export interface CreateVisitPayload {
   patientLongitude?: number;
   /** Portal bookings vs clinic walk-in; counts toward separate daily quotas. */
   appointmentChannel?: AppointmentChannel;
+  /** WhatsApp bot vs website vs walk-in. */
+  bookingSource?: BookingSource;
 }
 
 export const createVisit = async (payload: CreateVisitPayload) => {
@@ -140,7 +142,8 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     otherVitalsNotes: payload.otherVitalsNotes,
     patientLatitude: payload.patientLatitude,
     patientLongitude: payload.patientLongitude,
-    appointmentChannel: channel
+    appointmentChannel: channel,
+    bookingSource: payload.bookingSource
   });
 
   trackEvent({
@@ -151,6 +154,7 @@ export const createVisit = async (payload: CreateVisitPayload) => {
       visitId: visit._id.toString(),
       doctorId: payload.doctorId,
       channel,
+      bookingSource: payload.bookingSource,
     },
   });
 
