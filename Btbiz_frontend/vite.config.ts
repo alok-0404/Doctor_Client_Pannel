@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Shared monorepo dependencies must use the frontend's React instance.
+    resolve: {
+      dedupe: ['react', 'react-dom'],
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,

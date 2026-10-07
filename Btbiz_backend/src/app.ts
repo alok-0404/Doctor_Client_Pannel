@@ -103,13 +103,43 @@ app.use(
 );
 app.use(express.json());
 app.use(morgan("dev"));
-// Multi-tenant context (soft mode by default — see TENANT_ENFORCE in env).
-app.use((req, res, next) => {
-  void tenantMiddleware(req, res, next);
-});
+
+// Public files must not wait for database-backed tenant resolution.
+// Browsers request JS/CSS with */*, so the HTML-only tenant exemption
+// does not protect these requests.
+const frontendDist = path.join(__dirname, "../../Btbiz_frontend/dist");
+if (isProd) {
+  app.use(
+    "/assets",
+    express.static(path.join(frontendDist, "assets"), {
+      immutable: true,
+      maxAge: "1y",
+      index: false,
+    })
+  );
+  // Never serve index.html for a missing JS/CSS chunk from an older build.
+  app.use("/assets", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(404).type("text/plain").send("Asset not found. Reload the page to load the current version.");
+  });
+  app.use(
+    express.static(frontendDist, {
+      setHeaders: (res, filePath) => {
+        if (path.extname(filePath) === ".html") {
+          res.setHeader("Cache-Control", "no-store");
+        }
+      },
+    })
+  );
+}
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+// Multi-tenant context (soft mode by default — see TENANT_ENFORCE in env).
+app.use((req, res, next) => {
+  void tenantMiddleware(req, res, next);
 });
 
 app.use("/auth", authRoutes);
@@ -132,9 +162,8 @@ app.use("/super-admin", (req, res, next) => {
 });
 
 if (process.env.NODE_ENV === "production") {
-  const frontendDist = path.join(__dirname, "../../Btbiz_frontend/dist");
-  app.use(express.static(frontendDist));
   app.get("*", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     res.sendFile(path.join(frontendDist, "index.html"));
   });
 } else {

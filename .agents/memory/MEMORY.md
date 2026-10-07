@@ -1,0 +1,1 @@
+- [Monorepo validation](monorepo-validation.md) — package installation and HTTP test clients can obscure nested dependency and tenant-host failures.
