@@ -3,6 +3,8 @@ import { Slide, ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import './styles/medigraph-toastify.css'
 import { PublicHome } from './pages/PublicHome'
+import { HowItWorks } from './pages/HowItWorks'
+import { DoctorsDirectory } from './pages/DoctorsDirectory'
 import { BookAppointment } from './pages/BookAppointment'
 import { PatientLogin } from './pages/PatientLogin'
 import { PatientProfile } from './pages/PatientProfile'
@@ -35,6 +37,14 @@ export const App = () => {
       <Route
         path="/"
         element={<PublicHome />}
+      />
+      <Route
+        path="/how-it-works"
+        element={<HowItWorks />}
+      />
+      <Route
+        path="/doctors"
+        element={<DoctorsDirectory />}
       />
       <Route
         path="/portal"

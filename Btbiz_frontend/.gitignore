@@ -13,6 +13,28 @@ dist
 dist-ssr
 *.local
 
+# Duplicate compressed archives of demo video
+public/videos/*.zip
+# Demo video is too large for GitHub (>100 MB)
+public/videos/*.mp4
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies & build
+node_modules
+dist
+dist-ssr
+*.local
+
 # Editor
 .vscode/*
 !.vscode/extensions.json

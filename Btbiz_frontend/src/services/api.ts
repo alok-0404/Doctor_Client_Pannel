@@ -107,6 +107,62 @@ export interface DoctorRegisterPayload {
   phone: string
 }
 
+export interface DepartmentOption {
+  id: string
+  label: string
+  description: string
+  keywords: string[]
+}
+
+/** Editable public-profile fields (landing page + WhatsApp bot). Empty string clears a field. */
+export interface DoctorProfileFields {
+  department?: string
+  specialization?: string
+  qualification?: string
+  experienceYears?: number | ''
+  previousHospital?: string
+  bio?: string
+}
+
+export interface PublicDoctor {
+  id: string
+  name: string
+  clinicAddress?: string
+  department: string
+  departmentLabel: string
+  specialization?: string
+  qualification?: string
+  experienceYears?: number
+  previousHospital?: string
+  bio?: string
+  availabilityStatus?: 'available' | 'unavailable' | 'busy'
+  isFeatured?: boolean
+  photoUrl?: string
+}
+
+export interface SuperAdminDoctorDetail extends PublicDoctor {
+  email: string
+  phone: string
+  status: boolean
+  approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED'
+  displayOrder: number | null
+  createdAt: string
+}
+
+export interface SuperAdminDoctorUpdatePayload extends DoctorProfileFields {
+  name?: string
+  email?: string
+  phone?: string
+  isFeatured?: boolean
+  displayOrder?: number | ''
+}
+
+function photoFormData(photo: Blob): FormData {
+  const form = new FormData()
+  form.append('photo', photo, 'photo.jpg')
+  return form
+}
+
 export interface StartForgotPasswordPayload {
   phone: string
 }
@@ -138,6 +194,14 @@ export interface SuperAdminListItem {
   status: boolean
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED'
   createdAt: string
+  /** Doctors list only */
+  department?: string
+  departmentLabel?: string
+  specialization?: string
+  qualification?: string
+  experienceYears?: number
+  isFeatured?: boolean
+  photoUrl?: string
 }
 
 export interface SuperAdminOverview {
@@ -241,8 +305,55 @@ export const authService = {
     }
   },
 
-  async register(payload: DoctorRegisterPayload): Promise<void> {
-    await api.post('/auth/doctor/register', payload)
+  async register(payload: DoctorRegisterPayload & DoctorProfileFields): Promise<{ accessToken?: string }> {
+    const res = await api.post('/auth/doctor/register', payload)
+    return { accessToken: (res.data as { accessToken?: string })?.accessToken }
+  },
+
+  /** Upload with an explicit token (e.g. right after registration, before the doctor can log in). */
+  async uploadDoctorPhotoWithToken(accessToken: string, photo: Blob): Promise<void> {
+    await axios.post(`${API_BASE_URL}/auth/doctor/photo`, photoFormData(photo), {
+      timeout: API_TIMEOUT_MS,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  },
+
+  async updateDoctorPublicProfile(payload: DoctorProfileFields): Promise<PublicDoctor | undefined> {
+    const res = await api.patch('/auth/doctor/public-profile', payload)
+    return (res.data as { publicProfile?: PublicDoctor }).publicProfile
+  },
+
+  async uploadDoctorPhoto(photo: Blob): Promise<PublicDoctor | undefined> {
+    const res = await api.post('/auth/doctor/photo', photoFormData(photo))
+    return (res.data as { publicProfile?: PublicDoctor }).publicProfile
+  },
+
+  async deleteDoctorPhoto(): Promise<PublicDoctor | undefined> {
+    const res = await api.delete('/auth/doctor/photo')
+    return (res.data as { publicProfile?: PublicDoctor }).publicProfile
+  },
+
+  async getSuperAdminDoctor(doctorId: string): Promise<SuperAdminDoctorDetail> {
+    const res = await api.get(`/super-admin/doctors/${doctorId}`)
+    return (res.data as { doctor: SuperAdminDoctorDetail }).doctor
+  },
+
+  async updateSuperAdminDoctorProfile(
+    doctorId: string,
+    payload: SuperAdminDoctorUpdatePayload
+  ): Promise<SuperAdminDoctorDetail> {
+    const res = await api.patch(`/super-admin/doctors/${doctorId}/profile`, payload)
+    return (res.data as { doctor: SuperAdminDoctorDetail }).doctor
+  },
+
+  async uploadSuperAdminDoctorPhoto(doctorId: string, photo: Blob): Promise<SuperAdminDoctorDetail> {
+    const res = await api.post(`/super-admin/doctors/${doctorId}/photo`, photoFormData(photo))
+    return (res.data as { doctor: SuperAdminDoctorDetail }).doctor
+  },
+
+  async deleteSuperAdminDoctorPhoto(doctorId: string): Promise<SuperAdminDoctorDetail> {
+    const res = await api.delete(`/super-admin/doctors/${doctorId}/photo`)
+    return (res.data as { doctor: SuperAdminDoctorDetail }).doctor
   },
 
   async registerLabManager(payload: DoctorRegisterPayload): Promise<DoctorLoginResponse> {
@@ -344,6 +455,7 @@ export const authService = {
       clinicAddress?: string
       dailyOnlineAppointmentLimit?: number | null
       dailyWalkInAppointmentLimit?: number | null
+      publicProfile?: PublicDoctor
     }
   }> {
     const res = await api.get('/auth/doctor/profile')
@@ -1556,6 +1668,18 @@ export interface FamilyMemberHistory {
 export interface DoctorAppointmentQuotaSnapshot {
   online: { limit: number | null; booked: number; remaining: number | null }
   walkIn: { limit: number | null; booked: number; remaining: number | null }
+}
+
+export const doctorDirectoryService = {
+  async listDepartments(): Promise<DepartmentOption[]> {
+    const res = await api.get('/public/departments')
+    return (res.data as { departments: DepartmentOption[] }).departments ?? []
+  },
+
+  async listDoctors(params: { department?: string; sort?: 'senior'; limit?: number } = {}): Promise<PublicDoctor[]> {
+    const res = await api.get('/public/doctors', { params })
+    return (res.data as { doctors: PublicDoctor[] }).doctors ?? []
+  },
 }
 
 export const publicAppointmentService = {

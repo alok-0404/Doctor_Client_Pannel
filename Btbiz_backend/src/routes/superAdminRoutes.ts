@@ -1,7 +1,21 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import mongoose from "mongoose";
 
 import { Doctor } from "../models/Doctor";
+import { DEPARTMENTS, getDepartmentLabel } from "../constants/departments";
+import { getPublicBaseUrl } from "../config/publicBaseUrl";
+import { doctorPhotoUpload } from "../middleware/doctorPhotoUpload";
+import {
+  DoctorProfileValidationError,
+  PUBLIC_DOCTOR_SELECT,
+  applyDoctorProfileUpdate,
+  buildDoctorProfileUpdate,
+  doctorPhotoUrl,
+  hasDoctorProfileChanges,
+  removeDoctorPhoto,
+  saveDoctorPhoto,
+  toPublicDoctor
+} from "../services/doctorProfileService";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Tenant } from "../models/Tenant";
 import { authenticateSuperAdmin } from "../middleware/superAdminMiddleware";
@@ -40,12 +54,15 @@ router.get("/intelligence/summary", async (req, res) => {
 });
 
 // GET /super-admin/overview
-router.get("/overview", async (_req, res) => {
+router.get("/overview", async (req, res) => {
   try {
     const users = await Doctor.find({})
-      .select("name email phone role status approvalStatus createdAt")
+      .select(
+        "name email phone role status approvalStatus createdAt department specialization qualification experienceYears isFeatured photoUpdatedAt"
+      )
       .sort({ createdAt: -1 })
       .lean();
+    const baseUrl = getPublicBaseUrl(req);
 
     const doctors = users.filter((u: any) => u.role === "DOCTOR");
     const assistants = users.filter((u: any) => u.role === "ASSISTANT");
@@ -76,7 +93,16 @@ router.get("/overview", async (_req, res) => {
         pendingDoctorApprovals: pendingDoctorApprovals.length
       },
       lists: {
-        doctors: doctors.map(toListItem),
+        doctors: doctors.map((u: any) => ({
+          ...toListItem(u),
+          department: u.department || "general",
+          departmentLabel: getDepartmentLabel(u.department),
+          specialization: u.specialization,
+          qualification: u.qualification,
+          experienceYears: typeof u.experienceYears === "number" ? u.experienceYears : undefined,
+          isFeatured: Boolean(u.isFeatured),
+          photoUrl: doctorPhotoUrl(u, baseUrl)
+        })),
         assistants: assistants.map(toListItem),
         labAssistants: labAssistants.map(toListItem),
         pharmacies: pharmacies.map(toListItem),
@@ -118,6 +144,162 @@ router.patch("/doctors/:doctorId/approval", async (req, res) => {
     // eslint-disable-next-line no-console
     console.error("super-admin/doctors approval PATCH error:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+function normalizeDoctorPhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  return null;
+}
+
+async function loadDoctorForAdmin(doctorId: string, baseUrl: string) {
+  const doctor = await Doctor.findOne({ _id: doctorId, role: "DOCTOR" })
+    .select(`email phone status approvalStatus createdAt ${PUBLIC_DOCTOR_SELECT}`)
+    .lean();
+  if (!doctor) return null;
+  return {
+    ...toPublicDoctor(doctor, baseUrl),
+    email: (doctor as any).email,
+    phone: (doctor as any).phone,
+    status: Boolean((doctor as any).status),
+    approvalStatus: (doctor as any).approvalStatus ?? "APPROVED",
+    displayOrder: typeof (doctor as any).displayOrder === "number" ? (doctor as any).displayOrder : null,
+    createdAt: (doctor as any).createdAt
+  };
+}
+
+function sendAdminDoctorError(res: Response, error: unknown, context: string): void {
+  if (error instanceof DoctorProfileValidationError) {
+    res.status(400).json({ message: error.message });
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`${context} error:`, error);
+  res.status(500).json({ message: "Internal server error" });
+}
+
+// GET /super-admin/departments
+router.get("/departments", (_req, res) => {
+  res.status(200).json({ departments: DEPARTMENTS });
+});
+
+// GET /super-admin/doctors/:doctorId — full editable doctor profile
+router.get("/doctors/:doctorId", async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    const doctor = await loadDoctorForAdmin(req.params.doctorId, getPublicBaseUrl(req));
+    if (!doctor) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+    res.status(200).json({ doctor });
+  } catch (error) {
+    sendAdminDoctorError(res, error, "super-admin/doctors GET");
+  }
+});
+
+// PATCH /super-admin/doctors/:doctorId/profile — name, email, phone + public profile fields
+router.patch("/doctors/:doctorId/profile", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    const existing = await Doctor.findOne({ _id: doctorId, role: "DOCTOR" }).select("_id").lean();
+    if (!existing) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const update = buildDoctorProfileUpdate(body, { allowAdminFields: true });
+
+    if (body.name !== undefined) {
+      const name = String(body.name ?? "").trim();
+      if (!name) {
+        res.status(400).json({ message: "Name cannot be empty" });
+        return;
+      }
+      update.$set.name = name;
+    }
+    if (body.email !== undefined) {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (!email || !email.includes("@")) {
+        res.status(400).json({ message: "Valid email is required" });
+        return;
+      }
+      const taken = await Doctor.findOne({ email, _id: { $ne: doctorId } }).select("_id").lean();
+      if (taken) {
+        res.status(409).json({ message: "Email already registered" });
+        return;
+      }
+      update.$set.email = email;
+    }
+    if (body.phone !== undefined) {
+      const phone = normalizeDoctorPhone(String(body.phone ?? ""));
+      if (!phone) {
+        res.status(400).json({ message: "Invalid phone format" });
+        return;
+      }
+      const taken = await Doctor.findOne({ phone, _id: { $ne: doctorId } }).select("_id").lean();
+      if (taken) {
+        res.status(409).json({ message: "Phone already registered" });
+        return;
+      }
+      update.$set.phone = phone;
+    }
+
+    if (!hasDoctorProfileChanges(update)) {
+      res.status(400).json({ message: "No changes provided" });
+      return;
+    }
+    await applyDoctorProfileUpdate(doctorId, update);
+    const doctor = await loadDoctorForAdmin(doctorId, getPublicBaseUrl(req));
+    res.status(200).json({ message: "Doctor profile updated", doctor });
+  } catch (error) {
+    sendAdminDoctorError(res, error, "super-admin/doctors profile PATCH");
+  }
+});
+
+// POST /super-admin/doctors/:doctorId/photo (multipart "photo") / DELETE to remove
+router.post("/doctors/:doctorId/photo", doctorPhotoUpload, async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    const existing = await Doctor.findOne({ _id: doctorId, role: "DOCTOR" }).select("_id").lean();
+    if (!existing) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+    await saveDoctorPhoto(doctorId, (req as any).file);
+    const doctor = await loadDoctorForAdmin(doctorId, getPublicBaseUrl(req));
+    res.status(200).json({ message: "Photo updated", doctor });
+  } catch (error) {
+    sendAdminDoctorError(res, error, "super-admin/doctors photo POST");
+  }
+});
+
+router.delete("/doctors/:doctorId/photo", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    await removeDoctorPhoto(doctorId);
+    const doctor = await loadDoctorForAdmin(doctorId, getPublicBaseUrl(req));
+    res.status(200).json({ message: "Photo removed", doctor });
+  } catch (error) {
+    sendAdminDoctorError(res, error, "super-admin/doctors photo DELETE");
   }
 });
 

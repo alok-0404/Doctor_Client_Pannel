@@ -23,6 +23,12 @@ import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
 import { parseBookingSource } from "../utils/bookingSource";
 import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
+import { DEFAULT_DEPARTMENT_ID, DEPARTMENTS, isValidDepartmentId } from "../constants/departments";
+import {
+  PUBLIC_DOCTOR_SELECT,
+  compareDoctorsBySeniority,
+  toPublicDoctor
+} from "../services/doctorProfileService";
 
 const router = Router();
 
@@ -318,24 +324,101 @@ function extractCoordsFromText(input?: string): { lat: number; lng: number } | n
 }
 
 // GET /public/doctors - list consultants for appointment dropdown (with clinic location for distance)
-router.get("/doctors", async (_req, res) => {
+// GET /public/departments — fixed department list with patient keywords
+router.get("/departments", (_req, res) => {
+  res.status(200).json({ departments: DEPARTMENTS });
+});
+
+// GET /public/doctors?department=<id>&sort=senior&limit=<n>
+// Only approved doctors. Doctors without a department count as General Medicine.
+router.get("/doctors", async (req, res) => {
   try {
-    const doctors = await Doctor.find({ role: "DOCTOR" })
-      .select("_id name clinicLatitude clinicLongitude clinicAddress")
-      .sort({ name: 1 })
-      .lean();
+    const department = String(req.query.department ?? "").trim();
+    if (department && !isValidDepartmentId(department)) {
+      res.status(400).json({ message: "Invalid department" });
+      return;
+    }
+    const filter: Record<string, unknown> = {
+      role: "DOCTOR",
+      approvalStatus: { $nin: ["PENDING", "REJECTED"] }
+    };
+    if (department === DEFAULT_DEPARTMENT_ID) {
+      filter.$or = [{ department: DEFAULT_DEPARTMENT_ID }, { department: { $exists: false } }, { department: "" }];
+    } else if (department) {
+      filter.department = department;
+    }
+
+    let doctors = await Doctor.find(filter).select(PUBLIC_DOCTOR_SELECT).sort({ name: 1 }).lean();
+    if (String(req.query.sort ?? "") === "senior") {
+      doctors = [...doctors].sort(compareDoctorsBySeniority);
+    }
+    const limit = Number(req.query.limit);
+    if (Number.isInteger(limit) && limit > 0) {
+      doctors = doctors.slice(0, limit);
+    }
+
+    const baseUrl = getPublicBaseUrl(req);
     res.status(200).json({
-      doctors: doctors.map((d) => ({
-        id: (d as any)._id.toString(),
-        name: (d as any).name,
-        clinicLatitude: (d as any).clinicLatitude,
-        clinicLongitude: (d as any).clinicLongitude,
-        clinicAddress: (d as any).clinicAddress
-      }))
+      doctors: doctors.map((d) => toPublicDoctor(d, baseUrl))
     });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /doctors error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /public/doctors/:doctorId/photo — profile photo bytes (cached; URL carries ?v=<photoUpdatedAt>)
+router.get("/doctors/:doctorId/photo", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    if (!mongoose.isValidObjectId(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    const doctor = await Doctor.findOne({ _id: doctorId, role: "DOCTOR" })
+      .select("+profilePhoto photoUpdatedAt")
+      .lean();
+    const photo = (doctor as any)?.profilePhoto;
+    if (!photo?.data) {
+      res.status(404).json({ message: "Photo not found" });
+      return;
+    }
+    const buffer: Buffer = Buffer.isBuffer(photo.data) ? photo.data : Buffer.from(photo.data.buffer ?? photo.data);
+    res.setHeader("Content-Type", photo.contentType || "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.status(200).send(buffer);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /doctors/:id/photo error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /public/doctors/:doctorId — single approved doctor's public profile
+router.get("/doctors/:doctorId", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    if (!mongoose.isValidObjectId(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    const doctor = await Doctor.findOne({
+      _id: doctorId,
+      role: "DOCTOR",
+      approvalStatus: { $nin: ["PENDING", "REJECTED"] }
+    })
+      .select(PUBLIC_DOCTOR_SELECT)
+      .lean();
+    if (!doctor) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+    res.status(200).json({ doctor: toPublicDoctor(doctor, getPublicBaseUrl(req)) });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /doctors/:id error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

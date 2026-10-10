@@ -33,6 +33,19 @@ export interface IDoctor extends Document {
   dailyOnlineAppointmentLimit?: number;
   /** Max walk-in / clinic-registered visits per calendar day (IST); unset or ≤0 = unlimited */
   dailyWalkInAppointmentLimit?: number;
+  /** Public profile (landing page, bot). Department id from constants/departments. */
+  department?: string;
+  specialization?: string;
+  qualification?: string;
+  experienceYears?: number;
+  previousHospital?: string;
+  bio?: string;
+  /** Shown first on the landing page when true; then displayOrder, then experience. */
+  isFeatured?: boolean;
+  displayOrder?: number;
+  /** Compressed profile photo; excluded from queries unless selected with +profilePhoto. */
+  profilePhoto?: { data: Buffer; contentType: string };
+  photoUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,7 +99,26 @@ const DoctorSchema = new Schema<IDoctor>(
       required: true
     },
     dailyOnlineAppointmentLimit: { type: Number, min: 0 },
-    dailyWalkInAppointmentLimit: { type: Number, min: 0 }
+    dailyWalkInAppointmentLimit: { type: Number, min: 0 },
+    department: { type: String, trim: true },
+    specialization: { type: String, trim: true },
+    qualification: { type: String, trim: true },
+    experienceYears: { type: Number, min: 0, max: 80 },
+    previousHospital: { type: String, trim: true },
+    bio: { type: String, trim: true },
+    isFeatured: { type: Boolean, default: false },
+    displayOrder: { type: Number },
+    profilePhoto: {
+      type: new Schema(
+        {
+          data: { type: Buffer, required: true },
+          contentType: { type: String, required: true }
+        },
+        { _id: false }
+      ),
+      select: false
+    },
+    photoUpdatedAt: { type: Date }
   },
   { timestamps: true }
 );

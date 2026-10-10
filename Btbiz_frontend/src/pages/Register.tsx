@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authService } from '../services/api'
+import { authService, type DoctorProfileFields } from '../services/api'
+import { DoctorProfileForm } from '../components/DoctorProfileForm'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -18,6 +19,8 @@ export const Register = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [profile, setProfile] = useState<DoctorProfileFields>({})
+  const [photo, setPhoto] = useState<{ blob: Blob; previewUrl: string } | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,12 +40,28 @@ export const Register = () => {
     try {
       setLoading(true)
       const normalizedPhone = `${countryCode}${phoneDigits}`
-      await authService.register({ name, email, password, phone: normalizedPhone })
-      setSuccess('Registration request submitted. Super Admin approval ke baad hi login hoga. Redirecting to login…')
+      const { accessToken } = await authService.register({
+        name,
+        email,
+        password,
+        phone: normalizedPhone,
+        ...profile,
+      })
+      let photoNote = ''
+      if (photo && accessToken) {
+        try {
+          await authService.uploadDoctorPhotoWithToken(accessToken, photo.blob)
+        } catch {
+          photoNote = ' Photo upload failed — you can add it later from your dashboard.'
+        }
+      }
+      setSuccess(
+        `Registration request submitted. Super Admin approval ke baad hi login hoga.${photoNote} Redirecting to login…`
+      )
 
       setTimeout(() => {
         navigate('/login')
-      }, 800)
+      }, photoNote ? 2500 : 800)
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(err)
@@ -105,6 +124,25 @@ export const Register = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 canTogglePassword
+              />
+              <p className="register-profile-heading">
+                Public profile <span>(optional — shown on the website and WhatsApp bot)</span>
+              </p>
+              <DoctorProfileForm
+                idPrefix="register"
+                value={profile}
+                onChange={setProfile}
+                displayName={name}
+                photoUrl={photo?.previewUrl}
+                disabled={loading}
+                onPhotoPicked={(blob, previewUrl) => {
+                  if (photo) URL.revokeObjectURL(photo.previewUrl)
+                  setPhoto({ blob, previewUrl })
+                }}
+                onPhotoRemove={() => {
+                  if (photo) URL.revokeObjectURL(photo.previewUrl)
+                  setPhoto(null)
+                }}
               />
             </div>
 

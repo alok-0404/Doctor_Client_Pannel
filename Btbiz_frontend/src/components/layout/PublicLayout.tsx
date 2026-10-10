@@ -10,10 +10,11 @@ const WHATSAPP_BOT_URL = `https://wa.me/${WHATSAPP_BOT_E164}`
 
 const navLinks = [
   { label: 'Home', to: '/' },
-  { label: 'About Us', to: '#about' },
-  { label: 'Services', to: '#services' },
-  { label: 'Doctors', to: '#doctors' },
-  { label: 'Contact', to: '#contact' },
+  { label: 'About Us', to: '/#about' },
+  { label: 'How it works', to: '/how-it-works' },
+  { label: 'Services', to: '/#services' },
+  { label: 'Doctors', to: '/#doctors' },
+  { label: 'Contact', to: '/#contact' },
   { label: 'Book appointment', to: '/book-appointment' },
 ]
 
@@ -100,6 +101,7 @@ export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }
           <div className="public-footer-links public-home-footer-links">
             <Link to="/">Home</Link>
             <Link to="/#about">About</Link>
+            <Link to="/how-it-works">How it works</Link>
             <Link to="/#services">Services</Link>
             <Link to="/book-appointment">Book appointment</Link>
             <Link to={myProfileTo}>{myProfileLabel}</Link>

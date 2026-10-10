@@ -15,6 +15,17 @@ import {
   startDoctorPasswordReset
 } from "../services/authService";
 import { trackEvent } from "../services/analyticsService";
+import {
+  DoctorProfileValidationError,
+  PUBLIC_DOCTOR_SELECT,
+  applyDoctorProfileUpdate,
+  buildDoctorProfileUpdate,
+  hasDoctorProfileChanges,
+  removeDoctorPhoto,
+  saveDoctorPhoto,
+  toPublicDoctor
+} from "../services/doctorProfileService";
+import { getPublicBaseUrl } from "../config/publicBaseUrl";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
@@ -32,7 +43,16 @@ export const doctorRegister = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    let profileUpdate;
+    try {
+      profileUpdate = buildDoctorProfileUpdate((req.body ?? {}) as Record<string, unknown>);
+    } catch (validationError) {
+      sendDoctorProfileError(res, validationError, "doctorRegister");
+      return;
+    }
+
     const authResponse = await registerDoctor({ name, email, password, phone });
+    await applyDoctorProfileUpdate(authResponse.doctor.id, profileUpdate);
 
     res.status(201).json({
       message: "Registration successful",
@@ -357,6 +377,7 @@ export const getDoctorProfile = async (
     clinicAddress?: string;
     dailyOnlineAppointmentLimit?: number | null;
     dailyWalkInAppointmentLimit?: number | null;
+    publicProfile?: ReturnType<typeof toPublicDoctor>;
   } = {
     id: req.doctor._id.toString(),
     name: req.doctor.name,
@@ -380,7 +401,7 @@ export const getDoctorProfile = async (
   } else if (req.doctor.role === "DOCTOR") {
     const doc = await Doctor.findById(req.doctor._id)
       .select(
-        "availabilityStatus unavailableReason unavailableUntil clinicLatitude clinicLongitude clinicAddress dailyOnlineAppointmentLimit dailyWalkInAppointmentLimit"
+        `availabilityStatus unavailableReason unavailableUntil clinicLatitude clinicLongitude clinicAddress dailyOnlineAppointmentLimit dailyWalkInAppointmentLimit ${PUBLIC_DOCTOR_SELECT}`
       )
       .lean();
     if (doc) {
@@ -398,12 +419,78 @@ export const getDoctorProfile = async (
         typeof (doc as any).dailyWalkInAppointmentLimit === "number"
           ? (doc as any).dailyWalkInAppointmentLimit
           : null;
+      payload.publicProfile = toPublicDoctor(doc, getPublicBaseUrl(req));
     }
   }
 
   res.status(200).json({
     doctor: payload
   });
+};
+
+function sendDoctorProfileError(res: Response, error: unknown, context: string): void {
+  if (error instanceof DoctorProfileValidationError) {
+    res.status(400).json({ message: error.message });
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`${context} error:`, error);
+  res.status(500).json({ message: "Internal server error" });
+}
+
+async function sendOwnPublicProfile(req: Request, res: Response, message: string): Promise<void> {
+  const doc = await Doctor.findById(req.doctor!._id).select(PUBLIC_DOCTOR_SELECT).lean();
+  res.status(200).json({
+    message,
+    publicProfile: doc ? toPublicDoctor(doc, getPublicBaseUrl(req)) : undefined
+  });
+}
+
+// PATCH /auth/doctor/public-profile — department, speciality, degree, experience, previous hospital, bio
+export const updateDoctorPublicProfile = async (req: Request, res: Response): Promise<void> => {
+  if (!req.doctor || req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can update their public profile" });
+    return;
+  }
+  try {
+    const update = buildDoctorProfileUpdate((req.body ?? {}) as Record<string, unknown>);
+    if (!hasDoctorProfileChanges(update)) {
+      res.status(400).json({ message: "No profile fields provided" });
+      return;
+    }
+    await applyDoctorProfileUpdate(req.doctor._id.toString(), update);
+    await sendOwnPublicProfile(req, res, "Profile updated");
+  } catch (error) {
+    sendDoctorProfileError(res, error, "updateDoctorPublicProfile");
+  }
+};
+
+// POST /auth/doctor/photo (multipart field "photo")
+export const uploadOwnDoctorPhoto = async (req: Request, res: Response): Promise<void> => {
+  if (!req.doctor || req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can upload a profile photo" });
+    return;
+  }
+  try {
+    await saveDoctorPhoto(req.doctor._id.toString(), (req as any).file);
+    await sendOwnPublicProfile(req, res, "Photo updated");
+  } catch (error) {
+    sendDoctorProfileError(res, error, "uploadOwnDoctorPhoto");
+  }
+};
+
+// DELETE /auth/doctor/photo
+export const deleteOwnDoctorPhoto = async (req: Request, res: Response): Promise<void> => {
+  if (!req.doctor || req.doctor.role !== "DOCTOR") {
+    res.status(403).json({ message: "Only doctors can remove their profile photo" });
+    return;
+  }
+  try {
+    await removeDoctorPhoto(req.doctor._id.toString());
+    await sendOwnPublicProfile(req, res, "Photo removed");
+  } catch (error) {
+    sendDoctorProfileError(res, error, "deleteOwnDoctorPhoto");
+  }
 };
 
 export const updateDoctorClinic = async (

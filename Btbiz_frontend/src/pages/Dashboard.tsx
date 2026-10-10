@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/Skeleton'
 import { StatCard } from '../components/ui/StatCard'
 import { TextField } from '../components/ui/TextField'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
+import { DoctorPublicProfileCard } from '../components/DoctorPublicProfileCard'
 import {
   authService,
   notificationService,
@@ -886,6 +887,7 @@ export const Dashboard = () => {
               </form>
             </Card>
           )}
+          {authStorage.getRole() === 'DOCTOR' && <DoctorPublicProfileCard doctorName={doctorName} />}
         </div>
           </div>
         </div>

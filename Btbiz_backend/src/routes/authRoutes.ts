@@ -18,8 +18,12 @@ import {
   listLabAssistants,
   updateDoctorAvailability,
   updateDoctorAppointmentLimits,
+  updateDoctorPublicProfile,
+  uploadOwnDoctorPhoto,
+  deleteOwnDoctorPhoto,
   superAdminLogin
 } from "../controllers/authController";
+import { doctorPhotoUpload } from "../middleware/doctorPhotoUpload";
 
 const router = Router();
 
@@ -93,6 +97,13 @@ router.patch("/doctor/appointment-limits", authenticateDoctor, updateDoctorAppoi
 
 // PATCH /auth/doctor/availability (doctor only – mark unavailable/busy)
 router.patch("/doctor/availability", authenticateDoctor, updateDoctorAvailability);
+
+// PATCH /auth/doctor/public-profile (doctor only – department, speciality, degree, experience, previous hospital, bio)
+router.patch("/doctor/public-profile", authenticateDoctor, updateDoctorPublicProfile);
+
+// POST /auth/doctor/photo (doctor only – multipart "photo") / DELETE to remove
+router.post("/doctor/photo", authenticateDoctor, doctorPhotoUpload, uploadOwnDoctorPhoto);
+router.delete("/doctor/photo", authenticateDoctor, deleteOwnDoctorPhoto);
 
 export default router;
 

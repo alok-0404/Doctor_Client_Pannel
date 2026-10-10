@@ -11,6 +11,8 @@ import { Skeleton } from '../components/ui/Skeleton'
 import { EmptyState } from '../components/ui/EmptyState'
 import { StatCard } from '../components/ui/StatCard'
 import { LabIcon, PharmacyIcon, UserIcon } from '../components/ui/icons'
+import { SuperAdminDoctorEditor } from '../components/SuperAdminDoctorEditor'
+import { doctorInitials } from '../utils/doctorDirectory'
 import { authStorage } from '../utils/authStorage'
 import {
   authService,
@@ -101,6 +103,9 @@ export const SuperAdminDashboard = () => {
   const [form, setForm] = useState(emptyPartnerForm)
   const [saving, setSaving] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
+  const [editingDoctorId, setEditingDoctorId] = useState<string | null>(null)
+  const [doctorQuery, setDoctorQuery] = useState('')
+  const closeDoctorEditor = useCallback(() => setEditingDoctorId(null), [])
 
   const loadAll = useCallback(async () => {
     try {
@@ -174,6 +179,26 @@ export const SuperAdminDashboard = () => {
       { key: 'diagnostics' as const, count: overview.summary.diagnostics },
     ]
   }, [overview, pharmacyTenants.length, labTenants.length])
+
+  const filteredDoctors = useMemo(() => {
+    const doctors = overview?.lists.doctors ?? []
+    const query = doctorQuery.trim().toLowerCase()
+    if (!query) return doctors
+    return doctors.filter((doctor) => {
+      const haystack = [
+        doctor.name,
+        doctor.email,
+        doctor.phone,
+        doctor.departmentLabel,
+        doctor.department,
+        doctor.specialization,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [overview, doctorQuery])
 
   const handleDeleteTenant = (tenant: SuperAdminTenant) => {
     confirmCenterToast('Are you sure you want to delete this tenant?', async () => {
@@ -326,7 +351,9 @@ export const SuperAdminDashboard = () => {
     const columns =
       openCard === 'doctors'
         ? [
+            { label: 'Photo' },
             { label: 'Name' },
+            { label: 'Department' },
             { label: 'Email' },
             { label: 'Phone' },
             { label: 'Status' },
@@ -348,7 +375,23 @@ export const SuperAdminDashboard = () => {
       >
         {items.map((i) => (
           <tr key={i.id}>
-            <td>{i.name}</td>
+            {openCard === 'doctors' && (
+              <td>
+                <span className="super-admin-doctor-thumb">
+                  {i.photoUrl ? <img src={i.photoUrl} alt="" /> : doctorInitials(i.name)}
+                </span>
+              </td>
+            )}
+            <td>
+              {i.name}
+              {openCard === 'doctors' && i.isFeatured && <span className="super-admin-featured-tag">Featured</span>}
+            </td>
+            {openCard === 'doctors' && (
+              <td>
+                {i.departmentLabel ?? 'General Medicine'}
+                {i.specialization && <div className="super-admin-td-sub">{i.specialization}</div>}
+              </td>
+            )}
             <td>{i.email}</td>
             <td>{i.phone}</td>
             <td className={i.status ? 'super-admin-td-status super-admin-td-status--active' : 'super-admin-td-status super-admin-td-status--inactive'}>
@@ -369,6 +412,13 @@ export const SuperAdminDashboard = () => {
                 </td>
                 <td className="super-admin-td-actions">
                   <div className="super-admin-row-actions">
+                    <button
+                      type="button"
+                      className="ui-button ui-button-edit ui-button-sm"
+                      onClick={() => setEditingDoctorId(i.id)}
+                    >
+                      Edit
+                    </button>
                     <button
                       type="button"
                       className="ui-button ui-button-sm"
@@ -534,7 +584,27 @@ export const SuperAdminDashboard = () => {
 
   const renderCardContent = () => {
     if (!overview || !openCard) return null
-    if (openCard === 'doctors') return renderSimpleList(overview.lists.doctors)
+    if (openCard === 'doctors') {
+      const total = overview.lists.doctors.length
+      return (
+        <>
+          {filteredDoctors.length === 0 ? (
+            <EmptyState
+              className="super-admin-empty-state"
+              icon={<UserIcon size={22} />}
+              title={total === 0 ? 'No records yet' : 'No matching doctors'}
+              message={
+                total === 0
+                  ? 'New staff accounts will appear in this list.'
+                  : `No doctor matches “${doctorQuery.trim()}”. Try another name or clear the search.`
+              }
+            />
+          ) : (
+            renderSimpleList(filteredDoctors)
+          )}
+        </>
+      )
+    }
     if (openCard === 'assistants') return renderSimpleList(overview.lists.assistants)
     if (openCard === 'labAssistants') return renderSimpleList(overview.lists.labAssistants)
     if (openCard === 'pharmacies') return renderTenantList(pharmacyTenants)
@@ -615,6 +685,7 @@ export const SuperAdminDashboard = () => {
                   disabled={loading}
                   onClick={() => {
                     setOpenCard(key)
+                    setDoctorQuery('')
                     resetFormState()
                   }}
                 />
@@ -630,6 +701,22 @@ export const SuperAdminDashboard = () => {
             <Card className="dashboard-overview-card super-admin-panel-card">
               <div className="super-admin-panel-header">
                 <p className="dashboard-kicker super-admin-panel-kicker">{cardTitleMap[openCard]}</p>
+                {openCard === 'doctors' && overview && (
+                  <div className="super-admin-doctor-search">
+                    <span className="super-admin-doctor-search-count">
+                      {doctorQuery.trim()
+                        ? `${filteredDoctors.length} of ${overview.lists.doctors.length}`
+                        : `${overview.lists.doctors.length} doctor${overview.lists.doctors.length === 1 ? '' : 's'}`}
+                    </span>
+                    <input
+                      type="search"
+                      value={doctorQuery}
+                      onChange={(e) => setDoctorQuery(e.target.value)}
+                      placeholder="Search doctors"
+                      aria-label="Search doctors"
+                    />
+                  </div>
+                )}
                 {canAddPartner && !showForm && (
                   <div className="super-admin-panel-actions">
                     <button
@@ -667,6 +754,13 @@ export const SuperAdminDashboard = () => {
           )}
         </section>
       </main>
+      {editingDoctorId && (
+        <SuperAdminDoctorEditor
+          doctorId={editingDoctorId}
+          onClose={closeDoctorEditor}
+          onSaved={() => void loadAll()}
+        />
+      )}
     </AppLayout>
   )
 }

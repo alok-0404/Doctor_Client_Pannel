@@ -1,8 +1,10 @@
-import type { FC } from 'react'
+import { useEffect, useState, type FC } from 'react'
 import { Link } from 'react-router-dom'
 import { PublicLayout } from '../components/layout/PublicLayout'
 import { FestivalCelebration } from '../components/FestivalCelebration'
+import { DoctorCard } from '../components/DoctorCard'
 import { patientStorage } from '../utils/patientStorage'
+import { doctorDirectoryService, type PublicDoctor } from '../services/api'
 import { Card } from '../components/ui/Card'
 import { StatCard } from '../components/ui/StatCard'
 import {
@@ -63,6 +65,22 @@ export const PublicHome = () => {
   const hasPortalLogin = patientStorage.hasVerifiedPortalLogin()
   const myProfileTo = hasPortalLogin ? '/patient-profile' : '/patient-login'
   const myProfileLabel = hasPortalLogin ? 'My profile' : 'Patient login'
+  const [featuredDoctors, setFeaturedDoctors] = useState<PublicDoctor[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    doctorDirectoryService
+      .listDoctors({ sort: 'senior', limit: 3 })
+      .then((doctors) => {
+        if (!cancelled) setFeaturedDoctors(doctors)
+      })
+      .catch(() => {
+        if (!cancelled) setFeaturedDoctors([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <PublicLayout className="public-home-landing">
@@ -231,7 +249,11 @@ export const PublicHome = () => {
               </p>
             </div>
             <div className="public-home-doctors-grid">
-              {DOCTORS.map((doctor) => (
+              {featuredDoctors === null
+                ? null
+                : featuredDoctors.length > 0
+                ? featuredDoctors.map((doctor) => <DoctorCard key={doctor.id} doctor={doctor} />)
+                : DOCTORS.map((doctor) => (
                 <Card key={doctor.name} className="public-home-doctor-card public-home-lift-card" elevated interactive>
                   <div className="public-home-doctor-media">
                     <span className="public-home-doctor-badge">{doctor.status}</span>
@@ -254,6 +276,11 @@ export const PublicHome = () => {
                   </div>
                 </Card>
               ))}
+            </div>
+            <div className="public-home-doctors-more">
+              <Link to="/doctors" className="public-cta-secondary">
+                View all doctors
+              </Link>
             </div>
           </div>
         </section>
