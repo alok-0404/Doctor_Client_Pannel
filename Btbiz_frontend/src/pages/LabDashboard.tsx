@@ -574,12 +574,22 @@ export const LabDashboard = () => {
     try {
       await orderService.updateTestRequest(r.id, { status: 'ACCEPTED' })
       const context = await openPatientAndPrefillFromTestRequest(r)
-      if (context?.patientId && context.visitId) {
+      let visitId = context?.visitId ?? null
+      let visitTests = context?.visitTests ?? []
+      if (context?.patientId && !visitId) {
+        const created = await patientService.createVisit(context.patientId, {
+          reason: 'Lab request',
+        })
+        visitId = created.id || null
+        visitTests = []
+        if (visitId) setSelectedVisitId(visitId)
+      }
+      if (context?.patientId && visitId) {
         const { addedCount, skippedCount } = await addRequestTestsToVisit(
           r,
           context.patientId,
-          context.visitId,
-          context.visitTests
+          visitId,
+          visitTests
         )
         if (addedCount > 0) {
           const refreshed = await patientService.getFullHistory(context.patientId)
@@ -743,23 +753,31 @@ export const LabDashboard = () => {
     }
   }
 
-  const getDateBucket = (isoDate: string): 'today' | 'yesterday' | 'older' => {
-    const requestDate = new Date(isoDate)
+  const getDateBucket = (request: LabOrderRequest): 'today' | 'yesterday' | 'tomorrow' | 'older' => {
+    const preferred = request.preferredDateTime ? new Date(request.preferredDateTime) : null
+    const created = new Date(request.createdAt)
+    const requestDate = preferred && !Number.isNaN(preferred.getTime()) ? preferred : created
     if (Number.isNaN(requestDate.getTime())) return 'older'
 
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const startOfYesterday = new Date(startOfToday)
     startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+    const startOfTomorrow = new Date(startOfToday)
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+    const startOfDayAfterTomorrow = new Date(startOfTomorrow)
+    startOfDayAfterTomorrow.setDate(startOfDayAfterTomorrow.getDate() + 1)
 
+    if (requestDate >= startOfTomorrow && requestDate < startOfDayAfterTomorrow) return 'tomorrow'
     if (requestDate >= startOfToday) return 'today'
     if (requestDate >= startOfYesterday) return 'yesterday'
     return 'older'
   }
 
-  const todayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'today')
-  const yesterdayRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'yesterday')
-  const olderRequests = incomingTestRequests.filter((request) => getDateBucket(request.createdAt) === 'older')
+  const todayRequests = incomingTestRequests.filter((request) => getDateBucket(request) === 'today')
+  const tomorrowRequests = incomingTestRequests.filter((request) => getDateBucket(request) === 'tomorrow')
+  const yesterdayRequests = incomingTestRequests.filter((request) => getDateBucket(request) === 'yesterday')
+  const olderRequests = incomingTestRequests.filter((request) => getDateBucket(request) === 'older')
 
   const renderRequestCard = (r: LabOrderRequest) => (
     <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
@@ -931,6 +949,7 @@ export const LabDashboard = () => {
                     }
                   >
                     {renderRequestSection('TODAY', todayRequests, 'No requests today.')}
+                    {renderRequestSection('TOMORROW', tomorrowRequests, 'No requests for tomorrow.')}
                     {renderRequestSection('YESTERDAY', yesterdayRequests, 'No requests yesterday.')}
                     {renderRequestSection('OLDER', olderRequests, 'No older requests.')}
                   </div>

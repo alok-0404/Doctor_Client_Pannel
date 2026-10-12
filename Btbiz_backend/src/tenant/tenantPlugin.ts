@@ -64,6 +64,10 @@ export function tenantPlugin(schema: Schema): void {
 
   for (const hook of QUERY_HOOKS) {
     schema.pre(hook, function (next) {
+      if (this.getOptions?.().skipTenant) {
+        next();
+        return;
+      }
       const tenantId = getOptionalTenantId();
       if (!tenantId) {
         if (isStrictPluginMode()) {

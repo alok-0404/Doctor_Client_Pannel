@@ -41,6 +41,12 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** Patient OTP login must not send a staff JWT. A leftover clinic token scopes the lookup to the wrong tenant and verify returns 400. */
+const publicApi = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT_MS,
+})
+
 /** API instance for patient portal – uses patient JWT */
 export const patientApi = axios.create({
   baseURL: API_BASE_URL,
@@ -890,20 +896,20 @@ export const pharmacyService = {
 
 export const patientAuthService = {
   async sendOtp(mobile: string): Promise<void> {
-    await api.post('/public/patient/send-otp', { mobile })
+    await publicApi.post('/public/patient/send-otp', { mobile })
   },
   async verify(mobile: string, otp: string): Promise<
     | { token: string; patient: { id: string; firstName: string; lastName?: string } }
     | { selectionToken: string; patients: Array<{ id: string; firstName: string; lastName?: string }> }
   > {
-    const res = await api.post('/public/patient/verify', { mobile, otp })
+    const res = await publicApi.post('/public/patient/verify', { mobile, otp })
     return res.data
   },
   async selectProfile(selectionToken: string, patientId: string): Promise<{
     token: string
     patient: { id: string; firstName: string; lastName?: string }
   }> {
-    const res = await api.post('/public/patient/select-profile', {
+    const res = await publicApi.post('/public/patient/select-profile', {
       selectionToken,
       patientId,
     })
@@ -1548,8 +1554,10 @@ export const patientService = {
       temperature?: number
       otherVitalsNotes?: string
     }
-  ): Promise<void> {
-    await api.post(`/patients/${patientId}/visit`, payload)
+  ): Promise<{ id: string }> {
+    const res = await api.post(`/patients/${patientId}/visit`, payload)
+    const visit = (res.data as { visit?: { id?: string } }).visit
+    return { id: String(visit?.id ?? '') }
   },
 
   async referExistingVisit(

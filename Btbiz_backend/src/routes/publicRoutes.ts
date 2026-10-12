@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import path from "path";
@@ -21,6 +21,7 @@ import { env } from "../config/env";
 import { getPublicBaseUrl } from "../config/publicBaseUrl";
 import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
+import { getDoctorSlotsForDate, isSlotStillAvailable } from "../utils/doctorSlots";
 import { parseBookingSource } from "../utils/bookingSource";
 import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 import { DEFAULT_DEPARTMENT_ID, DEPARTMENTS, isValidDepartmentId } from "../constants/departments";
@@ -446,6 +447,58 @@ router.get("/doctors/:doctorId/appointment-quota", async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+// GET /public/doctors/:doctorId/slots?date=YYYY-MM-DD
+// OPD slots for that IST day (hours from OPD_SESSIONS / OPD_SLOT_MINUTES env).
+router.get("/doctors/:doctorId/slots", async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const dateStr = (req.query.date as string | undefined)?.trim();
+    if (!doctorId || !mongoose.isValidObjectId(doctorId)) {
+      res.status(400).json({ message: "Invalid doctor id" });
+      return;
+    }
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      res.status(400).json({ message: "Query ?date=YYYY-MM-DD is required" });
+      return;
+    }
+    const result = await getDoctorSlotsForDate(doctorId, dateStr);
+    if (!result) {
+      res.status(404).json({ message: "Doctor not found" });
+      return;
+    }
+    res.status(200).json(result);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /doctors/:id/slots error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+/**
+ * When the client picked a listed slot (`enforceSlot: true`), reject it if it was taken
+ * in the meantime. Returns true when the response was already sent.
+ */
+async function rejectIfSlotTaken(
+  res: Response,
+  body: { enforceSlot?: boolean; consultantId?: string; appointmentDate?: string; preferredSlot?: string }
+): Promise<boolean> {
+  if (body.enforceSlot !== true || !body.consultantId || !body.preferredSlot || !body.appointmentDate) {
+    return false;
+  }
+  if (!mongoose.isValidObjectId(body.consultantId)) return false;
+  const ok = await isSlotStillAvailable(
+    body.consultantId,
+    istCalendarDateStr(body.appointmentDate),
+    body.preferredSlot
+  );
+  if (ok) return false;
+  res.status(409).json({
+    code: "SLOT_UNAVAILABLE",
+    message: "This time slot is no longer available. Please choose another slot."
+  });
+  return true;
+}
 
 // POST /public/family/login-or-create
 // Body: { mobileNumber: string }
@@ -1315,12 +1368,15 @@ router.post("/appointments/new", async (req, res) => {
       patientLatitude?: number;
       patientLongitude?: number;
       source?: string;
+      reason?: string;
+      enforceSlot?: boolean;
     };
 
     if (!body.consultantId || !body.patientName || !body.mobileNumber || !body.gender || !body.appointmentDate) {
       res.status(400).json({ message: "Missing required fields for new patient appointment" });
       return;
     }
+    if (await rejectIfSlotTaken(res, body)) return;
 
     const derivedDob = body.dateOfBirth ? new Date(body.dateOfBirth) : deriveDobFromAge(body.age);
     const safeDob = derivedDob && !Number.isNaN(derivedDob.getTime()) ? derivedDob : undefined;
@@ -1352,6 +1408,7 @@ router.post("/appointments/new", async (req, res) => {
     const locationFromAddress = extractCoordsFromText(body.address);
     const notesParts = [`City: ${body.city || ""}`];
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
+    if (body.reason?.trim()) notesParts.push(`Reason: ${body.reason.trim()}`);
 
     const visit = await createVisitService({
       patientId: (patient as any)._id.toString(),
@@ -1374,15 +1431,16 @@ router.post("/appointments/new", async (req, res) => {
     console.error("public /appointments/new error:", error);
     if (error instanceof Error) {
       if (error.message === "DOCTOR_NOT_FOUND" || error.message === "INVALID_DOCTOR_ID") {
-        res.status(400).json({ message: "Selected consultant is invalid. Please try again." });
+        res.status(400).json({ code: "INVALID_DOCTOR", message: "Selected consultant is invalid. Please try again." });
         return;
       }
       if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
-        res.status(400).json({ message: "Could not create or find patient. Please try again." });
+        res.status(400).json({ code: "PATIENT_NOT_FOUND", message: "Could not create or find patient. Please try again." });
         return;
       }
       if (error.message === "DAILY_ONLINE_QUOTA_FULL") {
         res.status(409).json({
+          code: "QUOTA_FULL",
           message:
             "Online booking slots for this doctor on this date are full. Please choose another date or contact the clinic."
         });
@@ -1627,10 +1685,12 @@ router.post("/appointments/family", async (req, res) => {
       patientLatitude?: number;
       patientLongitude?: number;
       source?: string;
+      reason?: string;
+      enforceSlot?: boolean;
     };
 
     if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
-      res.status(400).json({ message: "Valid patientId is required" });
+      res.status(400).json({ code: "PATIENT_NOT_FOUND", message: "Valid patientId is required" });
       return;
     }
     if (!body.consultantId || !body.appointmentDate) {
@@ -1640,9 +1700,10 @@ router.post("/appointments/family", async (req, res) => {
 
     const patient = await Patient.findById(body.patientId);
     if (!patient) {
-      res.status(404).json({ message: "Patient not found" });
+      res.status(404).json({ code: "PATIENT_NOT_FOUND", message: "Patient not found" });
       return;
     }
+    if (await rejectIfSlotTaken(res, body)) return;
 
     const updatePayload: any = {};
     const derivedDob = body.dateOfBirth ? new Date(body.dateOfBirth) : deriveDobFromAge(body.age);
@@ -1669,6 +1730,7 @@ router.post("/appointments/family", async (req, res) => {
     const notesParts: string[] = [];
     if (body.opdNumber) notesParts.push(`OPD No: ${body.opdNumber}`);
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
+    if (body.reason?.trim()) notesParts.push(`Reason: ${body.reason.trim()}`);
 
     const visit = await createVisitService({
       patientId: (patient as any)._id.toString(),
@@ -1693,15 +1755,16 @@ router.post("/appointments/family", async (req, res) => {
     console.error("public /appointments/family error:", error);
     if (error instanceof Error) {
       if (error.message === "DOCTOR_NOT_FOUND" || error.message === "INVALID_DOCTOR_ID") {
-        res.status(400).json({ message: "Selected consultant is invalid. Please try again." });
+        res.status(400).json({ code: "INVALID_DOCTOR", message: "Selected consultant is invalid. Please try again." });
         return;
       }
       if (error.message === "PATIENT_NOT_FOUND" || error.message === "INVALID_PATIENT_ID") {
-        res.status(404).json({ message: "Patient not found. Please check the selected member." });
+        res.status(404).json({ code: "PATIENT_NOT_FOUND", message: "Patient not found. Please check the selected member." });
         return;
       }
       if (error.message === "DAILY_ONLINE_QUOTA_FULL") {
         res.status(409).json({
+          code: "QUOTA_FULL",
           message:
             "Online booking slots for this doctor on this date are full. Please choose another date or contact the clinic."
         });

@@ -10,6 +10,7 @@ import { env } from "../config/env";
 import { PatientDocument } from "../models/PatientDocument";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
+import { FamilyMember } from "../models/FamilyMember";
 import { Patient } from "../models/Patient";
 import { Doctor } from "../models/Doctor";
 import { authenticatePatient } from "../middleware/authMiddleware";
@@ -657,13 +658,23 @@ router.post(
         res.status(400).json({ message: "Valid patientId is required" });
         return;
       }
-      const patient = await Patient.findById(patientId).select("_id").lean();
+      let patient = await Patient.findById(patientId).setOptions({ skipTenant: true }).select("_id").lean();
+      if (!patient) {
+        const member = await FamilyMember.findById(patientId)
+          .setOptions({ skipTenant: true })
+          .select("patient")
+          .lean();
+        const linkedPatientId = (member as { patient?: { toString(): string } } | null)?.patient?.toString();
+        if (linkedPatientId && mongoose.isValidObjectId(linkedPatientId)) {
+          patient = await Patient.findById(linkedPatientId).setOptions({ skipTenant: true }).select("_id").lean();
+        }
+      }
       if (!patient) {
         res.status(404).json({ message: "Patient not found for provided patientId/familyMemberId" });
         return;
       }
       const fromArray = Array.isArray(body.tests) ? body.tests : [];
-      const single = body.testName ? [{ testName: body.testName, notes: body.notes }] : [];
+      const single = fromArray.length === 0 && body.testName ? [{ testName: body.testName, notes: body.notes }] : [];
       const rows = [...fromArray, ...single]
         .map((t) => ({ testName: String(t.testName ?? "").trim(), notes: t.notes?.trim?.() || undefined }))
         .filter((t) => t.testName.length > 0);

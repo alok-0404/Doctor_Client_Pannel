@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
+import { FamilyMember } from "../models/FamilyMember";
 import { Patient } from "../models/Patient";
 import { PatientOtpSession } from "../models/PatientOtpSession";
 import { findPatientsByMobile } from "./patientService";
@@ -8,7 +9,7 @@ import { sendOtpToWhatsapp } from "./whatsappService";
 import { env } from "../config/env";
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const SELECTION_TOKEN_EXPIRY = "5m";
+const SELECTION_TOKEN_EXPIRY = "30m";
 
 function normalizeMobile(raw: string): string {
   const digits = raw.replace(/\D/g, "");
@@ -111,19 +112,37 @@ export async function selectPatientProfile(
   } catch {
     throw new Error("INVALID_OR_EXPIRED_SELECTION");
   }
-  if (decoded.type !== "patient_select" || !decoded.patientIds?.includes(patientId)) {
+  if (decoded.type !== "patient_select" || !Array.isArray(decoded.patientIds)) {
     throw new Error("INVALID_SELECTION");
   }
 
-  const patient = await Patient.findById(patientId)
+  let resolvedPatientId = patientId;
+  let patient = await Patient.findById(resolvedPatientId)
+    .setOptions({ skipTenant: true })
     .select("_id firstName lastName")
     .lean();
   if (!patient) {
-    throw new Error("PATIENT_NOT_FOUND");
+    const member = await FamilyMember.findById(resolvedPatientId)
+      .setOptions({ skipTenant: true })
+      .select("patient")
+      .lean();
+    const linkedId = (member as { patient?: { toString(): string } } | null)?.patient?.toString();
+    if (linkedId) {
+      resolvedPatientId = linkedId;
+      patient = await Patient.findById(resolvedPatientId)
+        .setOptions({ skipTenant: true })
+        .select("_id firstName lastName")
+        .lean();
+    }
+  }
+  const allowed =
+    decoded.patientIds.includes(patientId) || decoded.patientIds.includes(resolvedPatientId);
+  if (!patient || !allowed) {
+    throw new Error(patient ? "INVALID_SELECTION" : "PATIENT_NOT_FOUND");
   }
 
   const token = jwt.sign(
-    { patientId, type: "patient" },
+    { patientId: resolvedPatientId, type: "patient" },
     env.jwt.secret,
     { expiresIn: env.jwt.expiresIn } as jwt.SignOptions
   );

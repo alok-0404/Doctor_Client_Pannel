@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { authenticateDoctor } from "../middleware/authMiddleware";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
+import { Patient } from "../models/Patient";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 import { Visit } from "../models/Visit";
@@ -29,6 +30,22 @@ function aggregateGroupedPaymentStatus(statuses: Array<"PENDING" | "PAID">): "PE
 
 function normalizeLabTestName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function labInboxProviderIds(doctor: {
+  _id: mongoose.Types.ObjectId;
+  role?: string;
+}): Promise<mongoose.Types.ObjectId[]> {
+  const ids: mongoose.Types.ObjectId[] = [doctor._id];
+  if (doctor.role === "LAB_ASSISTANT") {
+    const assistant = await Doctor.findById(doctor._id)
+      .select("createdByDoctorId")
+      .setOptions({ skipTenant: true })
+      .lean();
+    const parent = (assistant as { createdByDoctorId?: mongoose.Types.ObjectId } | null)?.createdByDoctorId;
+    if (parent) ids.push(parent);
+  }
+  return ids;
 }
 
 function labTestNamesMatch(a: string, b: string): boolean {
@@ -291,38 +308,50 @@ router.get("/test-requests", async (req, res) => {
       return;
     }
 
-    const providerIds = [req.doctor._id];
-    if (req.doctor.role === "LAB_ASSISTANT") {
-      const assistant = await Doctor.findById(req.doctor._id)
-        .select("createdByDoctorId")
-        .lean();
-      const parentLabId = (assistant as any)?.createdByDoctorId?.toString?.();
-      if (parentLabId) providerIds.push(parentLabId);
-    }
+    const providerIds = await labInboxProviderIds(req.doctor);
 
     const requests = await PatientTestRequest.find({
       $or: [
         { preferredProvider: { $exists: false } },
         { preferredProvider: null },
         { preferredProvider: { $in: providerIds } },
+        // Patient profile orders stay visible until a lab accepts them,
+        // even when the patient picked a different lab from the list.
+        { status: "PENDING", source: "patient" },
       ],
     })
       .sort({ createdAt: -1 })
-      .populate("patient", "firstName lastName mobileNumber")
       .populate("preferredProvider", "name")
       .lean();
+
+    const patientIds = [
+      ...new Set(
+        (requests as Array<{ patient?: mongoose.Types.ObjectId }>)
+          .map((r) => (r.patient ? String(r.patient) : ""))
+          .filter(Boolean)
+      ),
+    ];
+    const patientRows =
+      patientIds.length > 0
+        ? await Patient.find({ _id: { $in: patientIds } })
+            .setOptions({ skipTenant: true })
+            .select("firstName lastName mobileNumber")
+            .lean()
+        : [];
+    const patientById = new Map(patientRows.map((p) => [String(p._id), p]));
 
     const grouped = new Map<string, any>();
     for (const r of requests as any[]) {
       const key = (r.requestGroupId && String(r.requestGroupId).trim()) || r._id.toString();
       const testName = String(r.testName || "").trim();
+      const patient = patientById.get(String(r.patient ?? ""));
       if (!grouped.has(key)) {
         grouped.set(key, {
           id: key,
           requestGroupId: r.requestGroupId ? String(r.requestGroupId) : undefined,
-          patientId: r.patient?._id?.toString(),
-          patientName: [r.patient?.firstName, r.patient?.lastName].filter(Boolean).join(" ") || "Patient",
-          patientMobile: r.patient?.mobileNumber ?? "",
+          patientId: patient?._id?.toString() ?? (r.patient ? String(r.patient) : undefined),
+          patientName: [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient",
+          patientMobile: patient?.mobileNumber ?? "",
           testNames: testName ? [testName] : [],
           notes: r.notes,
           serviceType: r.serviceType,
@@ -384,6 +413,10 @@ router.patch("/test-requests/:requestId", async (req, res) => {
     if (body.paymentStatus) update.paymentStatus = body.paymentStatus;
     if (typeof body.expectedFulfillmentMinutes === "number" && body.expectedFulfillmentMinutes > 0) {
       update.expectedFulfillmentMinutes = Math.round(body.expectedFulfillmentMinutes);
+    }
+    if (body.status === "ACCEPTED") {
+      const providerIds = await labInboxProviderIds(req.doctor);
+      update.preferredProvider = providerIds[providerIds.length - 1];
     }
     if (body.status === "COMPLETED") {
       update.fulfilledAt = new Date();

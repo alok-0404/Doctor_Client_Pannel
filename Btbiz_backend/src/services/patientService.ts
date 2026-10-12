@@ -8,6 +8,7 @@ import { Visit } from "../models/Visit";
 import { Prescription } from "../models/Prescription";
 import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
+import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
 import type { AppointmentChannel, BookingSource } from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
@@ -32,15 +33,89 @@ const getMobileCandidates = (mobile: string): string[] => {
 };
 
 export const findPatientByMobile = async (mobile: string) => {
-  const candidates = getMobileCandidates(mobile);
-  return Patient.findOne({ mobileNumber: { $in: candidates } });
+  const patients = await findPatientsByMobile(mobile);
+  return patients[0] ?? null;
 };
 
-/** Returns all patients with the given mobile (for family scenario). */
-export const findPatientsByMobile = async (mobile: string) => {
+function splitFullName(fullName: string): { firstName: string; lastName?: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "Patient" };
+  return {
+    firstName: parts[0],
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : undefined,
+  };
+}
+
+/**
+ * Family login is stored on FamilyAccount.phone, while OTP login looks up Patient.mobileNumber.
+ * If the Patient row was removed but visits/family links remain, recreate it with the same id
+ * so profile selection and history keep working.
+ */
+async function restoreMissingFamilyPatients(mobile: string): Promise<void> {
   const candidates = getMobileCandidates(mobile);
-  return Patient.find({ mobileNumber: { $in: candidates } })
-    .select("_id firstName lastName mobileNumber")
+  if (candidates.length === 0) return;
+
+  const accounts = await FamilyAccount.collection
+    .find({ phone: { $in: candidates } })
+    .toArray();
+  if (accounts.length === 0) return;
+
+  for (const account of accounts) {
+    const members = await FamilyMember.collection
+      .find({ account: account._id, isDeleted: { $ne: true } })
+      .toArray();
+    const phone =
+      typeof account.phone === "string" && account.phone.trim()
+        ? account.phone.trim()
+        : candidates.find((c) => c.startsWith("+")) ?? candidates[0];
+
+    for (const member of members) {
+      if (!member.patient) continue;
+      const existing = await Patient.collection.findOne({ _id: member.patient });
+      if (existing) continue;
+
+      const name = splitFullName(String(member.fullName ?? "Patient"));
+      await Patient.collection.insertOne({
+        _id: member.patient,
+        firstName: name.firstName,
+        lastName: name.lastName,
+        mobileNumber: phone,
+        gender: member.gender,
+        dateOfBirth: member.dateOfBirth,
+        tenantId: member.tenantId || account.tenantId,
+        createdAt: member.createdAt ?? new Date(),
+        updatedAt: new Date(),
+      });
+    }
+  }
+}
+
+/** Returns all patients with the given mobile, including family profiles on that number. */
+export const findPatientsByMobile = async (mobile: string) => {
+  await restoreMissingFamilyPatients(mobile);
+  const candidates = getMobileCandidates(mobile);
+  const accounts = await FamilyAccount.collection
+    .find({ phone: { $in: candidates } })
+    .project({ _id: 1 })
+    .toArray();
+  const accountIds = accounts.map((account) => account._id);
+  const members =
+    accountIds.length > 0
+      ? await FamilyMember.collection
+          .find({ account: { $in: accountIds }, isDeleted: { $ne: true } })
+          .project({ patient: 1 })
+          .toArray()
+      : [];
+  const linkedPatientIds = members.map((member) => member.patient).filter(Boolean);
+
+  const orFilters: Record<string, unknown>[] = [];
+  if (candidates.length > 0) orFilters.push({ mobileNumber: { $in: candidates } });
+  if (linkedPatientIds.length > 0) orFilters.push({ _id: { $in: linkedPatientIds } });
+  if (orFilters.length === 0) return [];
+
+  return Patient.find({ $or: orFilters })
+    .setOptions({ skipTenant: true })
+    .select("_id firstName lastName mobileNumber gender dateOfBirth address")
     .sort({ createdAt: 1 })
     .lean();
 };
@@ -117,8 +192,8 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     throw new Error("INVALID_DOCTOR_ID");
   }
   const [patient, doctor] = await Promise.all([
-    Patient.findById(payload.patientId),
-    Doctor.findById(payload.doctorId)
+    Patient.findById(payload.patientId).setOptions({ skipTenant: true }),
+    Doctor.findById(payload.doctorId).setOptions({ skipTenant: true })
   ]);
   if (!patient) throw new Error("PATIENT_NOT_FOUND");
   if (!doctor) throw new Error("DOCTOR_NOT_FOUND");
@@ -204,12 +279,13 @@ export const getFullPatientHistory = async (patientId: string) => {
     throw new Error("INVALID_PATIENT_ID");
   }
 
-  const patient = await Patient.findById(patientId);
+  const patient = await Patient.findById(patientId).setOptions({ skipTenant: true });
   if (!patient) {
     throw new Error("PATIENT_NOT_FOUND");
   }
   if (!(patient as any).dateOfBirth) {
     const member = await FamilyMember.findOne({ patient: patient._id, isDeleted: { $ne: true } })
+      .setOptions({ skipTenant: true })
       .select("dateOfBirth")
       .lean();
     if ((member as any)?.dateOfBirth) {
@@ -218,6 +294,7 @@ export const getFullPatientHistory = async (patientId: string) => {
   }
 
   const visits = await Visit.find({ patient: patient._id })
+    .setOptions({ skipTenant: true })
     .sort({ visitDate: -1 })
     .populate("doctor", "_id name email")
     .lean();
@@ -226,9 +303,10 @@ export const getFullPatientHistory = async (patientId: string) => {
 
   const [prescriptions, diagnosticTests] = await Promise.all([
     Prescription.find({ visit: { $in: visitIds } })
+      .setOptions({ skipTenant: true })
       .populate("medicines")
       .lean(),
-    DiagnosticTest.find({ visit: { $in: visitIds } }).lean()
+    DiagnosticTest.find({ visit: { $in: visitIds } }).setOptions({ skipTenant: true }).lean()
   ]);
 
   const prescriptionsByVisit = new Map<string, unknown[]>();
@@ -264,7 +342,10 @@ export const getFullPatientHistory = async (patientId: string) => {
 
   const [documents, pharmacyDispensations, medicineRequests, testRequests] =
     await Promise.all([
-      PatientDocument.find({ patient: patient._id }).sort({ createdAt: -1 }).lean(),
+      PatientDocument.find({ patient: patient._id })
+        .setOptions({ skipTenant: true })
+        .sort({ createdAt: -1 })
+        .lean(),
       PharmacyDispensation.find({ patient: patient._id })
         .sort({ createdAt: -1 })
         .populate("dispensedBy", "name")
@@ -394,7 +475,7 @@ export const addDiagnosticTestsToVisit = async (
     throw new Error("TEST_NAMES_REQUIRED");
   }
 
-  const visit = await Visit.findById(visitId).lean();
+  const visit = await Visit.findById(visitId).setOptions({ skipTenant: true }).lean();
   if (!visit) {
     throw new Error("VISIT_NOT_FOUND");
   }
@@ -412,7 +493,10 @@ export const addDiagnosticTestsToVisit = async (
     throw new Error("TEST_NAMES_REQUIRED");
   }
 
-  const existing = await DiagnosticTest.find({ visit: visitId }).select("testName").lean();
+  const existing = await DiagnosticTest.find({ visit: visitId })
+    .setOptions({ skipTenant: true })
+    .select("testName")
+    .lean();
   const existingNormalized = new Set(
     existing.map((e: { testName?: string }) => normalizeDiagnosticTestName(String(e.testName ?? "")))
   );
@@ -453,7 +537,7 @@ export const updateDiagnosticTestPricesOnVisit = async (
     throw new Error("TEST_PRICES_REQUIRED");
   }
 
-  const visit = await Visit.findById(visitId).lean();
+  const visit = await Visit.findById(visitId).setOptions({ skipTenant: true }).lean();
   if (!visit) {
     throw new Error("VISIT_NOT_FOUND");
   }

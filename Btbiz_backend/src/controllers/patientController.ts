@@ -225,7 +225,9 @@ export const createVisit = async (
     };
 
     let doctorId = body.doctorId;
-    if (req.doctor?.role === "ASSISTANT") {
+    if (req.doctor?.role === "LAB_ASSISTANT" || req.doctor?.role === "LAB_MANAGER") {
+      doctorId = req.doctor._id.toString();
+    } else if (req.doctor?.role === "ASSISTANT") {
       const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
       if (!assistant?.createdByDoctorId) {
         res.status(400).json({ message: "Assistant is not linked to a doctor. Cannot refer patient." });
@@ -1093,9 +1095,9 @@ export const addDiagnosticTests = async (
 ): Promise<void> => {
   try {
     const role = req.doctor?.role;
-    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT") {
+    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT" && role !== "LAB_MANAGER") {
       res.status(403).json({
-        message: "Only doctor or lab assistant can add diagnostic tests"
+        message: "Only doctor or lab staff can add diagnostic tests"
       });
       return;
     }
@@ -1174,9 +1176,9 @@ export const updateDiagnosticTestPrices = async (
 ): Promise<void> => {
   try {
     const role = req.doctor?.role;
-    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT") {
+    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT" && role !== "LAB_MANAGER") {
       res.status(403).json({
-        message: "Only doctor or lab assistant can update diagnostic test prices"
+        message: "Only doctor or lab staff can update diagnostic test prices"
       });
       return;
     }
@@ -1250,9 +1252,9 @@ export const uploadDiagnosticTestReport = async (
 ): Promise<void> => {
   try {
     const role = req.doctor?.role;
-    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT") {
+    if (role !== "DOCTOR" && role !== "LAB_ASSISTANT" && role !== "LAB_MANAGER") {
       res.status(403).json({
-        message: "Only doctor or lab assistant can upload diagnostic test reports"
+        message: "Only doctor or lab staff can upload diagnostic test reports"
       });
       return;
     }
