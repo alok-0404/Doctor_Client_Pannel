@@ -1,6 +1,6 @@
 import { useEffect, useState, type FC } from 'react'
 import { Link } from 'react-router-dom'
-import { PublicLayout } from '../components/layout/PublicLayout'
+import { PublicLayout, WHATSAPP_BOT_URL } from '../components/layout/PublicLayout'
 import { FestivalCelebration } from '../components/FestivalCelebration'
 import { DoctorCard } from '../components/DoctorCard'
 import { patientStorage } from '../utils/patientStorage'
@@ -53,6 +53,50 @@ const DOCTORS = [
   { name: 'Dr. Basant Tomar', specialty: 'General Physician', experience: '15+ years', status: 'Available' },
   { name: 'Dr. Priya Sharma', specialty: 'Internal Medicine', experience: '12+ years', status: 'Available' },
   { name: 'Dr. Arjun Mehta', specialty: 'Family Medicine', experience: '10+ years', status: 'In clinic' },
+]
+
+const BOT_MENU = [
+  'Book Appointment',
+  'My Profile & History',
+  'My Family Members',
+  'Request Lab Test',
+  'Order Medicines',
+  'Upload Prescription',
+  'Receipts & Reports',
+]
+
+const BOT_STEPS = [
+  {
+    title: 'Type hi',
+    text: 'The menu opens with all seven clinic services.',
+  },
+  {
+    title: 'Choose who and what',
+    text: 'Book for yourself or a family member — appointment, lab, or medicine.',
+  },
+  {
+    title: 'Confirm in chat',
+    text: 'Pick the date, slot, home collection, or delivery before you send.',
+  },
+  {
+    title: 'Clinic sees it live',
+    text: 'Doctor, lab, and pharmacy get the request. Reports return to your profile.',
+  },
+]
+
+const BOT_USPS = [
+  {
+    title: 'No app, only WhatsApp',
+    text: 'Patients already use WhatsApp. Type hi and the clinic is there.',
+  },
+  {
+    title: 'One mobile, whole family',
+    text: 'Switch members on the same number and book for anyone in the family.',
+  },
+  {
+    title: 'Same records as the website',
+    text: 'A chat booking shows on the doctor dashboard. Reports and receipts stay on the patient profile.',
+  },
 ]
 
 const TRUST_POINTS = [
@@ -215,6 +259,69 @@ export const PublicHome = () => {
                       Learn more <span aria-hidden="true">→</span>
                     </Link>
                   </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="whatsapp" className="public-home-section public-home-bot" aria-labelledby="whatsapp-bot-title">
+          <div className="public-home-container">
+            <div className="public-home-bot-intro">
+              <div className="public-home-bot-copy">
+                <span className="public-home-section-eyebrow">WhatsApp assistant</span>
+                <h2 id="whatsapp-bot-title" className="public-section-title public-home-section-title">
+                  The whole clinic, in one chat
+                </h2>
+                <p className="public-home-bot-lead">
+                  Type hi. Seven services. No app to download — booking, family, lab, and pharmacy stay on the same record as this website.
+                </p>
+                <a
+                  href={WHATSAPP_BOT_URL}
+                  className="public-cta public-home-cta-whatsapp"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Chat on WhatsApp
+                </a>
+              </div>
+
+              <div className="public-home-bot-phone" role="region" aria-label="Sample WhatsApp menu">
+                <div className="public-home-bot-phone-top">
+                  <span className="public-home-bot-phone-dot" aria-hidden="true" />
+                  MediGraph
+                </div>
+                <p className="public-home-bot-bubble public-home-bot-bubble--user">hi</p>
+                <div className="public-home-bot-bubble public-home-bot-bubble--bot">
+                  <p className="public-home-bot-bubble-label">Choose a service</p>
+                  <ol className="public-home-bot-menu">
+                    {BOT_MENU.map((item, index) => (
+                      <li key={item}>
+                        <span>{index + 1}</span>
+                        {item}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </div>
+
+            <ol className="public-home-bot-flow">
+              {BOT_STEPS.map((step, index) => (
+                <li key={step.title} className="public-home-bot-step">
+                  <span className="public-home-bot-step-num" aria-hidden="true">{index + 1}</span>
+                  <h3 className="public-home-bot-step-title">{step.title}</h3>
+                  <p className="public-home-bot-step-text">{step.text}</p>
+                </li>
+              ))}
+            </ol>
+
+            <div className="public-home-bot-usps">
+              {BOT_USPS.map((point) => (
+                <Card key={point.title} className="public-home-bot-usp public-home-lift-card" elevated interactive>
+                  <span className="public-home-trust-accent" aria-hidden="true" />
+                  <h3 className="public-home-trust-title">{point.title}</h3>
+                  <p className="public-home-trust-text">{point.text}</p>
                 </Card>
               ))}
             </div>

@@ -6,7 +6,7 @@ import { patientStorage } from '../../utils/patientStorage'
 
 /** MediGraph WhatsApp bot — opens chat on click */
 const WHATSAPP_BOT_E164 = '919625887227'
-const WHATSAPP_BOT_URL = `https://wa.me/${WHATSAPP_BOT_E164}`
+export const WHATSAPP_BOT_URL = `https://wa.me/${WHATSAPP_BOT_E164}`
 
 const navLinks = [
   { label: 'Home', to: '/' },
