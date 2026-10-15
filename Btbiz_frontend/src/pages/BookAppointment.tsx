@@ -96,6 +96,54 @@ function isOnlineFull(snap: DoctorAppointmentQuotaSnapshot | null): boolean {
   return snap.online.remaining === 0
 }
 
+type DayLoad = 'light' | 'moderate' | 'busy' | 'unknown'
+
+/** Green = few bookings, yellow = filling up, red = busy or full. */
+function dayLoadFromQuota(snap: DoctorAppointmentQuotaSnapshot): DayLoad {
+  const booked = snap.online.booked
+  const limit = snap.online.limit
+  if (limit != null && limit > 0) {
+    const ratio = booked / limit
+    if (snap.online.remaining === 0 || ratio >= 0.75) return 'busy'
+    if (ratio >= 0.4) return 'moderate'
+    return 'light'
+  }
+  if (booked >= 16) return 'busy'
+  if (booked >= 8) return 'moderate'
+  return 'light'
+}
+
+function istClock(now = new Date()): { dateKey: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now)
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+  return {
+    dateKey: `${get('year')}-${get('month')}-${get('day')}`,
+    minutes: Number(get('hour')) * 60 + Number(get('minute')),
+  }
+}
+
+/** Start of a slot label such as "2:00 - 3:00 PM", in minutes from midnight. */
+function slotStartMinutes(label: string): number {
+  const [startRaw, ...rest] = label.split('-')
+  const start = startRaw.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i)
+  const endMeridiem = rest.join('-').match(/(AM|PM)/i)?.[1]
+  if (!start) return 0
+  let hour = Number(start[1])
+  const minute = Number(start[2])
+  const meridiem = (start[3] || endMeridiem || 'AM').toUpperCase()
+  if (meridiem === 'PM' && hour !== 12) hour += 12
+  if (meridiem === 'AM' && hour === 12) hour = 0
+  return hour * 60 + minute
+}
+
 export const BookAppointment = () => {
   const navigate = useNavigate()
   const [policyConsentChecked, setPolicyConsentChecked] = useState(false)
@@ -150,7 +198,8 @@ export const BookAppointment = () => {
   const [deleteMemberTarget, setDeleteMemberTarget] = useState<FamilyMemberSummary | null>(null)
   const [appointmentQuota, setAppointmentQuota] = useState<DoctorAppointmentQuotaSnapshot | null>(null)
   const [appointmentQuotaLoading, setAppointmentQuotaLoading] = useState(false)
-  const [dateAvailabilityMap, setDateAvailabilityMap] = useState<Record<string, 'available' | 'full' | 'unknown'>>({})
+  const [dateAvailabilityMap, setDateAvailabilityMap] = useState<Record<string, { load: DayLoad; booked: number; full: boolean }>>({})
+  const [clock, setClock] = useState(() => istClock())
   const [dateAvailabilityLoading, setDateAvailabilityLoading] = useState(false)
   const [bookingDayNotice, setBookingDayNotice] = useState<string | null>(null)
   const [nextSuggestedDate, setNextSuggestedDate] = useState<string | null>(null)
@@ -422,7 +471,7 @@ export const BookAppointment = () => {
       setFamilyOtpSent(true)
     } catch (err: any) {
       const msg = err?.response?.data?.message
-      setError(typeof msg === 'string' ? msg : 'Could not send OTP. You can skip for now.')
+      setError(typeof msg === 'string' ? msg : 'Could not send OTP. Please try again.')
     } finally {
       setFamilyOtpSending(false)
     }
@@ -444,11 +493,6 @@ export const BookAppointment = () => {
     } finally {
       setFamilyOtpSending(false)
     }
-  }
-
-  const handleSkipFamilyOtp = async () => {
-    setError(null)
-    await handleFamilyLogin()
   }
 
   const newMemberDobAge = useMemo(() => {
@@ -637,13 +681,13 @@ export const BookAppointment = () => {
           const d = new Date(year, month, i + 1)
           const key = formatDateKey(d)
           if (startOfDay(d) < todayStart) {
-            return [key, 'full'] as const
+            return [key, { load: 'unknown' as const, booked: 0, full: false }] as const
           }
           try {
             const snap = await publicAppointmentService.getAppointmentQuota(familyConsultantId, key)
-            return [key, isOnlineFull(snap) ? 'full' : 'available'] as const
+            return [key, { load: dayLoadFromQuota(snap), booked: snap.online.booked, full: isOnlineFull(snap) }] as const
           } catch {
-            return [key, 'unknown'] as const
+            return [key, { load: 'unknown' as const, booked: 0, full: false }] as const
           }
         })
       )
@@ -657,6 +701,18 @@ export const BookAppointment = () => {
       cancelled = true
     }
   }, [mode, familyConsultantId, calendarMonth, todayStart])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(istClock()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const isSlotPassed = (slot: string) =>
+    Boolean(appointmentDate) && appointmentDate === clock.dateKey && slotStartMinutes(slot) < clock.minutes
+
+  useEffect(() => {
+    if (preferredSlot && isSlotPassed(preferredSlot)) setPreferredSlot('')
+  }, [preferredSlot, appointmentDate, clock])
 
   const handleSuggestNextAvailableDate = async () => {
     if (!familyConsultantId) return
@@ -684,6 +740,10 @@ export const BookAppointment = () => {
     setError(null)
     if (!appointmentDate) {
       setError('Please select appointment date.')
+      return
+    }
+    if (preferredSlot && isSlotPassed(preferredSlot)) {
+      setError('That time has already passed today. Choose a later slot.')
       return
     }
     if (mode !== 'family') {
@@ -899,18 +959,16 @@ export const BookAppointment = () => {
             resetFamilyAccess()
           }}
         />
-        <div className="book-appointment-field-action">
-          <Button onClick={() => void handleSendFamilyOtp()} disabled={familyOtpSending}>
-            {familyOtpSending && !familyOtpSent ? 'Sending…' : 'Send OTP'}
-          </Button>
-        </div>
+        {!familyAccountId && (
+          <div className="book-appointment-field-action">
+            <Button onClick={() => void handleSendFamilyOtp()} disabled={familyOtpSending}>
+              {familyOtpSending && !familyOtpSent ? 'Sending…' : 'Send OTP'}
+            </Button>
+          </div>
+        )}
       </div>
 
-      <p className="public-section-text book-appointment-otp-note">
-        Verify this number before family details open. For now you can enter <strong>123456</strong> or skip OTP.
-      </p>
-
-      {familyOtpSent && (
+      {familyOtpSent && !familyAccountId && (
         <div className="book-appointment-form-grid">
           <TextField
             id="family-otp"
@@ -926,12 +984,6 @@ export const BookAppointment = () => {
           </div>
         </div>
       )}
-
-      <div className="book-appointment-otp-skip">
-        <Button variant="secondary" onClick={() => void handleSkipFamilyOtp()} disabled={familyOtpSending}>
-          Skip OTP for now
-        </Button>
-      </div>
 
       {familyAccountId && (
         <>
@@ -1251,33 +1303,43 @@ export const BookAppointment = () => {
                     }
                     const dayStart = startOfDay(cell.date)
                     const isPast = dayStart < todayStart
-                    const status = dateAvailabilityMap[cell.dateKey] ?? 'unknown'
+                    const mark = dateAvailabilityMap[cell.dateKey] ?? { load: 'unknown' as const, booked: 0, full: false }
                     const isSelected = appointmentDate === cell.dateKey
+                    const loadLabel = mark.load === 'light'
+                      ? 'Few appointments'
+                      : mark.load === 'moderate'
+                        ? 'Filling up'
+                        : mark.load === 'busy'
+                          ? 'Busy'
+                          : 'Checking'
                     return (
                       <button
                         key={cell.key}
                         type="button"
                         disabled={isPast}
                         className={`book-appointment-calendar-day ${isSelected ? 'selected' : ''}`}
+                        title={isPast ? undefined : `${loadLabel}. ${mark.booked} booked online.`}
                         onClick={() => {
                           setAppointmentDate(cell.dateKey!)
-                          if (status === 'full') {
+                          if (mark.full) {
                             setBookingDayNotice('Selected day is full. Please choose another date.')
+                          } else if (mark.load === 'busy') {
+                            setBookingDayNotice('This day already has many appointments. Your turn may take longer.')
                           } else {
                             setBookingDayNotice(null)
                           }
                         }}
                       >
                         <span>{cell.date.getDate()}</span>
-                        <i className={`dot ${status}`} />
+                        {!isPast && <i className={`dot ${mark.load}`} />}
                       </button>
                     )
                   })}
                 </div>
                 <div className="book-appointment-calendar-legend">
-                  <span><i className="dot available" /> Available</span>
-                  <span><i className="dot full" /> Full</span>
-                  <span><i className="dot unknown" /> Checking</span>
+                  <span><i className="dot light" /> Few</span>
+                  <span><i className="dot moderate" /> Filling up</span>
+                  <span><i className="dot busy" /> Busy</span>
                 </div>
               </div>
               {dateAvailabilityLoading && (
@@ -1300,10 +1362,18 @@ export const BookAppointment = () => {
                 onChange={(e) => setPreferredSlot(e.target.value)}
               >
                 <option value="">Select slot</option>
-                {TIME_SLOTS.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
+                {TIME_SLOTS.map((s) => {
+                  const passed = isSlotPassed(s)
+                  return (
+                    <option key={s} value={s} disabled={passed}>
+                      {passed ? `${s} (passed)` : s}
+                    </option>
+                  )
+                })}
               </select>
+              <p className="book-appointment-slot-disclaimer">
+                This time can move earlier or later depending on the patients already waiting. Choosing 11:00 does not mean your turn will be called at 11:00.
+              </p>
             </div>
           </div>
 
