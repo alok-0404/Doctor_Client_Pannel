@@ -618,7 +618,11 @@ export interface DoctorAppointmentItem {
   patientAddress?: string
   /** Optional source of appointment, e.g. 'WHATSAPP' for bot-created appointments */
   source?: string
+  /** Consultation fee status; older visits without a value come back as UNPAID. */
+  paymentStatus?: 'PAID' | 'UNPAID'
   visitDate: string
+  /** Slot label the patient chose while booking, e.g. "2:00 - 3:00 PM". */
+  preferredSlot?: string
   reason?: string
   notes?: string
   /** Patient's location at time of booking (if they shared it) */
@@ -1829,7 +1833,8 @@ export const publicAppointmentService = {
     patientLatitude?: number
     patientLongitude?: number
     source?: 'WEBSITE' | 'WHATSAPP'
-  }): Promise<{ appointmentId: string; patientId: string }> {
+    paymentMode?: 'ONLINE' | 'CASH_AT_CLINIC'
+  }): Promise<{ appointmentId: string; patientId: string; paymentStatus?: 'PAID' | 'UNPAID' }> {
     const res = await api.post('/public/appointments/family', payload)
     return res.data as any
   },

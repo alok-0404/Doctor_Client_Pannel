@@ -17,7 +17,7 @@ import {
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
 import { PatientOtpSession } from "../models/PatientOtpSession";
-import { sendOtpToWhatsapp } from "../services/whatsappService";
+import { sendOtpToWhatsapp, sendWhatsAppMessage } from "../services/whatsappService";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { env } from "../config/env";
@@ -38,6 +38,76 @@ const router = Router();
 
 const SELF_MIN_AGE_MSG =
   "For Self, age must be 18 years or above. Please enter a valid date of birth.";
+
+/** Must match the fee shown on the website booking payment step. */
+const BOOKING_CONSULTATION_FEE = 500;
+
+function parseBookingPaymentMode(raw: unknown): "ONLINE" | "CASH_AT_CLINIC" | undefined {
+  const v = String(raw ?? "").trim().toUpperCase();
+  if (v === "ONLINE" || v === "ONLINE_NOW") return "ONLINE";
+  if (v === "CASH_AT_CLINIC" || v === "CASH" || v === "OFFLINE") return "CASH_AT_CLINIC";
+  return undefined;
+}
+
+function resolveBookingPayment(body: { paymentMode?: unknown; paymentStatus?: unknown }): {
+  paymentMode?: "ONLINE" | "CASH_AT_CLINIC";
+  paymentStatus: "PAID" | "UNPAID";
+} {
+  const paymentMode = parseBookingPaymentMode(body.paymentMode);
+  const paid = String(body.paymentStatus ?? "").trim().toUpperCase() === "PAID" || paymentMode === "ONLINE";
+  return { paymentMode, paymentStatus: paid ? "PAID" : "UNPAID" };
+}
+
+function formatBookingId(appointmentId: string): string {
+  const clean = appointmentId.replace(/[^a-zA-Z0-9]/g, "");
+  return clean ? `MG-${clean.slice(-6).toUpperCase()}` : "";
+}
+
+function formatBookingDate(yyyymmdd: string): string {
+  const d = new Date(`${yyyymmdd}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return yyyymmdd;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function buildBookingConfirmationMessage(data: {
+  appointmentId: string;
+  patientName: string;
+  doctorName: string;
+  appointmentDate: string;
+  slot?: string;
+  consultationLabel: string;
+  paymentStatus: "PAID" | "UNPAID";
+}): string {
+  const fee = `₹${BOOKING_CONSULTATION_FEE.toLocaleString("en-IN")}`;
+  const feeLine =
+    data.paymentStatus === "PAID"
+      ? `💳 *Fee:* ${fee} — PAID (online)`
+      : `💳 *Fee:* ${fee} — UNPAID (pay at clinic)`;
+  const when = data.slot
+    ? `${formatBookingDate(data.appointmentDate)}, ${data.slot}`
+    : formatBookingDate(data.appointmentDate);
+  return [
+    "━━━━━━━━━━━━━━━━━━━",
+    "✅ *APPOINTMENT BOOKED!*",
+    "━━━━━━━━━━━━━━━━━━━",
+    `🆔 *Booking ID:* ${formatBookingId(data.appointmentId)}`,
+    "",
+    `👤 ${data.patientName}`,
+    `🏥 ${data.doctorName}`,
+    `📅 ${when}`,
+    `📝 ${data.consultationLabel}`,
+    feeLine,
+    "",
+    "🧾 *Receipt*",
+    `Consultation fee: ${fee}`,
+    `Status: ${data.paymentStatus === "PAID" ? "Paid" : "Due at clinic"}`,
+    "",
+    "⏰ Please arrive 15 minutes before your slot and show this Booking ID at the reception. Actual consultation time may vary slightly.",
+    "🙏 Thank you for choosing *MediGraph*!",
+    "━━━━━━━━━━━━━━━━━━━"
+  ].join("\n");
+}
+
 let patientMobileIndexChecked = false;
 
 async function ensurePatientMobileNonUniqueIndex(): Promise<void> {
@@ -1344,6 +1414,8 @@ router.post("/appointments/old", async (req, res) => {
       patientLatitude?: number;
       patientLongitude?: number;
       source?: string;
+      paymentMode?: string;
+      paymentStatus?: string;
     };
 
     if (!body.mobileNumber || !body.consultationType || !body.consultantId || !body.opdNumber || !body.appointmentDate) {
@@ -1386,7 +1458,8 @@ router.post("/appointments/old", async (req, res) => {
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING",
-      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP"
+      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP",
+      ...resolveBookingPayment(body)
     });
 
     res.status(201).json({
@@ -1436,6 +1509,8 @@ router.post("/appointments/new", async (req, res) => {
       source?: string;
       reason?: string;
       enforceSlot?: boolean;
+      paymentMode?: string;
+      paymentStatus?: string;
     };
 
     if (!body.consultantId || !body.patientName || !body.mobileNumber || !body.gender || !body.appointmentDate) {
@@ -1485,7 +1560,8 @@ router.post("/appointments/new", async (req, res) => {
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING",
-      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP"
+      bookingSource: parseBookingSource(body.source) ?? "WHATSAPP",
+      ...resolveBookingPayment(body)
     });
 
     res.status(201).json({
@@ -1753,6 +1829,8 @@ router.post("/appointments/family", async (req, res) => {
       source?: string;
       reason?: string;
       enforceSlot?: boolean;
+      paymentMode?: string;
+      paymentStatus?: string;
     };
 
     if (!body.patientId || !mongoose.isValidObjectId(body.patientId)) {
@@ -1798,6 +1876,9 @@ router.post("/appointments/family", async (req, res) => {
     if (body.preferredSlot) notesParts.push(`Preferred time: ${body.preferredSlot}`);
     if (body.reason?.trim()) notesParts.push(`Reason: ${body.reason.trim()}`);
 
+    const bookingSource = parseBookingSource(body.source) ?? "WEBSITE";
+    const { paymentMode, paymentStatus } = resolveBookingPayment(body);
+
     const visit = await createVisitService({
       patientId: (patient as any)._id.toString(),
       doctorId: body.consultantId,
@@ -1807,14 +1888,39 @@ router.post("/appointments/family", async (req, res) => {
       patientLatitude: body.patientLatitude ?? locationFromAddress?.lat,
       patientLongitude: body.patientLongitude ?? locationFromAddress?.lng,
       appointmentChannel: "ONLINE_BOOKING",
-      bookingSource: parseBookingSource(body.source) ?? "WEBSITE"
+      bookingSource,
+      paymentMode,
+      paymentStatus
     });
 
     // Doctor is notified only when assistant refers (vitals/refer flow), not on online booking.
 
+    const appointmentId = (visit as any)._id.toString();
+    // The WhatsApp bot sends its own confirmation in-chat; only website bookings need one here.
+    if (bookingSource !== "WHATSAPP" && patient.mobileNumber) {
+      const doctor = await Doctor.findById(body.consultantId).select("name").lean();
+      const patientName =
+        body.patientName?.trim() ||
+        [patient.firstName, patient.lastName].filter(Boolean).join(" ").trim() ||
+        "Patient";
+      const message = buildBookingConfirmationMessage({
+        appointmentId,
+        patientName,
+        doctorName: (doctor as any)?.name || "Doctor",
+        appointmentDate: body.appointmentDate,
+        slot: body.preferredSlot,
+        consultationLabel: body.consultationType || "Consultation",
+        paymentStatus
+      });
+      void sendWhatsAppMessage(patient.mobileNumber, message).catch((err) => {
+        console.error("booking confirmation WhatsApp failed:", err);
+      });
+    }
+
     res.status(201).json({
-      appointmentId: (visit as any)._id.toString(),
-      patientId: (patient as any)._id.toString()
+      appointmentId,
+      patientId: (patient as any)._id.toString(),
+      paymentStatus
     });
   } catch (error) {
     // eslint-disable-next-line no-console

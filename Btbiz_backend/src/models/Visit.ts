@@ -5,6 +5,8 @@ import { PatientId } from "./Patient";
 
 export type AppointmentChannel = "ONLINE_BOOKING" | "WALK_IN";
 export type BookingSource = "WHATSAPP" | "WEBSITE" | "WALK_IN";
+export type VisitPaymentStatus = "PAID" | "UNPAID";
+export type VisitPaymentMode = "ONLINE" | "CASH_AT_CLINIC";
 
 export interface IVisit extends Document {
   patient: PatientId;
@@ -30,6 +32,9 @@ export interface IVisit extends Document {
   appointmentChannel?: AppointmentChannel;
   /** How the appointment was booked — WhatsApp bot vs website vs walk-in. */
   bookingSource?: BookingSource;
+  /** Consultation fee status; unset on older visits (treated as unpaid). */
+  paymentStatus?: VisitPaymentStatus;
+  paymentMode?: VisitPaymentMode;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -83,6 +88,14 @@ const VisitSchema = new Schema<IVisit>(
       type: String,
       enum: ["WHATSAPP", "WEBSITE", "WALK_IN"],
       index: true
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["PAID", "UNPAID"]
+    },
+    paymentMode: {
+      type: String,
+      enum: ["ONLINE", "CASH_AT_CLINIC"]
     }
   },
   { timestamps: true }

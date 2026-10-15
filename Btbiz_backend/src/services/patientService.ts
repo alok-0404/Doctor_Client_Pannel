@@ -10,7 +10,12 @@ import { DiagnosticTest } from "../models/DiagnosticTest";
 import { Doctor } from "../models/Doctor";
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
-import type { AppointmentChannel, BookingSource } from "../models/Visit";
+import type {
+  AppointmentChannel,
+  BookingSource,
+  VisitPaymentMode,
+  VisitPaymentStatus
+} from "../models/Visit";
 import { assertDailyAppointmentQuotaAllowed } from "../utils/appointmentQuota";
 import { PharmacyDispensation } from "../models/PharmacyDispensation";
 import { trackEvent } from "./analyticsService";
@@ -182,6 +187,8 @@ export interface CreateVisitPayload {
   appointmentChannel?: AppointmentChannel;
   /** WhatsApp bot vs website vs walk-in. */
   bookingSource?: BookingSource;
+  paymentStatus?: VisitPaymentStatus;
+  paymentMode?: VisitPaymentMode;
 }
 
 export const createVisit = async (payload: CreateVisitPayload) => {
@@ -218,7 +225,9 @@ export const createVisit = async (payload: CreateVisitPayload) => {
     patientLatitude: payload.patientLatitude,
     patientLongitude: payload.patientLongitude,
     appointmentChannel: channel,
-    bookingSource: payload.bookingSource
+    bookingSource: payload.bookingSource,
+    paymentStatus: payload.paymentStatus,
+    paymentMode: payload.paymentMode
   });
 
   trackEvent({

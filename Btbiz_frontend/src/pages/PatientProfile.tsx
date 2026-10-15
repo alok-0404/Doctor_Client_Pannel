@@ -19,6 +19,7 @@ import {
   type ServiceProviderOption,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
+import { peekBookingFamilyReturn } from '../utils/bookingFamilyReturn'
 import { PublicLayout } from '../components/layout/PublicLayout'
 import { Breadcrumb } from '../components/ui/Breadcrumb'
 import { Button } from '../components/ui/Button'
@@ -648,9 +649,15 @@ export const PatientProfile = () => {
       )}
       actions={(
         <>
-          <Link to="/book-appointment" className="ui-button ui-button-secondary">
-            Book appointment
-          </Link>
+          {peekBookingFamilyReturn() ? (
+            <Link to="/book-appointment" className="ui-button ui-button-secondary">
+              Back
+            </Link>
+          ) : (
+            <Link to="/book-appointment" className="ui-button ui-button-secondary">
+              Book appointment
+            </Link>
+          )}
           <Button variant="secondary" onClick={handleLogout}>
             Logout
           </Button>

@@ -32,6 +32,14 @@ function distanceKm(
   return R * c;
 }
 
+/** Bookings store the chosen slot in notes as "Preferred time: <slot>". */
+function preferredSlotFromNotes(notes: unknown): string | undefined {
+  if (typeof notes !== "string") return undefined;
+  const match = notes.match(/Preferred time:\s*([^.\n]+)/i);
+  const slot = match?.[1]?.trim();
+  return slot || undefined;
+}
+
 function mapVisitToAppointment(
   v: any,
   clinicLat?: number | null,
@@ -65,9 +73,11 @@ function mapVisitToAppointment(
     patientMobile: patient?.mobileNumber ?? undefined,
     patientAddress: patient?.address ?? undefined,
     visitDate: v.visitDate,
+    preferredSlot: preferredSlotFromNotes(v.notes),
     reason: v.reason,
     notes: v.notes,
     source: resolveBookingSource(v),
+    paymentStatus: v.paymentStatus === "PAID" ? "PAID" : "UNPAID",
     patientLatitude: patientLat,
     patientLongitude: patientLng,
     distanceKm: distanceKmValue

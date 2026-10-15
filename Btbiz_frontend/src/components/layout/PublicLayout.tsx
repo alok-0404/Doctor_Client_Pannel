@@ -1,8 +1,9 @@
 import type { FC, ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { MenuIcon } from '../ui/icons'
 import { patientStorage } from '../../utils/patientStorage'
+import { peekBookingFamilyReturn } from '../../utils/bookingFamilyReturn'
 
 /** MediGraph WhatsApp bot — opens chat on click */
 const WHATSAPP_BOT_E164 = '919625887227'
@@ -24,9 +25,11 @@ export interface PublicLayoutProps {
 }
 
 export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }) => {
+  const location = useLocation()
   const hasPortalLogin = patientStorage.hasVerifiedPortalLogin()
   const myProfileTo = hasPortalLogin ? '/patient-profile' : '/patient-login'
   const myProfileLabel = hasPortalLogin ? 'My profile' : 'Patient login'
+  const backToFamily = location.pathname === '/patient-profile' && peekBookingFamilyReturn() != null
 
   const shellClass = ['public-layout', 'public-home', className].filter(Boolean).join(' ')
 
@@ -56,9 +59,15 @@ export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }
                   {myProfileLabel}
                 </Link>
               </nav>
-              <Link to="/book-appointment" className="public-cta public-home-nav-cta public-home-nav-cta--drawer">
-                Book appointment
-              </Link>
+              {backToFamily ? (
+                <button type="button" className="public-cta public-home-nav-cta public-home-nav-cta--drawer" disabled>
+                  Book appointment
+                </button>
+              ) : (
+                <Link to="/book-appointment" className="public-cta public-home-nav-cta public-home-nav-cta--drawer">
+                  Book appointment
+                </Link>
+              )}
               <Link to="/portal" className="public-nav-staff public-home-staff-btn">
                 For staff only
               </Link>
@@ -76,9 +85,15 @@ export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }
                 {myProfileLabel}
               </Link>
             </nav>
-            <Link to="/book-appointment" className="public-cta public-home-nav-cta">
-              Book appointment
-            </Link>
+            {backToFamily ? (
+              <button type="button" className="public-cta public-home-nav-cta" disabled>
+                Book appointment
+              </button>
+            ) : (
+              <Link to="/book-appointment" className="public-cta public-home-nav-cta">
+                Book appointment
+              </Link>
+            )}
             <Link to="/portal" className="public-nav-staff public-home-staff-btn">
               For staff only
             </Link>

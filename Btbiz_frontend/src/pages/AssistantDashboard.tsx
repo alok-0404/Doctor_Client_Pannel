@@ -1061,6 +1061,30 @@ export const AssistantDashboard = () => {
     return reason && reason.length > 0 ? reason : null
   }
 
+  const renderAppointmentWhen = (a: DoctorAppointmentItem) => {
+    const d = new Date(a.visitDate)
+    if (Number.isNaN(d.getTime())) return null
+    const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    const time = a.preferredSlot || d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    return (
+      <div className="assistant-appointment-when">
+        📅 {date} · 🕒 {time}
+      </div>
+    )
+  }
+
+  const renderPaymentBadge = (a: DoctorAppointmentItem) => {
+    const paid = a.paymentStatus === 'PAID'
+    return (
+      <span
+        className={`appointment-pay-badge ${paid ? 'is-paid' : 'is-unpaid'}`}
+        title={paid ? 'Consultation fee paid' : 'Consultation fee pending'}
+      >
+        {paid ? 'Paid' : 'Unpaid'}
+      </span>
+    )
+  }
+
   return (
     <>
       <AppLayout
@@ -1376,7 +1400,8 @@ export const AssistantDashboard = () => {
                         }}
                       >
                         <div>
-                          <strong>{a.patientName}</strong>
+                          <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
+                          {renderAppointmentWhen(a)}
                           {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
                           {a.distanceKm != null && (
                             <div style={{ marginTop: 4, fontSize: 12, color: '#0d47a1' }}>
@@ -1461,7 +1486,8 @@ export const AssistantDashboard = () => {
                     }}
                   >
                     <div>
-                      <strong>{a.patientName}</strong>
+                      <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
+                      {renderAppointmentWhen(a)}
                       {getAssistantAppointmentSubtitle(a) && (
                         <div style={{ color: '#607d8b', fontSize: 12 }}>{getAssistantAppointmentSubtitle(a)}</div>
                       )}
@@ -1548,7 +1574,8 @@ export const AssistantDashboard = () => {
                     }}
                   >
                     <div>
-                      <strong>{a.patientName}</strong>
+                      <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
+                      {renderAppointmentWhen(a)}
                       <div style={{ color: '#607d8b', fontSize: 12 }}>
                         Checked-in at {new Date(a.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                       </div>
@@ -1608,10 +1635,8 @@ export const AssistantDashboard = () => {
                     }}
                   >
                     <div>
-                      <strong>{a.patientName}</strong>
-                      <div style={{ color: '#607d8b', fontSize: 12 }}>
-                        {new Date(a.visitDate).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
-                      </div>
+                      <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
+                      {renderAppointmentWhen(a)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       {a.patientMobile && (

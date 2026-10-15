@@ -9,6 +9,7 @@ import {
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 import { setBookAppointmentBackHandler } from '../utils/bookAppointmentBack'
+import { clearBookingFamilyReturn, peekBookingFamilyReturn, saveBookingFamilyReturn } from '../utils/bookingFamilyReturn'
 import { completedAgeYears } from '../utils/age'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { PublicLayout } from '../components/layout/PublicLayout'
@@ -178,6 +179,8 @@ export const BookAppointment = () => {
   const [familyPatientName, setFamilyPatientName] = useState('')
   const [familyGender, setFamilyGender] = useState<string>('')
   const [familyAddress, setFamilyAddress] = useState('')
+  const [familyPrefilled, setFamilyPrefilled] = useState({ name: false, gender: false, address: false })
+  const [showConfirmedPopup, setShowConfirmedPopup] = useState(false)
 
   const [addingMember, setAddingMember] = useState(false)
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
@@ -237,6 +240,32 @@ export const BookAppointment = () => {
       .finally(() => {
         setLoadingConsultants(false)
       })
+  }, [])
+
+  useEffect(() => {
+    const saved = peekBookingFamilyReturn()
+    if (!saved) return
+    let cancelled = false
+    setPolicyConsentChecked(true)
+    setPolicyAccepted(true)
+    setMode('family')
+    setStep('details')
+    setFamilyCountryCode(saved.countryCode || '+91')
+    setFamilyMobile(saved.mobileDigits)
+    setFamilyAccountId(saved.accountId)
+    void publicAppointmentService
+      .listFamilyMembers({ accountId: saved.accountId })
+      .then((list) => {
+        if (cancelled) return
+        setFamilyMembers(list.members ?? [])
+        clearBookingFamilyReturn()
+      })
+      .catch(() => {
+        if (!cancelled) setError('Could not restore your family list. Verify the mobile number again.')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -415,14 +444,21 @@ export const BookAppointment = () => {
       setFamilyPatientName('')
       setFamilyGender('')
       setFamilyAddress('')
+      setFamilyPrefilled({ name: false, gender: false, address: false })
       return
     }
     const p = member.patient
-    setFamilyPatientName(
-      (p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : member.fullName) || ''
-    )
-    setFamilyGender(p?.gender ?? member.gender ?? '')
-    setFamilyAddress(p?.address ?? '')
+    const name = (p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : member.fullName) || ''
+    const gender = p?.gender ?? member.gender ?? ''
+    const address = p?.address ?? ''
+    setFamilyPatientName(name)
+    setFamilyGender(gender)
+    setFamilyAddress(address)
+    setFamilyPrefilled({
+      name: name.trim().length > 0,
+      gender: gender.trim().length > 0,
+      address: address.trim().length > 0,
+    })
   }, [])
 
   const handleSelectFamilyMember = useCallback((memberId: string, sourceMembers?: FamilyMemberSummary[]) => {
@@ -604,6 +640,11 @@ export const BookAppointment = () => {
       )
       const name = [result.patient.firstName, result.patient.lastName].filter(Boolean).join(' ')
       patientStorage.set(result.token, result.patient.id, name || 'Patient', 'booking')
+      saveBookingFamilyReturn({
+        accountId: familyAccountId,
+        countryCode: familyCountryCode,
+        mobileDigits: familyMobile.replace(/\D/g, ''),
+      })
       navigate('/patient-profile')
     } catch (err: any) {
       const msg = err?.response?.data?.message
@@ -632,7 +673,7 @@ export const BookAppointment = () => {
     [familyAccountId]
   )
 
-  // When member is selected, prefill editable patient details for appointment.
+  // When member is selected, prefill patient details; prefilled ones are locked.
   useEffect(() => {
     if (mode !== 'family') return
     if (!selectedFamilyMember) return
@@ -796,6 +837,7 @@ export const BookAppointment = () => {
           address: familyAddress || undefined,
           ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
           source: 'WEBSITE',
+          paymentMode: paymentMode === 'online_now' ? 'ONLINE' : 'CASH_AT_CLINIC',
         })
       } else {
         setError('Please select New Patient.')
@@ -808,6 +850,7 @@ export const BookAppointment = () => {
       setSelectedPaymentMode(paymentMode)
       window.history.pushState({ bookStep: 'confirm' }, '')
       setStep('confirm')
+      setShowConfirmedPopup(true)
     } catch (err: any) {
       const msg = err?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'Failed to confirm appointment. Please try again.')
@@ -1237,6 +1280,9 @@ export const BookAppointment = () => {
               value={familyPatientName}
               onChange={(e) => setFamilyPatientName(e.target.value)}
               disabled={!selectedFamilyMemberId}
+              readOnly={familyPrefilled.name}
+              className={familyPrefilled.name ? 'book-appointment-locked-input' : ''}
+              title={familyPrefilled.name ? 'Saved in family profile' : undefined}
             />
             <div className="book-appointment-select-field">
               <label htmlFor="family-gender">Gender *</label>
@@ -1245,7 +1291,9 @@ export const BookAppointment = () => {
                 name="familyGender"
                 value={familyGender}
                 onChange={(e) => setFamilyGender(e.target.value)}
-                disabled={!selectedFamilyMemberId}
+                disabled={!selectedFamilyMemberId || familyPrefilled.gender}
+                className={familyPrefilled.gender ? 'book-appointment-locked-input' : undefined}
+                title={familyPrefilled.gender ? 'Saved in family profile' : undefined}
               >
                 <option value="">Select Gender</option>
                 {GENDERS.map((g) => (
@@ -1262,6 +1310,9 @@ export const BookAppointment = () => {
             value={familyAddress}
             onChange={(e) => setFamilyAddress(e.target.value)}
             disabled={!selectedFamilyMemberId}
+            readOnly={familyPrefilled.address}
+            className={familyPrefilled.address ? 'book-appointment-locked-input' : ''}
+            title={familyPrefilled.address ? 'Saved in family profile' : undefined}
           />
 
           <div className="book-appointment-form-grid">
@@ -1477,7 +1528,14 @@ export const BookAppointment = () => {
 
   const getConfirmName = () => familyPatientName || selectedFamilyMember?.fullName || '—'
   const getConfirmMobile = () => familyMobile || '—'
-  const getConfirmEmail = () => '—'
+  const getConfirmWhen = () => {
+    const d = appointmentDate ? new Date(`${appointmentDate}T00:00:00`) : null
+    const date = d && !Number.isNaN(d.getTime())
+      ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      : appointmentDate || '—'
+    return preferredSlot ? `${date}, ${preferredSlot}` : date
+  }
+  const confirmPaid = selectedPaymentMode !== 'cash_at_clinic'
 
   const renderConfirm = () => (
     <Card className="book-appointment-panel book-appointment-confirm-card" elevated>
@@ -1493,13 +1551,20 @@ export const BookAppointment = () => {
       <div className="public-section-text book-appointment-confirm-summary">
         <p className="book-appointment-confirm-line"><strong>Name:</strong> {getConfirmName()}</p>
         <p className="book-appointment-confirm-line"><strong>Mobile:</strong> {getConfirmMobile()}</p>
-        <p className="book-appointment-confirm-line"><strong>Email:</strong> {getConfirmEmail()}</p>
+        {selectedConsultant && (
+          <p className="book-appointment-confirm-line"><strong>Doctor:</strong> {selectedConsultant.name}</p>
+        )}
+        <p className="book-appointment-confirm-line"><strong>Date &amp; time:</strong> {getConfirmWhen()}</p>
         <p className="book-appointment-confirm-line">
-          <strong>Payment:</strong> {selectedPaymentMode === 'cash_at_clinic' ? 'Cash at clinic (on appointment day)' : 'Paid online during booking'}
+          <strong>Fee:</strong> ₹500{' '}
+          <span className={`appointment-pay-badge ${confirmPaid ? 'is-paid' : 'is-unpaid'}`}>
+            {confirmPaid ? 'Paid' : 'Unpaid'}
+          </span>
+          {' '}{confirmPaid ? 'Paid online during booking' : 'Cash at clinic (on appointment day)'}
         </p>
       </div>
       <p className="public-section-text book-appointment-confirm-footer">
-        You will be contacted by the clinic if any changes are required.
+        A booking confirmation with these details will be sent to your WhatsApp number. You will be contacted by the clinic if any changes are required.
       </p>
 
       <div className="book-appointment-confirm-actions">
@@ -1603,6 +1668,32 @@ export const BookAppointment = () => {
           </p>
         )}
       </PublicLayout>
+      {showConfirmedPopup && step === 'confirm' && (
+        <div
+          className="book-appointment-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="appointment-confirmed-title"
+          onClick={() => setShowConfirmedPopup(false)}
+        >
+          <div className="book-appointment-modal-wrap" onClick={(e) => e.stopPropagation()}>
+          <Card className="book-appointment-modal-card book-appointment-confirmed-popup" elevated>
+            <div className="book-appointment-confirmed-icon" aria-hidden="true">✓</div>
+            <h3 id="appointment-confirmed-title">Appointment confirmed</h3>
+            <p>
+              Your appointment for <strong>{getConfirmName()}</strong> on <strong>{getConfirmWhen()}</strong> is booked.
+              Booking details will be shared to your mobile number{' '}
+              <strong>{familyMobile ? `${familyCountryCode} ${familyMobile}` : ''}</strong> on WhatsApp.
+            </p>
+            <div className="book-appointment-modal-actions">
+              <Button autoFocus onClick={() => setShowConfirmedPopup(false)}>
+                OK
+              </Button>
+            </div>
+          </Card>
+          </div>
+        </div>
+      )}
       {deleteMemberTarget && (
         <div className="book-appointment-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-member-title">
           <Card className="book-appointment-modal-card" elevated>
