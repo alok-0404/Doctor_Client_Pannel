@@ -15,7 +15,6 @@ const navLinks = [
   { label: 'Services', to: '/#services' },
   { label: 'Doctors', to: '/#doctors' },
   { label: 'Contact', to: '/#contact' },
-  { label: 'Book appointment', to: '/book-appointment' },
 ]
 
 export interface PublicLayoutProps {
@@ -58,7 +57,7 @@ export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }
                 </Link>
               </nav>
               <Link to="/book-appointment" className="public-cta public-home-nav-cta public-home-nav-cta--drawer">
-                Appointment
+                Book appointment
               </Link>
               <Link to="/portal" className="public-nav-staff public-home-staff-btn">
                 For staff only
@@ -78,7 +77,7 @@ export const PublicLayout: FC<PublicLayoutProps> = ({ children, className = '' }
               </Link>
             </nav>
             <Link to="/book-appointment" className="public-cta public-home-nav-cta">
-              Appointment
+              Book appointment
             </Link>
             <Link to="/portal" className="public-nav-staff public-home-staff-btn">
               For staff only

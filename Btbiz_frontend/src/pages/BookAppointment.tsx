@@ -8,6 +8,7 @@ import {
   type FamilyRelation,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
+import { setBookAppointmentBackHandler } from '../utils/bookAppointmentBack'
 import { completedAgeYears } from '../utils/age'
 import { CountryCodePhoneInput } from '../components/CountryCodePhoneInput'
 import { PublicLayout } from '../components/layout/PublicLayout'
@@ -101,6 +102,8 @@ export const BookAppointment = () => {
   const [policyAccepted, setPolicyAccepted] = useState(false)
   const [mode, setMode] = useState<Mode>('none')
   const [step, setStep] = useState<Step>('details')
+  const stepRef = useRef<Step>('details')
+  stepRef.current = step
 
   const [consultants, setConsultants] = useState<ConsultantOption[]>([])
   const [loadingConsultants, setLoadingConsultants] = useState(false)
@@ -114,6 +117,9 @@ export const BookAppointment = () => {
   // Family booking state (recommended flow)
   const [familyCountryCode, setFamilyCountryCode] = useState('+91')
   const [familyMobile, setFamilyMobile] = useState('')
+  const [familyOtp, setFamilyOtp] = useState('')
+  const [familyOtpSent, setFamilyOtpSent] = useState(false)
+  const [familyOtpSending, setFamilyOtpSending] = useState(false)
   const [familyAccountId, setFamilyAccountId] = useState<string | null>(null)
   const [familyMembers, setFamilyMembers] = useState<FamilyMemberSummary[]>([])
   const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState<string>('')
@@ -182,6 +188,39 @@ export const BookAppointment = () => {
       .finally(() => {
         setLoadingConsultants(false)
       })
+  }, [])
+
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      const booked = (event.state as { bookStep?: Step } | null)?.bookStep
+      if (booked === 'payment' || booked === 'confirm' || booked === 'details') {
+        setStep(booked)
+        return
+      }
+      if (stepRef.current === 'confirm') setStep('payment')
+      else if (stepRef.current === 'payment') setStep('details')
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    setBookAppointmentBackHandler(() => {
+      if (stepRef.current === 'payment' || stepRef.current === 'confirm') {
+        window.history.back()
+        return true
+      }
+      return false
+    })
+    return () => setBookAppointmentBackHandler(null)
+  }, [])
+
+  const resetFamilyAccess = useCallback(() => {
+    setFamilyOtp('')
+    setFamilyOtpSent(false)
+    setFamilyAccountId(null)
+    setFamilyMembers([])
+    setSelectedFamilyMemberId('')
   }, [])
 
   const fetchUserLocation = useCallback(() => {
@@ -344,19 +383,20 @@ export const BookAppointment = () => {
     applyFamilyMemberToBooking(member)
   }, [familyMembers, applyFamilyMemberToBooking])
 
+  const familyMobileValue = `${familyCountryCode}${familyMobile.replace(/\D/g, '').trim()}`
+
   const handleFamilyLogin = async () => {
     setError(null)
     setFamilyAccountId(null)
     setFamilyMembers([])
     setSelectedFamilyMemberId('')
 
-    const mobile = `${familyCountryCode}${familyMobile.replace(/\D/g, '').trim()}`
-    if (mobile.length < 8) {
+    if (familyMobile.replace(/\D/g, '').length < 10) {
       setError('Please enter a valid mobile number.')
       return
     }
     try {
-      const account = await publicAppointmentService.familyLoginOrCreate(mobile)
+      const account = await publicAppointmentService.familyLoginOrCreate(familyMobileValue)
       setFamilyAccountId(account.id)
       const list = await publicAppointmentService.listFamilyMembers({ accountId: account.id })
       setFamilyMembers(list.members ?? [])
@@ -368,6 +408,47 @@ export const BookAppointment = () => {
       const msg = err?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'Failed to load family members. Please try again.')
     }
+  }
+
+  const handleSendFamilyOtp = async () => {
+    setError(null)
+    if (familyMobile.replace(/\D/g, '').length < 10) {
+      setError('Please enter a valid 10-digit mobile number.')
+      return
+    }
+    setFamilyOtpSending(true)
+    try {
+      await publicAppointmentService.sendFamilyOtp(familyMobileValue)
+      setFamilyOtpSent(true)
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Could not send OTP. You can skip for now.')
+    } finally {
+      setFamilyOtpSending(false)
+    }
+  }
+
+  const handleVerifyFamilyOtp = async () => {
+    setError(null)
+    if (familyOtp.trim().length < 4) {
+      setError('Enter the OTP sent to this mobile.')
+      return
+    }
+    setFamilyOtpSending(true)
+    try {
+      await publicAppointmentService.verifyFamilyOtp(familyMobileValue, familyOtp.trim())
+      await handleFamilyLogin()
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+      setError(typeof msg === 'string' ? msg : 'Invalid or expired OTP.')
+    } finally {
+      setFamilyOtpSending(false)
+    }
+  }
+
+  const handleSkipFamilyOtp = async () => {
+    setError(null)
+    await handleFamilyLogin()
   }
 
   const newMemberDobAge = useMemo(() => {
@@ -633,6 +714,7 @@ export const BookAppointment = () => {
       setBookingDayNotice('Today booking is closed. Choose next available date.')
       return
     }
+    window.history.pushState({ bookStep: 'payment' }, '')
     setStep('payment')
   }
 
@@ -664,6 +746,7 @@ export const BookAppointment = () => {
       }
       setAppointmentId(res.appointmentId)
       setSelectedPaymentMode(paymentMode)
+      window.history.pushState({ bookStep: 'confirm' }, '')
       setStep('confirm')
     } catch (err: any) {
       const msg = err?.response?.data?.message
@@ -806,15 +889,48 @@ export const BookAppointment = () => {
           id="family-primary-mobile"
           label="Primary Mobile No *"
           countryCode={familyCountryCode}
-          onCountryCodeChange={setFamilyCountryCode}
+          onCountryCodeChange={(code) => {
+            setFamilyCountryCode(code)
+            resetFamilyAccess()
+          }}
           phoneDigits={familyMobile}
-          onPhoneDigitsChange={setFamilyMobile}
+          onPhoneDigitsChange={(digits) => {
+            setFamilyMobile(digits)
+            resetFamilyAccess()
+          }}
         />
         <div className="book-appointment-field-action">
-          <Button onClick={handleFamilyLogin}>
-            Load Family
+          <Button onClick={() => void handleSendFamilyOtp()} disabled={familyOtpSending}>
+            {familyOtpSending && !familyOtpSent ? 'Sending…' : 'Send OTP'}
           </Button>
         </div>
+      </div>
+
+      <p className="public-section-text book-appointment-otp-note">
+        Verify this number before family details open. For now you can enter <strong>123456</strong> or skip OTP.
+      </p>
+
+      {familyOtpSent && (
+        <div className="book-appointment-form-grid">
+          <TextField
+            id="family-otp"
+            label="OTP *"
+            value={familyOtp}
+            onChange={(e) => setFamilyOtp(e.target.value)}
+            placeholder="6-digit OTP"
+          />
+          <div className="book-appointment-field-action">
+            <Button onClick={() => void handleVerifyFamilyOtp()} disabled={familyOtpSending}>
+              {familyOtpSending ? 'Checking…' : 'Verify & Load Family'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="book-appointment-otp-skip">
+        <Button variant="secondary" onClick={() => void handleSkipFamilyOtp()} disabled={familyOtpSending}>
+          Skip OTP for now
+        </Button>
       </div>
 
       {familyAccountId && (
@@ -1404,7 +1520,14 @@ export const BookAppointment = () => {
         {policyAccepted && step === 'details' && mode === 'family' && renderFamilyForm()}
         {policyAccepted && step === 'payment' && renderPayment()}
         {policyAccepted && step === 'confirm' && renderConfirm()}
-        {step !== 'confirm' && (
+        {step === 'payment' && (
+          <p className="book-appointment-back-link">
+            <button type="button" className="book-appointment-back-btn" onClick={() => window.history.back()}>
+              Back
+            </button>
+          </p>
+        )}
+        {step === 'details' && (
           <p className="book-appointment-back-link">
             <Link to="/">Back to home</Link>
           </p>

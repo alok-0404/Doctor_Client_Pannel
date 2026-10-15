@@ -1749,6 +1749,14 @@ export const publicAppointmentService = {
     return res.data as { appointmentId: string; patientId: string }
   },
 
+  async sendFamilyOtp(mobileNumber: string): Promise<void> {
+    await api.post('/public/family/send-otp', { mobileNumber })
+  },
+
+  async verifyFamilyOtp(mobileNumber: string, otp: string): Promise<void> {
+    await api.post('/public/family/verify-otp', { mobileNumber, otp })
+  },
+
   async familyLoginOrCreate(mobileNumber: string): Promise<FamilyAccountSummary> {
     const res = await api.post('/public/family/login-or-create', { mobileNumber })
     const data = res.data as { account: FamilyAccountSummary }

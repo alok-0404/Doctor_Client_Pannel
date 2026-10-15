@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 import path from "path";
 
 import { Doctor } from "../models/Doctor";
@@ -15,6 +16,8 @@ import {
 } from "../services/patientService";
 import { FamilyAccount } from "../models/FamilyAccount";
 import { FamilyMember } from "../models/FamilyMember";
+import { PatientOtpSession } from "../models/PatientOtpSession";
+import { sendOtpToWhatsapp } from "../services/whatsappService";
 import { PatientTestRequest } from "../models/PatientTestRequest";
 import { PatientMedicineRequest } from "../models/PatientMedicineRequest";
 import { env } from "../config/env";
@@ -499,6 +502,69 @@ async function rejectIfSlotTaken(
   });
   return true;
 }
+
+const BOOKING_OTP_EXPIRY_MS = 10 * 60 * 1000;
+/** Temporary test code so booking can continue before WhatsApp OTP delivery is live. */
+const BOOKING_TEST_OTP = "123456";
+
+// POST /public/family/send-otp — prove the mobile before family details are shown.
+// Does not require an existing patient profile (new bookings).
+router.post("/family/send-otp", async (req, res) => {
+  try {
+    const { mobileNumber } = req.body as { mobileNumber?: string };
+    const mobile = (mobileNumber || "").trim();
+    const digits = mobile.replace(/\D/g, "");
+    if (digits.length < 10) {
+      res.status(400).json({ message: "Enter a valid mobile number" });
+      return;
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + BOOKING_OTP_EXPIRY_MS);
+    await PatientOtpSession.deleteMany({ mobile });
+    await PatientOtpSession.create({ mobile, otpHash, expiresAt });
+    await sendOtpToWhatsapp(mobile, otp);
+    res.status(200).json({ message: "OTP sent" });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/send-otp error:", error);
+    res.status(500).json({ message: "Could not send OTP" });
+  }
+});
+
+// POST /public/family/verify-otp
+// Accepts the WhatsApp OTP, or 123456 while delivery is still being bypassed.
+router.post("/family/verify-otp", async (req, res) => {
+  try {
+    const { mobileNumber, otp } = req.body as { mobileNumber?: string; otp?: string };
+    const mobile = (mobileNumber || "").trim();
+    const code = (otp || "").trim();
+    if (!mobile || !code) {
+      res.status(400).json({ message: "Mobile and OTP are required" });
+      return;
+    }
+    if (code === BOOKING_TEST_OTP) {
+      res.status(200).json({ verified: true });
+      return;
+    }
+
+    const session = await PatientOtpSession.findOne({
+      mobile,
+      expiresAt: { $gt: new Date() },
+    });
+    if (!session || !(await bcrypt.compare(code, session.otpHash))) {
+      res.status(400).json({ message: "Invalid or expired OTP" });
+      return;
+    }
+    await PatientOtpSession.deleteOne({ _id: session._id });
+    res.status(200).json({ verified: true });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("public /family/verify-otp error:", error);
+    res.status(500).json({ message: "Could not verify OTP" });
+  }
+});
 
 // POST /public/family/login-or-create
 // Body: { mobileNumber: string }

@@ -5169,6 +5169,24 @@ body {
   text-align: center;
 }
 
+.book-appointment-back-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.book-appointment-otp-note {
+  margin: 0 0 14px;
+}
+
+.book-appointment-otp-skip {
+  margin: 0 0 16px;
+}
+
 .book-appointment-consent-card {
   max-width: none;
   width: 100%;

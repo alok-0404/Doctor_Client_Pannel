@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 
 import { authService } from '../services/api'
 import { authStorage } from '../utils/authStorage'
+import { tryBookAppointmentBack } from '../utils/bookAppointmentBack'
 
 export const GlobalBackButton = () => {
   const navigate = useNavigate()
@@ -39,6 +40,9 @@ export const GlobalBackButton = () => {
   const handleBack = () => {
     if (dashboardRoots.has(location.pathname)) {
       setShowLogoutConfirm(true)
+      return
+    }
+    if (location.pathname === '/book-appointment' && tryBookAppointmentBack()) {
       return
     }
     navigate(-1)
