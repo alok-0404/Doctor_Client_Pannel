@@ -27,7 +27,7 @@ export interface DoctorSlotsResult {
   slots: DoctorSlot[];
 }
 
-const DEFAULT_OPD_SESSIONS = "10:00-13:00,17:00-20:00";
+const DEFAULT_OPD_SESSIONS = "10:00-19:00";
 const DEFAULT_SLOT_MINUTES = 30;
 const DEFAULT_CAPACITY_PER_SLOT = 1;
 /** Today's slots that start sooner than this are not offered. */
@@ -42,7 +42,7 @@ function parseHHMM(value: string): number | null {
   return h * 60 + min;
 }
 
-/** OPD_SESSIONS="10:00-13:00,17:00-20:00" (IST, 24h). Invalid entries are ignored. */
+/** OPD_SESSIONS="10:00-19:00" or "10:00-13:00,17:00-20:00" (IST, 24h). Invalid entries are ignored. */
 export function parseOpdSessions(raw: string | undefined): OpdSession[] {
   const sessions: OpdSession[] = [];
   for (const part of String(raw || DEFAULT_OPD_SESSIONS).split(",")) {

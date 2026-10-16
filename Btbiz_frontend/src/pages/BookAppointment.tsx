@@ -6,6 +6,7 @@ import {
   type DoctorAppointmentQuotaSnapshot,
   type FamilyMemberSummary,
   type FamilyRelation,
+  type ReviewEligibility,
 } from '../services/api'
 import { patientStorage } from '../utils/patientStorage'
 import { setBookAppointmentBackHandler } from '../utils/bookAppointmentBack'
@@ -23,9 +24,28 @@ import { TextField } from '../components/ui/TextField'
 
 type Mode = 'none' | 'family'
 type Step = 'details' | 'payment' | 'confirm'
-type PaymentMode = 'online_now' | 'cash_at_clinic'
+type PaymentMode = 'online_now' | 'cash_at_clinic' | 'free_review'
+type BookingField = 'member' | 'consultant' | 'patientName' | 'gender' | 'date' | 'slot'
+
+const BOOKING_FIELD_ELEMENT_IDS: Record<BookingField, string> = {
+  member: 'family-member-select',
+  consultant: 'family-consultant',
+  patientName: 'family-patient-name',
+  gender: 'family-gender',
+  date: 'family-appointment-date',
+  slot: 'family-preferred-slot',
+}
+const BOOKING_FIELD_ORDER: BookingField[] = ['member', 'consultant', 'patientName', 'gender', 'date', 'slot']
 
 const CONSULTATION_TYPES = ['New Consultation', 'Review Appointment']
+const REVIEW_CONSULTATION = 'Review Appointment'
+
+function formatDisplayDate(dateKey?: string): string {
+  if (!dateKey) return ''
+  const d = new Date(`${dateKey}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return dateKey
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 const GENDERS = ['MALE', 'FEMALE', 'OTHER']
 const RELATIONS: Array<{ value: FamilyRelation; label: string }> = [
   { value: 'SELF', label: 'Self' },
@@ -44,6 +64,10 @@ const TIME_SLOTS = [
   '12:00 - 1:00 PM',
   '1:00 - 2:00 PM',
   '2:00 - 3:00 PM',
+  '3:00 - 4:00 PM',
+  '4:00 - 5:00 PM',
+  '5:00 - 6:00 PM',
+  '6:00 - 7:00 PM',
 ]
 
 const MSG_SELF_MIN_AGE =
@@ -181,6 +205,8 @@ export const BookAppointment = () => {
   const [familyAddress, setFamilyAddress] = useState('')
   const [familyPrefilled, setFamilyPrefilled] = useState({ name: false, gender: false, address: false })
   const [showConfirmedPopup, setShowConfirmedPopup] = useState(false)
+  const [reviewCheck, setReviewCheck] = useState<ReviewEligibility | null>(null)
+  const [reviewCheckLoading, setReviewCheckLoading] = useState(false)
 
   const [addingMember, setAddingMember] = useState(false)
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
@@ -195,6 +221,7 @@ export const BookAppointment = () => {
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<BookingField, string>>>({})
   const [appointmentId, setAppointmentId] = useState<string | null>(null)
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode | null>(null)
   const [profileSessionReady, setProfileSessionReady] = useState<boolean>(() => !!patientStorage.getToken())
@@ -230,9 +257,6 @@ export const BookAppointment = () => {
       .listConsultants()
       .then((list) => {
         setConsultants(list)
-        if (list.length > 0) {
-          setFamilyConsultantId((prev) => prev || list[0].id)
-        }
       })
       .catch(() => {
         setError('Unable to load consultants. Please try again later.')
@@ -391,6 +415,17 @@ export const BookAppointment = () => {
     }
   }, [appointmentId, policyAccepted])
 
+  const consultantGroups = useMemo(() => {
+    const groups = new Map<string, ConsultantOption[]>()
+    for (const c of consultants) {
+      const label = c.departmentLabel || 'General Medicine'
+      groups.set(label, [...(groups.get(label) ?? []), c])
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => (a === 'General Medicine' ? -1 : b === 'General Medicine' ? 1 : a.localeCompare(b)))
+      .map(([label, doctors]) => ({ label, doctors }))
+  }, [consultants])
+
   const selectedConsultantId = mode === 'family' ? familyConsultantId : ''
   const selectedConsultant = consultants.find((c) => c.id === selectedConsultantId)
   const todayStart = useMemo(() => startOfDay(new Date()), [])
@@ -423,6 +458,7 @@ export const BookAppointment = () => {
   const resetState = () => {
     setStep('details')
     setError(null)
+    setFieldErrors({})
     setAppointmentId(null)
     setSelectedPaymentMode(null)
   }
@@ -438,6 +474,44 @@ export const BookAppointment = () => {
   )
 
   const selectedFamilyPatientId = selectedFamilyMember?.patientId ?? selectedFamilyMember?.patient?.id ?? null
+
+  const selectedFamilyMemberAge = useMemo(() => {
+    const dob = selectedFamilyMember?.dateOfBirth ?? selectedFamilyMember?.patient?.dateOfBirth
+    if (!dob) return null
+    const d = new Date(dob)
+    if (Number.isNaN(d.getTime())) return null
+    return completedAgeYears(d)
+  }, [selectedFamilyMember])
+
+  useEffect(() => {
+    setFieldErrors((prev) => {
+      const filled: Record<BookingField, boolean> = {
+        member: Boolean(selectedFamilyMemberId && selectedFamilyPatientId),
+        consultant: Boolean(familyConsultantId),
+        patientName: Boolean(familyPatientName.trim()),
+        gender: Boolean(familyGender),
+        date: Boolean(appointmentDate),
+        slot: !preferredSlot || !isSlotPassed(preferredSlot),
+      }
+      const next = { ...prev }
+      let changed = false
+      for (const f of Object.keys(prev) as BookingField[]) {
+        if (filled[f]) {
+          delete next[f]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [
+    selectedFamilyMemberId,
+    selectedFamilyPatientId,
+    familyConsultantId,
+    familyPatientName,
+    familyGender,
+    appointmentDate,
+    preferredSlot,
+  ])
 
   const applyFamilyMemberToBooking = useCallback((member: FamilyMemberSummary | null) => {
     if (!member) {
@@ -751,6 +825,80 @@ export const BookAppointment = () => {
   const isSlotPassed = (slot: string) =>
     Boolean(appointmentDate) && appointmentDate === clock.dateKey && slotStartMinutes(slot) < clock.minutes
 
+  const isReviewBooking = familyConsultationType === REVIEW_CONSULTATION
+  const isFreeReview = isReviewBooking && reviewCheck?.eligible === true
+
+  useEffect(() => {
+    if (!isReviewBooking || !selectedFamilyPatientId || !familyConsultantId || !appointmentDate) {
+      setReviewCheck(null)
+      return
+    }
+    let cancelled = false
+    setReviewCheckLoading(true)
+    publicAppointmentService
+      .checkReviewEligibility(selectedFamilyPatientId, familyConsultantId, appointmentDate)
+      .then((result) => {
+        if (!cancelled) setReviewCheck(result)
+      })
+      .catch(() => {
+        if (!cancelled) setReviewCheck(null)
+      })
+      .finally(() => {
+        if (!cancelled) setReviewCheckLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isReviewBooking, selectedFamilyPatientId, familyConsultantId, appointmentDate])
+
+  const reviewNotEligibleMessage = (check: ReviewEligibility) =>
+    check.reason === 'WINDOW_EXPIRED'
+      ? `${check.windowDays} days completed since your last consultation on ${formatDisplayDate(check.consultationDate)} (free review was valid till ${formatDisplayDate(check.validUntil)}). Please book a fresh New Consultation.`
+      : 'No previous consultation found with this doctor. A free review is only for patients who consulted this doctor in the last 10 days. Please book a New Consultation.'
+
+  const renderReviewNotice = () => {
+    if (!isReviewBooking) return null
+    if (!selectedFamilyPatientId || !familyConsultantId || !appointmentDate) {
+      return (
+        <p className="book-appointment-review-note">
+          Select the doctor and date to confirm your review appointment.
+        </p>
+      )
+    }
+    if (reviewCheckLoading) {
+      return <p className="book-appointment-review-note">Checking your free review eligibility…</p>
+    }
+    if (!reviewCheck) return null
+    if (reviewCheck.eligible && !reviewCheck.enforced) {
+      return (
+        <p className="book-appointment-review-note is-ok" role="status">
+          ✅ Review appointment is free — no consultation fee for this visit.
+        </p>
+      )
+    }
+    if (reviewCheck.eligible) {
+      return (
+        <p className="book-appointment-review-note is-ok" role="status">
+          ✅ Free review — within {reviewCheck.windowDays} days of your consultation on{' '}
+          <strong>{formatDisplayDate(reviewCheck.consultationDate)}</strong>. Valid till{' '}
+          <strong>{formatDisplayDate(reviewCheck.validUntil)}</strong>. No fee for this visit.
+        </p>
+      )
+    }
+    return (
+      <div className="book-appointment-review-note is-expired" role="alert">
+        <p>⚠️ {reviewNotEligibleMessage(reviewCheck)}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setFamilyConsultationType(CONSULTATION_TYPES[0])}
+        >
+          Switch to New Consultation
+        </Button>
+      </div>
+    )
+  }
+
   useEffect(() => {
     if (preferredSlot && isSlotPassed(preferredSlot)) setPreferredSlot('')
   }, [preferredSlot, appointmentDate, clock])
@@ -779,14 +927,6 @@ export const BookAppointment = () => {
 
   const goToPayment = () => {
     setError(null)
-    if (!appointmentDate) {
-      setError('Please select appointment date.')
-      return
-    }
-    if (preferredSlot && isSlotPassed(preferredSlot)) {
-      setError('That time has already passed today. Choose a later slot.')
-      return
-    }
     if (mode !== 'family') {
       setError('Please select New Patient.')
       return
@@ -795,17 +935,32 @@ export const BookAppointment = () => {
       setError('Please login with your mobile number first.')
       return
     }
-    if (!selectedFamilyMemberId || !selectedFamilyPatientId) {
-      setError('Please select a family member.')
+    const errors: Partial<Record<BookingField, string>> = {}
+    if (!selectedFamilyMemberId || !selectedFamilyPatientId) errors.member = 'Please select a family member.'
+    if (!familyConsultantId) errors.consultant = 'Please select a consultant.'
+    if (selectedFamilyMemberId) {
+      if (!familyPatientName.trim()) errors.patientName = 'Please enter patient name.'
+      if (!familyGender) errors.gender = 'Please select gender.'
+    }
+    if (!appointmentDate) errors.date = 'Please select appointment date.'
+    if (preferredSlot && isSlotPassed(preferredSlot)) errors.slot = 'That time has already passed today. Choose a later slot.'
+    setFieldErrors(errors)
+    const firstInvalid = BOOKING_FIELD_ORDER.find((f) => errors[f])
+    if (firstInvalid) {
+      const el = document.getElementById(BOOKING_FIELD_ELEMENT_IDS[firstInvalid])
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el?.focus({ preventScroll: true })
       return
     }
-    if (!familyConsultantId) {
-      setError('Please select a consultant.')
-      return
-    }
-    if (!familyPatientName || !familyGender) {
-      setError('Please fill patient name and gender.')
-      return
+    if (isReviewBooking) {
+      if (reviewCheckLoading || !reviewCheck) {
+        setError('Checking free review eligibility. Please wait a moment and try again.')
+        return
+      }
+      if (!reviewCheck.eligible) {
+        setError(reviewNotEligibleMessage(reviewCheck))
+        return
+      }
     }
     if (
       appointmentQuota &&
@@ -837,7 +992,8 @@ export const BookAppointment = () => {
           address: familyAddress || undefined,
           ...(userLocation && { patientLatitude: userLocation.lat, patientLongitude: userLocation.lng }),
           source: 'WEBSITE',
-          paymentMode: paymentMode === 'online_now' ? 'ONLINE' : 'CASH_AT_CLINIC',
+          paymentMode:
+            paymentMode === 'free_review' ? undefined : paymentMode === 'online_now' ? 'ONLINE' : 'CASH_AT_CLINIC',
         })
       } else {
         setError('Please select New Patient.')
@@ -1030,12 +1186,13 @@ export const BookAppointment = () => {
 
       {familyAccountId && (
         <>
-          <div className="book-appointment-select-field">
+          <div className={`book-appointment-select-field${fieldErrors.member ? ' book-appointment-select-field--error' : ''}`}>
             <label htmlFor="family-member-select">Select Family Member *</label>
             <select
               id="family-member-select"
               value={selectedFamilyMemberId}
               onChange={(e) => handleSelectFamilyMember(e.target.value)}
+              aria-invalid={fieldErrors.member ? true : undefined}
             >
               <option value="">Select member</option>
               {familyMembers.map((m) => (
@@ -1044,6 +1201,12 @@ export const BookAppointment = () => {
                 </option>
               ))}
             </select>
+            {fieldErrors.member && <p className="book-appointment-field-error">{fieldErrors.member}</p>}
+            {selectedFamilyMemberAge !== null && selectedFamilyMemberAge < 18 && (
+              <p role="note" className="book-appointment-minor-note">
+                {MSG_MINOR_FAMILY_DISCLAIMER}
+              </p>
+            )}
           </div>
 
           <div className="book-appointment-member-toolbar">
@@ -1235,11 +1398,14 @@ export const BookAppointment = () => {
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
+            {renderReviewNotice()}
           </div>
 
           <div className="book-appointment-form-grid">
-            <div className="book-appointment-select-field">
-              <label htmlFor="family-consultant">Name of Consultant *</label>
+            <div className={`book-appointment-select-field${fieldErrors.consultant ? ' book-appointment-select-field--error' : ''}`}>
+              <label htmlFor="family-consultant">
+                Name of Consultant <span className="book-appointment-required">*</span>
+              </label>
               <select
                 id="family-consultant"
                 name="familyConsultantId"
@@ -1247,12 +1413,21 @@ export const BookAppointment = () => {
                 value={familyConsultantId}
                 onChange={(e) => setFamilyConsultantId(e.target.value)}
                 disabled={loadingConsultants}
+                required
+                aria-invalid={fieldErrors.consultant ? true : undefined}
               >
-                {consultants.length === 0 && <option value="">Loading…</option>}
-                {consultants.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                <option value="">{consultants.length === 0 ? 'Loading…' : 'Select doctor'}</option>
+                {consultantGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.doctors.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.specialization ? `${c.name} — ${c.specialization}` : c.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
+              {fieldErrors.consultant && <p className="book-appointment-field-error">{fieldErrors.consultant}</p>}
               {loadingConsultants && (
                 <div className="book-appointment-skeleton-inline" aria-busy="true" aria-label="Loading consultants...">
                   <Skeleton lines={2} />
@@ -1283,8 +1458,9 @@ export const BookAppointment = () => {
               readOnly={familyPrefilled.name}
               className={familyPrefilled.name ? 'book-appointment-locked-input' : ''}
               title={familyPrefilled.name ? 'Saved in family profile' : undefined}
+              error={fieldErrors.patientName}
             />
-            <div className="book-appointment-select-field">
+            <div className={`book-appointment-select-field${fieldErrors.gender ? ' book-appointment-select-field--error' : ''}`}>
               <label htmlFor="family-gender">Gender *</label>
               <select
                 id="family-gender"
@@ -1294,12 +1470,14 @@ export const BookAppointment = () => {
                 disabled={!selectedFamilyMemberId || familyPrefilled.gender}
                 className={familyPrefilled.gender ? 'book-appointment-locked-input' : undefined}
                 title={familyPrefilled.gender ? 'Saved in family profile' : undefined}
+                aria-invalid={fieldErrors.gender ? true : undefined}
               >
                 <option value="">Select Gender</option>
                 {GENDERS.map((g) => (
                   <option key={g} value={g}>{g}</option>
                 ))}
               </select>
+              {fieldErrors.gender && <p className="book-appointment-field-error">{fieldErrors.gender}</p>}
             </div>
           </div>
           <TextField
@@ -1316,9 +1494,9 @@ export const BookAppointment = () => {
           />
 
           <div className="book-appointment-form-grid">
-            <div className="book-appointment-select-field">
+            <div className={`book-appointment-select-field${fieldErrors.date ? ' book-appointment-select-field--error' : ''}`}>
               <label htmlFor="family-appointment-date">Appointment Date *</label>
-              <div className="book-appointment-calendar">
+              <div id="family-appointment-date" tabIndex={-1} className="book-appointment-calendar">
                 <div className="book-appointment-calendar-head">
                   <Button
                     size="sm"
@@ -1393,6 +1571,7 @@ export const BookAppointment = () => {
                   <span><i className="dot busy" /> Busy</span>
                 </div>
               </div>
+              {fieldErrors.date && <p className="book-appointment-field-error">{fieldErrors.date}</p>}
               {dateAvailabilityLoading && (
                 <div className="book-appointment-skeleton-inline" aria-busy="true" aria-label="Checking month availability...">
                   <Skeleton lines={2} />
@@ -1404,13 +1583,14 @@ export const BookAppointment = () => {
                 </p>
               )}
             </div>
-            <div className="book-appointment-select-field">
+            <div className={`book-appointment-select-field${fieldErrors.slot ? ' book-appointment-select-field--error' : ''}`}>
               <label htmlFor="family-preferred-slot">Preferred time (approx)</label>
               <select
                 id="family-preferred-slot"
                 name="preferredSlot"
                 value={preferredSlot}
                 onChange={(e) => setPreferredSlot(e.target.value)}
+                aria-invalid={fieldErrors.slot ? true : undefined}
               >
                 <option value="">Select slot</option>
                 {TIME_SLOTS.map((s) => {
@@ -1422,6 +1602,7 @@ export const BookAppointment = () => {
                   )
                 })}
               </select>
+              {fieldErrors.slot && <p className="book-appointment-field-error">{fieldErrors.slot}</p>}
               <p className="book-appointment-slot-disclaimer">
                 This time can move earlier or later depending on the patients already waiting. Choosing 11:00 does not mean your turn will be called at 11:00.
               </p>
@@ -1499,7 +1680,29 @@ export const BookAppointment = () => {
     </Card>
   )
 
-  const renderPayment = () => (
+  const renderPayment = () => isFreeReview ? (
+    <Card className="book-appointment-panel book-appointment-payment-card" elevated>
+      <h2 className="public-section-title book-appointment-payment-title">Free review</h2>
+      <p className="public-section-text book-appointment-payment-fee">
+        Consultation fee: <strong>₹0</strong> (free review)
+      </p>
+      <p className="public-section-text book-appointment-payment-lead">
+        {reviewCheck?.enforced ? (
+          <>
+            This review is within {reviewCheck.windowDays} days of your consultation on{' '}
+            <strong>{formatDisplayDate(reviewCheck.consultationDate)}</strong>, so there is no charge.
+          </>
+        ) : (
+          'Review appointments are free, so there is no charge for this visit.'
+        )}
+      </p>
+      <div className="book-appointment-payment-actions">
+        <Button onClick={() => void handleConfirmAppointment('free_review')} disabled={submitting}>
+          {submitting ? 'Processing…' : 'Confirm free review'}
+        </Button>
+      </div>
+    </Card>
+  ) : (
     <Card className="book-appointment-panel book-appointment-payment-card" elevated>
       <h2 className="public-section-title book-appointment-payment-title">Payment</h2>
       <p className="public-section-text book-appointment-payment-fee">
@@ -1535,7 +1738,8 @@ export const BookAppointment = () => {
       : appointmentDate || '—'
     return preferredSlot ? `${date}, ${preferredSlot}` : date
   }
-  const confirmPaid = selectedPaymentMode !== 'cash_at_clinic'
+  const confirmFree = selectedPaymentMode === 'free_review'
+  const confirmPaid = selectedPaymentMode === 'online_now'
 
   const renderConfirm = () => (
     <Card className="book-appointment-panel book-appointment-confirm-card" elevated>
@@ -1552,15 +1756,28 @@ export const BookAppointment = () => {
         <p className="book-appointment-confirm-line"><strong>Name:</strong> {getConfirmName()}</p>
         <p className="book-appointment-confirm-line"><strong>Mobile:</strong> {getConfirmMobile()}</p>
         {selectedConsultant && (
-          <p className="book-appointment-confirm-line"><strong>Doctor:</strong> {selectedConsultant.name}</p>
+          <p className="book-appointment-confirm-line">
+            <strong>Doctor:</strong> {selectedConsultant.name}
+            {selectedConsultant.departmentLabel ? ` (${selectedConsultant.departmentLabel})` : ''}
+          </p>
         )}
         <p className="book-appointment-confirm-line"><strong>Date &amp; time:</strong> {getConfirmWhen()}</p>
         <p className="book-appointment-confirm-line">
-          <strong>Fee:</strong> ₹500{' '}
-          <span className={`appointment-pay-badge ${confirmPaid ? 'is-paid' : 'is-unpaid'}`}>
-            {confirmPaid ? 'Paid' : 'Unpaid'}
-          </span>
-          {' '}{confirmPaid ? 'Paid online during booking' : 'Cash at clinic (on appointment day)'}
+          {confirmFree ? (
+            <>
+              <strong>Fee:</strong> ₹0{' '}
+              <span className="appointment-pay-badge is-free">Free review</span>
+              {' '}No consultation fee for review
+            </>
+          ) : (
+            <>
+              <strong>Fee:</strong> ₹500{' '}
+              <span className={`appointment-pay-badge ${confirmPaid ? 'is-paid' : 'is-unpaid'}`}>
+                {confirmPaid ? 'Paid' : 'Unpaid'}
+              </span>
+              {' '}{confirmPaid ? 'Paid online during booking' : 'Cash at clinic (on appointment day)'}
+            </>
+          )}
         </p>
       </div>
       <p className="public-section-text book-appointment-confirm-footer">

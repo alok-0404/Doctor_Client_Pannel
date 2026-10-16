@@ -12,6 +12,7 @@ import ocrService from "../ocrService";
 import { getIo } from "../socket";
 import { Visit } from "../models/Visit";
 import { env } from "../config/env";
+import { findHospitalDoctor, hospitalDoctorObjectIds, listHospitalDoctors } from "../services/hospitalDoctorService";
 import {
   findExistingUploadFilePath,
   toStoredUploadPath,
@@ -228,12 +229,20 @@ export const createVisit = async (
     if (req.doctor?.role === "LAB_ASSISTANT" || req.doctor?.role === "LAB_MANAGER") {
       doctorId = req.doctor._id.toString();
     } else if (req.doctor?.role === "ASSISTANT") {
-      const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-      if (!assistant?.createdByDoctorId) {
-        res.status(400).json({ message: "Assistant is not linked to a doctor. Cannot refer patient." });
-        return;
+      // Walk-in at the hospital desk: refer to the chosen doctor, else the assistant's own doctor.
+      if (doctorId) {
+        if (!(await findHospitalDoctor(doctorId))) {
+          res.status(400).json({ message: "Selected doctor is not part of this hospital." });
+          return;
+        }
+      } else {
+        const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
+        if (!assistant?.createdByDoctorId) {
+          res.status(400).json({ message: "Please choose the doctor to refer this patient to." });
+          return;
+        }
+        doctorId = (assistant.createdByDoctorId as any).toString();
       }
-      doctorId = (assistant.createdByDoctorId as any).toString();
     } else if (!doctorId) {
       res.status(400).json({ message: "Doctor is required for the visit" });
       return;
@@ -343,20 +352,16 @@ export const recordVitalsAndReferForExistingVisit = async (
       return;
     }
 
-    const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-    if (!assistant?.createdByDoctorId) {
-      res.status(400).json({ message: "Assistant is not linked to a doctor. Cannot refer patient." });
-      return;
-    }
-    const doctorId = (assistant.createdByDoctorId as any).toString();
-
     const visit = await Visit.findById(visitId).lean();
     if (!visit) {
       res.status(404).json({ message: "Visit not found." });
       return;
     }
-    if (visit.patient.toString() !== patientId || visit.doctor.toString() !== doctorId) {
-      res.status(403).json({ message: "This visit does not belong to this patient or your doctor." });
+    // Referral always goes to the doctor the patient booked with.
+    const doctorId = visit.doctor.toString();
+    const referredDoctor = await findHospitalDoctor(doctorId);
+    if (visit.patient.toString() !== patientId || !referredDoctor) {
+      res.status(403).json({ message: "This visit does not belong to this patient or this hospital." });
       return;
     }
 
@@ -403,8 +408,10 @@ export const recordVitalsAndReferForExistingVisit = async (
     }
 
     res.status(200).json({
-      message: "Patient referred to doctor.",
-      notificationId: notification._id.toString()
+      message: `Patient referred to ${referredDoctor.name}.`,
+      notificationId: notification._id.toString(),
+      doctorId,
+      doctorName: referredDoctor.name
     });
   } catch (error) {
     if (error instanceof Error) {
@@ -625,9 +632,8 @@ export const listPendingAssistantDocuments = async (req: Request, res: Response)
       return;
     }
 
-    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-    const parentDoctorId = (assistantDoc as { createdByDoctorId?: unknown } | null)?.createdByDoctorId;
-    if (!parentDoctorId) {
+    const hospitalDoctorIds = hospitalDoctorObjectIds(await listHospitalDoctors());
+    if (!hospitalDoctorIds.length) {
       res.status(200).json({ items: [] });
       return;
     }
@@ -635,15 +641,14 @@ export const listPendingAssistantDocuments = async (req: Request, res: Response)
     const orderParam = String(req.query.order ?? "").toLowerCase();
     const sortDir = orderParam === "desc" ? -1 : 1;
 
-    const parentOid = new mongoose.Types.ObjectId(String(parentDoctorId));
     const assistantOid = new mongoose.Types.ObjectId(String(req.doctor._id));
 
     const [patientIdsFromStaffPending, patientIdsFromVisits] = await Promise.all([
       PatientDocument.distinct("patient", {
         patientPublishStatus: "PENDING_ASSISTANT",
-        uploadedBy: { $in: [assistantOid, parentOid] },
+        uploadedBy: { $in: [assistantOid, ...hospitalDoctorIds] },
       }),
-      Visit.distinct("patient", { doctor: parentOid }),
+      Visit.distinct("patient", { doctor: { $in: hospitalDoctorIds } }),
     ]);
 
     const patientIdSet = new Set<string>([

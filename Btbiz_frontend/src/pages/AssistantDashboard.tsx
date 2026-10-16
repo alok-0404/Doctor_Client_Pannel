@@ -26,6 +26,7 @@ import {
   type AssistantFamilyOption,
   type AssistantPatientPrefill,
   type AssistantPendingDocumentItem,
+  type HospitalDoctorOption,
 } from '../services/api'
 import { toast } from 'react-toastify'
 import { parseAssistantReferralError } from '../utils/assistantErrors'
@@ -90,6 +91,12 @@ export const AssistantDashboard = () => {
   const [patientId, setPatientId] = useState<string | null>(null)
   const [hasTodayVisit, setHasTodayVisit] = useState(false)
   const [todayVisitId, setTodayVisitId] = useState<string | null>(null)
+  /** Doctor of today's booked visit — referral goes to this doctor automatically. */
+  const [checkinVisitDoctor, setCheckinVisitDoctor] = useState<{ name: string; department?: string } | null>(null)
+  const [hospitalDoctors, setHospitalDoctors] = useState<HospitalDoctorOption[]>([])
+  const [doctorFilter, setDoctorFilter] = useState<string>('all')
+  /** Walk-in (no booking today): doctor chosen at the desk. */
+  const [walkInDoctorId, setWalkInDoctorId] = useState('')
   const [prefilledFromVisitAt, setPrefilledFromVisitAt] = useState<string | null>(null)
   /** When assistant check-in was recorded on the visit (wall clock), if any. */
   const [prefilledAssistantCheckInAt, setPrefilledAssistantCheckInAt] = useState<string | null>(null)
@@ -114,12 +121,13 @@ export const AssistantDashboard = () => {
   const [otherVitalsNotes, setOtherVitalsNotes] = useState('')
 
   const [notesForDoctor, setNotesForDoctor] = useState('')
-  const [referredToDoctorName, setReferredToDoctorName] = useState<string | null>(null)
 
-  // Doctor availability (real-time for assistant) – assistant can also update on doctor's behalf
-  const [doctorAvailabilityStatus, setDoctorAvailabilityStatus] = useState<AvailabilityStatus>('available')
-  const [doctorUnavailableReason, setDoctorUnavailableReason] = useState<string | null>(null)
-  const [doctorUnavailableUntil, setDoctorUnavailableUntil] = useState<string | null>(null)
+  // Doctor availability (real-time for assistant) – assistant can update any hospital doctor on their behalf
+  const [availabilityDoctorId, setAvailabilityDoctorId] = useState('')
+  const availabilityDoctor = hospitalDoctors.find((d) => d.id === availabilityDoctorId) ?? null
+  const doctorAvailabilityStatus: AvailabilityStatus = availabilityDoctor?.availabilityStatus ?? 'available'
+  const doctorUnavailableReason = availabilityDoctor?.unavailableReason ?? null
+  const doctorUnavailableUntil = availabilityDoctor?.unavailableUntil ?? null
   const [availabilityUpdating, setAvailabilityUpdating] = useState(false)
   const [availabilityUpdateSuccess, setAvailabilityUpdateSuccess] = useState<string | null>(null)
   const [availabilityUpdateError, setAvailabilityUpdateError] = useState<string | null>(null)
@@ -170,6 +178,11 @@ export const AssistantDashboard = () => {
   const [verifyPreviewLoading, setVerifyPreviewLoading] = useState(false)
   const [verifyPreviewError, setVerifyPreviewError] = useState<string | null>(null)
   const verifyPreviewUrlRef = useRef<string | null>(null)
+  const docFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!docFile && docFileInputRef.current) docFileInputRef.current.value = ''
+  }, [docFile])
 
   const [saveLoading, setSaveLoading] = useState(false)
   const [referLoading, setReferLoading] = useState(false)
@@ -214,22 +227,44 @@ export const AssistantDashboard = () => {
   const [familyOptions, setFamilyOptions] = useState<AssistantFamilyOption[] | null>(null)
   const [familyPickMobile, setFamilyPickMobile] = useState<string | null>(null)
 
-  const loadProfile = async () => {
+  const applyDoctorAvailability = (
+    doctorId: string,
+    data: { availabilityStatus: AvailabilityStatus; unavailableReason?: string | null; unavailableUntil?: string | null }
+  ) => {
+    setHospitalDoctors((prev) =>
+      prev.map((d) =>
+        d.id === doctorId
+          ? {
+              ...d,
+              availabilityStatus: data.availabilityStatus,
+              unavailableReason: data.unavailableReason || undefined,
+              unavailableUntil: data.unavailableUntil || undefined,
+            }
+          : d
+      )
+    )
+  }
+
+  const selectAvailabilityDoctor = (doctor: HospitalDoctorOption | null) => {
+    setAvailabilityDoctorId(doctor?.id ?? '')
+    setUnavailableReason(doctor?.unavailableReason ?? '')
+    setUnavailableDuration('')
+    setUnavailableUntilCustom('')
+    setAvailabilityUpdateSuccess(null)
+    setAvailabilityUpdateError(null)
+  }
+
+  const loadHospitalDoctors = async (isInitial = false) => {
     try {
-      const { doctor } = await authService.getProfile()
-      if (doctor.referredToDoctorName) setReferredToDoctorName(doctor.referredToDoctorName)
-      if (doctor.availabilityStatus) setDoctorAvailabilityStatus(doctor.availabilityStatus as AvailabilityStatus)
-      if (doctor.unavailableReason) {
-        setDoctorUnavailableReason(doctor.unavailableReason)
-        setUnavailableReason(doctor.unavailableReason)
-      } else {
-        setDoctorUnavailableReason(null)
-        setUnavailableReason('')
-      }
-      if (doctor.unavailableUntil) setDoctorUnavailableUntil(doctor.unavailableUntil)
-      else setDoctorUnavailableUntil(null)
+      const { linkedDoctorId, doctors } = await appointmentService.getAssistantHospitalDoctors()
+      const list = doctors ?? []
+      setHospitalDoctors(list)
+      if (!isInitial) return
+      const linked = linkedDoctorId ? list.find((d) => d.id === linkedDoctorId) : undefined
+      if (linked) setWalkInDoctorId((prev) => prev || linked.id)
+      selectAvailabilityDoctor(linked ?? list[0] ?? null)
     } catch {
-      // ignore
+      if (isInitial) setHospitalDoctors([])
     }
   }
 
@@ -245,6 +280,7 @@ export const AssistantDashboard = () => {
   }
 
   const handleSetAvailability = async (status: AvailabilityStatus) => {
+    if (!availabilityDoctor) return
     setAvailabilityUpdateSuccess(null)
     setAvailabilityUpdateError(null)
     setAvailabilityUpdating(true)
@@ -252,21 +288,22 @@ export const AssistantDashboard = () => {
       // Only "unavailable" requires a reason and time period. "busy" is simple.
       const until = status === 'unavailable' ? getUnavailableUntilISO() : undefined
       const res = await authService.updateDoctorAvailability({
+        doctorId: availabilityDoctor.id,
         availabilityStatus: status,
         unavailableReason: status === 'unavailable' ? unavailableReason : undefined,
         unavailableUntil: until
       })
-      setDoctorAvailabilityStatus(status)
-      if (status === 'available') {
-        setDoctorUnavailableUntil(null)
-      } else if (res.unavailableUntil) {
-        setDoctorUnavailableUntil(res.unavailableUntil)
-      } else {
-        setDoctorUnavailableUntil(null)
-      }
-      setDoctorUnavailableReason(status === 'unavailable' ? unavailableReason || null : null)
+      applyDoctorAvailability(availabilityDoctor.id, {
+        availabilityStatus: status,
+        unavailableReason: status === 'unavailable' ? unavailableReason : null,
+        unavailableUntil: status === 'available' ? null : res.unavailableUntil,
+      })
       setAvailabilityUpdateSuccess(
-        status === 'available' ? 'Doctor is now available.' : status === 'unavailable' ? 'Reason and time period saved.' : 'Doctor marked as busy.'
+        status === 'available'
+          ? `${availabilityDoctor.name} is now available.`
+          : status === 'unavailable'
+            ? `${availabilityDoctor.name} marked unavailable.`
+            : `${availabilityDoctor.name} marked as busy.`
       )
       setTimeout(() => setAvailabilityUpdateSuccess(null), 4000)
     } catch (err: unknown) {
@@ -359,6 +396,11 @@ export const AssistantDashboard = () => {
 
       setHasTodayVisit(isToday)
       setTodayVisitId(isToday ? latestVisit.id : null)
+      setCheckinVisitDoctor(
+        isToday && latestVisit.doctorName
+          ? { name: latestVisit.doctorName, department: latestVisit.doctorDepartment }
+          : null
+      )
 
       // Always prefill from latest known visit values (even if not today's visit).
       try {
@@ -416,6 +458,7 @@ export const AssistantDashboard = () => {
     } else {
       setHasTodayVisit(false)
       setTodayVisitId(null)
+      setCheckinVisitDoctor(null)
       setPrefilledFromVisitAt(null)
       setPrefilledAssistantCheckInAt(null)
       setDiseaseReason('')
@@ -631,18 +674,27 @@ export const AssistantDashboard = () => {
       temperature: temp,
       otherVitalsNotes: otherVitalsNotes.trim() || undefined,
     }
+    const isBookedVisit = hasTodayVisit && Boolean(todayVisitId)
+    if (!isBookedVisit && !walkInDoctorId) {
+      setFormError('Choose the doctor to refer this patient to.')
+      return
+    }
+    const referredName = isBookedVisit
+      ? checkinVisitDoctor?.name
+      : hospitalDoctors.find((d) => d.id === walkInDoctorId)?.name
     setReferLoading(true)
     try {
-      if (hasTodayVisit && todayVisitId) {
+      if (isBookedVisit && todayVisitId) {
         await patientService.referExistingVisit(patientId, todayVisitId, payload)
       } else {
-        await patientService.createVisit(patientId, payload)
+        await patientService.createVisit(patientId, { ...payload, doctorId: walkInDoctorId })
       }
-      setFormSuccess('Patient referred to doctor successfully.')
+      setFormSuccess(referredName ? `Patient referred to ${referredName} successfully.` : 'Patient referred to doctor successfully.')
       setStep('search')
       setPatient(null)
       setPatientId(null)
       setTodayVisitId(null)
+      setCheckinVisitDoctor(null)
       setPrefilledFromVisitAt(null)
       setPrefilledAssistantCheckInAt(null)
       setMobileSearch('')
@@ -965,6 +1017,7 @@ export const AssistantDashboard = () => {
     setPatientId(null)
     setHasTodayVisit(false)
     setTodayVisitId(null)
+    setCheckinVisitDoctor(null)
     setPrefilledFromVisitAt(null)
     setPrefilledAssistantCheckInAt(null)
     setMobileSearch('')
@@ -982,32 +1035,23 @@ export const AssistantDashboard = () => {
   }
 
   useEffect(() => {
-    void loadProfile()
-  }, [])
-
-  useEffect(() => {
     void loadPendingAssistantDocuments()
   }, [loadPendingAssistantDocuments])
 
-  // Load today's + upcoming appointments for assistant view.
+  // Load doctors (with live availability) + today's/upcoming appointments for assistant view.
   useEffect(() => {
+    void loadHospitalDoctors(true)
     void loadCheckedInAudit()
     void loadTodayPatientsForDoctor()
     void loadUpcomingPatientsForDoctor()
     const timer = window.setInterval(() => {
+      void loadHospitalDoctors()
       void loadCheckedInAudit()
       void loadTodayPatientsForDoctor()
       void loadUpcomingPatientsForDoctor()
     }, 30_000)
     return () => window.clearInterval(timer)
   }, [])
-
-  // If doctor is available, hide the "to contact" list.
-  useEffect(() => {
-    if (doctorAvailabilityStatus === 'available') {
-      setTodayPatientsToContact([])
-    }
-  }, [doctorAvailabilityStatus])
 
   // Socket: real-time doctor availability updates for assistant
   useEffect(() => {
@@ -1023,13 +1067,17 @@ export const AssistantDashboard = () => {
           query: { doctorId: userId },
           transports: ['websocket', 'polling']
         })
-        socket.on('doctorAvailabilityChanged', (data: { availabilityStatus: AvailabilityStatus; unavailableReason?: string; unavailableUntil?: string }) => {
-          if (!mounted) return
-          if (data.availabilityStatus) setDoctorAvailabilityStatus(data.availabilityStatus)
-          setDoctorUnavailableReason(data.unavailableReason ?? null)
-          setUnavailableReason(data.unavailableReason ?? '')
-          setDoctorUnavailableUntil(data.unavailableUntil ?? null)
-        })
+        socket.on(
+          'doctorAvailabilityChanged',
+          (data: { doctorId?: string; availabilityStatus?: AvailabilityStatus; unavailableReason?: string; unavailableUntil?: string }) => {
+            if (!mounted || !data.doctorId || !data.availabilityStatus) return
+            applyDoctorAvailability(data.doctorId, {
+              availabilityStatus: data.availabilityStatus,
+              unavailableReason: data.unavailableReason,
+              unavailableUntil: data.unavailableUntil,
+            })
+          }
+        )
       } catch {
         // ignore
       }
@@ -1061,6 +1109,47 @@ export const AssistantDashboard = () => {
     return reason && reason.length > 0 ? reason : null
   }
 
+  const matchesDoctorFilter = (a: DoctorAppointmentItem) => doctorFilter === 'all' || a.doctorId === doctorFilter
+  const shownTodayAppointments = todayAppointments.filter(matchesDoctorFilter)
+  const shownPatientsToContact = todayPatientsToContact.filter((a) => a.doctorId === availabilityDoctorId)
+  const doctorsById = useMemo(() => new Map(hospitalDoctors.map((d) => [d.id, d])), [hospitalDoctors])
+
+  const renderAvailabilityTag = (doctorId?: string) => {
+    const status = doctorId ? doctorsById.get(doctorId)?.availabilityStatus : undefined
+    if (!status || status === 'available') return null
+    return (
+      <span className={`assistant-availability-tag is-${status}`}>{status === 'busy' ? 'Busy' : 'Unavailable'}</span>
+    )
+  }
+  const shownCheckedInToday = checkedInToday.filter(matchesDoctorFilter)
+  const shownUpcomingAppointments = upcomingAppointments.filter(matchesDoctorFilter)
+
+  const renderDoctorFilter = () =>
+    hospitalDoctors.length > 1 ? (
+      <select
+        className="assistant-doctor-filter"
+        value={doctorFilter}
+        onChange={(e) => setDoctorFilter(e.target.value)}
+        aria-label="Filter appointments by doctor"
+      >
+        <option value="all">All doctors</option>
+        {hospitalDoctors.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name} · {d.departmentLabel}
+          </option>
+        ))}
+      </select>
+    ) : null
+
+  const renderAppointmentDoctor = (a: DoctorAppointmentItem) =>
+    a.doctorName ? (
+      <div className="assistant-appointment-doctor">
+        👨‍⚕️ {a.doctorName}
+        {a.doctorDepartment ? <span> · {a.doctorDepartment}</span> : null}
+        {renderAvailabilityTag(a.doctorId)}
+      </div>
+    ) : null
+
   const renderAppointmentWhen = (a: DoctorAppointmentItem) => {
     const d = new Date(a.visitDate)
     if (Number.isNaN(d.getTime())) return null
@@ -1074,6 +1163,13 @@ export const AssistantDashboard = () => {
   }
 
   const renderPaymentBadge = (a: DoctorAppointmentItem) => {
+    if (a.paymentStatus === 'FREE') {
+      return (
+        <span className="appointment-pay-badge is-free" title="Free review within the follow-up window">
+          Free review
+        </span>
+      )
+    }
     const paid = a.paymentStatus === 'PAID'
     return (
       <span
@@ -1207,12 +1303,47 @@ export const AssistantDashboard = () => {
             </div>
           )}
         </Card>
-        {referredToDoctorName && (
+        {hospitalDoctors.length > 0 && (
           <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--availability">
-            <p className="dashboard-kicker">Your doctor&apos;s availability</p>
+            <p className="dashboard-kicker">Doctor availability</p>
             <p className="dashboard-body" style={{ marginTop: 4, marginBottom: 12, fontSize: 13, color: '#627d98' }}>
-              Mark doctor unavailable or busy so patients can be informed in real time. You can update this on behalf of the doctor.
+              Live status of every doctor. Doctors can update it from their own dashboard, or you can update it on their behalf —
+              all assistants see the change instantly.
             </p>
+            <div className="assistant-availability-board" role="list" aria-label="Doctor availability overview">
+              {hospitalDoctors.map((d) => {
+                const status = d.availabilityStatus ?? 'available'
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    role="listitem"
+                    className={`assistant-availability-chip is-${status}${d.id === availabilityDoctorId ? ' is-selected' : ''}`}
+                    onClick={() => selectAvailabilityDoctor(d)}
+                    title={d.unavailableReason ? `Reason: ${d.unavailableReason}` : undefined}
+                  >
+                    <span className="assistant-availability-dot" aria-hidden />
+                    <span className="assistant-availability-chip-name">{d.name}</span>
+                    <span className="assistant-availability-chip-status">{status}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <label className="assistant-availability-select-label" htmlFor="availability-doctor">
+              Update status for
+            </label>
+            <select
+              id="availability-doctor"
+              className="assistant-doctor-filter assistant-availability-select"
+              value={availabilityDoctorId}
+              onChange={(e) => selectAvailabilityDoctor(hospitalDoctors.find((d) => d.id === e.target.value) ?? null)}
+            >
+              {hospitalDoctors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} · {d.departmentLabel}
+                </option>
+              ))}
+            </select>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
               {(['available', 'unavailable', 'busy'] as const).map((status) => (
                 <button
@@ -1305,16 +1436,6 @@ export const AssistantDashboard = () => {
                     Unavailable until: {new Date(doctorUnavailableUntil).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
                   </p>
                 )}
-                {availabilityUpdateSuccess && (
-                  <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 4 }}>
-                    {availabilityUpdateSuccess}
-                  </p>
-                )}
-                {availabilityUpdateError && (
-                  <p style={{ fontSize: 12, color: '#c62828', marginTop: 4, marginBottom: 4 }}>
-                    {availabilityUpdateError}
-                  </p>
-                )}
                 <button
                   type="button"
                   disabled={availabilityUpdating}
@@ -1334,8 +1455,18 @@ export const AssistantDashboard = () => {
                 </button>
               </div>
             )}
+            {availabilityUpdateSuccess && (
+              <p style={{ fontSize: 12, color: '#2e7d32', marginTop: 4, marginBottom: 4 }}>
+                {availabilityUpdateSuccess}
+              </p>
+            )}
+            {availabilityUpdateError && (
+              <p style={{ fontSize: 12, color: '#c62828', marginTop: 4, marginBottom: 4 }}>
+                {availabilityUpdateError}
+              </p>
+            )}
             <p className="dashboard-body" style={{ marginTop: 10, marginBottom: 8 }}>
-              {referredToDoctorName} is currently{' '}
+              {availabilityDoctor?.name ?? 'Doctor'} is currently{' '}
               <strong
                 style={{
                   color:
@@ -1364,7 +1495,7 @@ export const AssistantDashboard = () => {
                     <Skeleton variant="rect" height={56} />
                     <Skeleton variant="rect" height={56} />
                   </div>
-                ) : todayPatientsToContact.length === 0 ? (
+                ) : shownPatientsToContact.length === 0 ? (
                   <EmptyState
                     className="assistant-desk-empty-state assistant-desk-empty-state--compact"
                     icon={<UserIcon size={22} />}
@@ -1380,11 +1511,11 @@ export const AssistantDashboard = () => {
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 8,
-                      maxHeight: todayPatientsToContact.length > 5 ? 320 : undefined,
-                      overflowY: todayPatientsToContact.length > 5 ? 'auto' : undefined,
+                      maxHeight: shownPatientsToContact.length > 5 ? 320 : undefined,
+                      overflowY: shownPatientsToContact.length > 5 ? 'auto' : undefined,
                     }}
                   >
-                    {todayPatientsToContact.map((a) => (
+                    {shownPatientsToContact.map((a) => (
                       <li
                         key={a.id}
                         style={{
@@ -1402,6 +1533,7 @@ export const AssistantDashboard = () => {
                         <div>
                           <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
                           {renderAppointmentWhen(a)}
+                      {renderAppointmentDoctor(a)}
                           {a.reason && <div style={{ color: '#607d8b', fontSize: 12 }}>{a.reason}</div>}
                           {a.distanceKm != null && (
                             <div style={{ marginTop: 4, fontSize: 12, color: '#0d47a1' }}>
@@ -1443,14 +1575,17 @@ export const AssistantDashboard = () => {
 
         <div className="assistant-desk-grid">
           <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--today">
-            <p className="dashboard-kicker">Today&apos;s appointments (assistant view)</p>
+            <div className="assistant-desk-card-head">
+              <p className="dashboard-kicker">Today&apos;s appointments (all doctors)</p>
+              {renderDoctorFilter()}
+            </div>
             {todayPatientsLoading ? (
               <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading appointments">
                 <Skeleton variant="rect" height={56} />
                 <Skeleton variant="rect" height={56} />
                 <Skeleton lines={2} />
               </div>
-            ) : todayAppointments.length === 0 ? (
+            ) : shownTodayAppointments.length === 0 ? (
               <EmptyState
                 className="assistant-desk-empty-state assistant-desk-empty-state--compact"
                 icon={<CalendarIcon size={22} />}
@@ -1466,11 +1601,11 @@ export const AssistantDashboard = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 8,
-                  maxHeight: todayAppointments.length > 5 ? 320 : undefined,
-                  overflowY: todayAppointments.length > 5 ? 'auto' : undefined,
+                  maxHeight: shownTodayAppointments.length > 5 ? 320 : undefined,
+                  overflowY: shownTodayAppointments.length > 5 ? 'auto' : undefined,
                 }}
               >
-                {todayAppointments.map((a) => (
+                {shownTodayAppointments.map((a) => (
                   <li
                     key={a.id}
                     style={{
@@ -1488,6 +1623,7 @@ export const AssistantDashboard = () => {
                     <div>
                       <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
                       {renderAppointmentWhen(a)}
+                      {renderAppointmentDoctor(a)}
                       {getAssistantAppointmentSubtitle(a) && (
                         <div style={{ color: '#607d8b', fontSize: 12 }}>{getAssistantAppointmentSubtitle(a)}</div>
                       )}
@@ -1538,7 +1674,7 @@ export const AssistantDashboard = () => {
                 <Skeleton variant="rect" height={56} />
                 <Skeleton variant="rect" height={56} />
               </div>
-            ) : checkedInToday.length === 0 ? (
+            ) : shownCheckedInToday.length === 0 ? (
               <EmptyState
                 className="assistant-desk-empty-state assistant-desk-empty-state--compact"
                 icon={<UserIcon size={22} />}
@@ -1554,11 +1690,11 @@ export const AssistantDashboard = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 8,
-                  maxHeight: checkedInToday.length > 5 ? 320 : undefined,
-                  overflowY: checkedInToday.length > 5 ? 'auto' : undefined,
+                  maxHeight: shownCheckedInToday.length > 5 ? 320 : undefined,
+                  overflowY: shownCheckedInToday.length > 5 ? 'auto' : undefined,
                 }}
               >
-                {checkedInToday.map((a) => (
+                {shownCheckedInToday.map((a) => (
                   <li
                     key={`checked-${a.id}`}
                     style={{
@@ -1576,6 +1712,7 @@ export const AssistantDashboard = () => {
                     <div>
                       <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
                       {renderAppointmentWhen(a)}
+                      {renderAppointmentDoctor(a)}
                       <div style={{ color: '#607d8b', fontSize: 12 }}>
                         Checked-in at {new Date(a.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                       </div>
@@ -1593,13 +1730,16 @@ export const AssistantDashboard = () => {
           </Card>
 
           <Card className="dashboard-overview-card assistant-availability-card assistant-desk-card assistant-desk-card--upcoming">
-            <p className="dashboard-kicker">Upcoming appointments (assistant view)</p>
+            <div className="assistant-desk-card-head">
+              <p className="dashboard-kicker">Upcoming appointments (all doctors)</p>
+              {renderDoctorFilter()}
+            </div>
             {upcomingPatientsLoading ? (
               <div className="assistant-desk-skeleton-stack" aria-busy="true" aria-label="Loading upcoming appointments">
                 <Skeleton variant="rect" height={56} />
                 <Skeleton variant="rect" height={56} />
               </div>
-            ) : upcomingAppointments.length === 0 ? (
+            ) : shownUpcomingAppointments.length === 0 ? (
               <EmptyState
                 className="assistant-desk-empty-state assistant-desk-empty-state--compact"
                 icon={<CalendarIcon size={22} />}
@@ -1615,11 +1755,11 @@ export const AssistantDashboard = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 8,
-                  maxHeight: upcomingAppointments.length > 5 ? 320 : undefined,
-                  overflowY: upcomingAppointments.length > 5 ? 'auto' : undefined,
+                  maxHeight: shownUpcomingAppointments.length > 5 ? 320 : undefined,
+                  overflowY: shownUpcomingAppointments.length > 5 ? 'auto' : undefined,
                 }}
               >
-                {upcomingAppointments.map((a) => (
+                {shownUpcomingAppointments.map((a) => (
                   <li
                     key={a.id}
                     style={{
@@ -1637,6 +1777,7 @@ export const AssistantDashboard = () => {
                     <div>
                       <strong>{a.patientName}</strong> {renderPaymentBadge(a)}
                       {renderAppointmentWhen(a)}
+                      {renderAppointmentDoctor(a)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       {a.patientMobile && (
@@ -1770,10 +1911,29 @@ export const AssistantDashboard = () => {
               <h2 className="search-title">
                 {patient ? 'Update details, record vitals, refer' : 'Record vitals and refer'}
               </h2>
-              {referredToDoctorName && (
+              {hasTodayVisit && todayVisitId ? (
                 <p className="search-subtitle">
-                  Patient will be referred to <strong>{referredToDoctorName}</strong>.
+                  Patient will be referred to{' '}
+                  <strong>{checkinVisitDoctor?.name ?? 'the booked doctor'}</strong>
+                  {checkinVisitDoctor?.department ? ` (${checkinVisitDoctor.department})` : ''} — the doctor chosen while booking.
                 </p>
+              ) : (
+                <div className="assistant-walkin-doctor">
+                  <label htmlFor="walkin-doctor">Walk-in: refer to doctor *</label>
+                  <select
+                    id="walkin-doctor"
+                    value={walkInDoctorId}
+                    onChange={(e) => setWalkInDoctorId(e.target.value)}
+                  >
+                    <option value="">Select doctor</option>
+                    {hospitalDoctors.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} · {d.departmentLabel}
+                        {d.specialization ? ` (${d.specialization})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
               {prefilledFromVisitAt && (
                 <p
@@ -1893,6 +2053,7 @@ export const AssistantDashboard = () => {
                     <p className="dashboard-kicker">Upload report / document</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <input
+                        ref={docFileInputRef}
                         type="file"
                         accept=".pdf,.jpg,.jpeg,.png"
                         onChange={(e) => {
@@ -1928,6 +2089,9 @@ export const AssistantDashboard = () => {
                         </button>
                       )}
                     </div>
+                    <p className="text-sm" style={{ color: 'var(--med-text-muted)', margin: '6px 0 0' }}>
+                      Accepted formats: PDF, JPG, JPEG, PNG
+                    </p>
                     {docUploadError && (
                       <p className="text-sm" style={{ color: '#c62828', marginTop: 4 }}>
                         {docUploadError}
@@ -1961,10 +2125,12 @@ export const AssistantDashboard = () => {
                     <Button
                       type="button"
                       variant="secondary"
+                      className="ui-button-upload"
                       disabled={!docFile || docUploadLoading}
                       onClick={handleUploadDocument}
                       style={{ marginTop: 8 }}
                     >
+                      <DocumentIcon size={16} />
                       {docUploadLoading ? 'Uploading…' : 'Upload to patient record'}
                     </Button>
                     {docPendingReleaseId && (

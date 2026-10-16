@@ -487,7 +487,9 @@ export const authService = {
     availabilityStatus: 'available' | 'unavailable' | 'busy'
     unavailableReason?: string
     unavailableUntil?: string
-  }): Promise<{ availabilityStatus: string; unavailableReason?: string; unavailableUntil?: string }> {
+    /** Assistant only: which hospital doctor to update. */
+    doctorId?: string
+  }): Promise<{ doctorId?: string; availabilityStatus: string; unavailableReason?: string; unavailableUntil?: string }> {
     const res = await api.patch('/auth/doctor/availability', payload)
     return res.data
   },
@@ -618,11 +620,15 @@ export interface DoctorAppointmentItem {
   patientAddress?: string
   /** Optional source of appointment, e.g. 'WHATSAPP' for bot-created appointments */
   source?: string
-  /** Consultation fee status; older visits without a value come back as UNPAID. */
-  paymentStatus?: 'PAID' | 'UNPAID'
+  /** Consultation fee status; older visits without a value come back as UNPAID. FREE = free review. */
+  paymentStatus?: 'PAID' | 'UNPAID' | 'FREE'
   visitDate: string
   /** Slot label the patient chose while booking, e.g. "2:00 - 3:00 PM". */
   preferredSlot?: string
+  /** Doctor the patient booked with (assistant views list every hospital doctor). */
+  doctorId?: string
+  doctorName?: string
+  doctorDepartment?: string
   reason?: string
   notes?: string
   /** Patient's location at time of booking (if they shared it) */
@@ -705,6 +711,17 @@ export interface AssistantFamilyOption {
   mobileNumber?: string
 }
 
+export interface HospitalDoctorOption {
+  id: string
+  name: string
+  department: string
+  departmentLabel: string
+  specialization?: string
+  availabilityStatus?: 'available' | 'unavailable' | 'busy'
+  unavailableReason?: string
+  unavailableUntil?: string
+}
+
 export interface AssistantPatientPrefill {
   patient: PatientSummary | null
   latestVisit: {
@@ -712,6 +729,9 @@ export interface AssistantPatientPrefill {
     visitDate: string
     reason?: string
     notes?: string
+    doctorId?: string
+    doctorName?: string
+    doctorDepartment?: string
   } | null
   /** Present when several profiles share this mobile — choose one and call prefill again with patientId. */
   familyOptions?: AssistantFamilyOption[]
@@ -743,6 +763,12 @@ export const appointmentService = {
     const res = await api.get('/appointments/assistant/doctor-upcoming')
     const data = res.data as { doctorId: string; appointments: DoctorAppointmentItem[]; total: number }
     return data
+  },
+
+  /** For assistant: every doctor of the hospital (filters + walk-in referral). */
+  async getAssistantHospitalDoctors(): Promise<{ linkedDoctorId?: string; doctors: HospitalDoctorOption[] }> {
+    const res = await api.get('/appointments/assistant/doctors')
+    return res.data as { linkedDoctorId?: string; doctors: HospitalDoctorOption[] }
   },
 
   /** For assistant audit: today's already checked-in patients. */
@@ -1557,6 +1583,8 @@ export const patientService = {
       weightKg?: number
       temperature?: number
       otherVitalsNotes?: string
+      /** Assistant walk-in: doctor to refer to (defaults to the assistant's own doctor). */
+      doctorId?: string
     }
   ): Promise<{ id: string }> {
     const res = await api.post(`/patients/${patientId}/visit`, payload)
@@ -1625,9 +1653,25 @@ export const patientService = {
   },
 }
 
+export interface ReviewEligibility {
+  eligible: boolean
+  /** False while the 10-day rule is off: every review is free and allowed. */
+  enforced: boolean
+  windowDays: number
+  reason?: 'NO_PREVIOUS_CONSULTATION' | 'WINDOW_EXPIRED'
+  /** YYYY-MM-DD (IST) of the consultation the free review counts from. */
+  consultationDate?: string
+  /** Last YYYY-MM-DD a free review can be booked for. */
+  validUntil?: string
+  daysSinceConsultation?: number
+}
+
 export interface ConsultantOption {
   id: string
   name: string
+  department?: string
+  departmentLabel?: string
+  specialization?: string
   clinicLatitude?: number
   clinicLongitude?: number
   clinicAddress?: string
@@ -1699,6 +1743,13 @@ export const publicAppointmentService = {
     const res = await api.get('/public/doctors')
     const data = res.data as { doctors: ConsultantOption[] }
     return data.doctors
+  },
+
+  async checkReviewEligibility(patientId: string, doctorId: string, dateYyyyMmDd: string): Promise<ReviewEligibility> {
+    const res = await api.get('/public/review-eligibility', {
+      params: { patientId, doctorId, date: dateYyyyMmDd },
+    })
+    return res.data as ReviewEligibility
   },
 
   async getAppointmentQuota(doctorId: string, dateYyyyMmDd: string): Promise<DoctorAppointmentQuotaSnapshot> {
@@ -1834,7 +1885,7 @@ export const publicAppointmentService = {
     patientLongitude?: number
     source?: 'WEBSITE' | 'WHATSAPP'
     paymentMode?: 'ONLINE' | 'CASH_AT_CLINIC'
-  }): Promise<{ appointmentId: string; patientId: string; paymentStatus?: 'PAID' | 'UNPAID' }> {
+  }): Promise<{ appointmentId: string; patientId: string; paymentStatus?: 'PAID' | 'UNPAID' | 'FREE' }> {
     const res = await api.post('/public/appointments/family', payload)
     return res.data as any
   },

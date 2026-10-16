@@ -5,7 +5,8 @@ import { PatientId } from "./Patient";
 
 export type AppointmentChannel = "ONLINE_BOOKING" | "WALK_IN";
 export type BookingSource = "WHATSAPP" | "WEBSITE" | "WALK_IN";
-export type VisitPaymentStatus = "PAID" | "UNPAID";
+/** FREE = review within the free follow-up window, no fee due. */
+export type VisitPaymentStatus = "PAID" | "UNPAID" | "FREE";
 export type VisitPaymentMode = "ONLINE" | "CASH_AT_CLINIC";
 
 export interface IVisit extends Document {
@@ -91,7 +92,7 @@ const VisitSchema = new Schema<IVisit>(
     },
     paymentStatus: {
       type: String,
-      enum: ["PAID", "UNPAID"]
+      enum: ["PAID", "UNPAID", "FREE"]
     },
     paymentMode: {
       type: String,

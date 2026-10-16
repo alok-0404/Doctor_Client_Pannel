@@ -35,11 +35,11 @@ export const DoctorsDirectory = () => {
     }
   }, [])
 
-  const departmentsWithDoctors = useMemo(() => {
-    if (!doctors) return []
-    const present = new Set(doctors.map((d) => d.department))
-    return departments.filter((d) => present.has(d.id))
-  }, [departments, doctors])
+  const doctorCountByDepartment = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const d of doctors ?? []) counts.set(d.department, (counts.get(d.department) ?? 0) + 1)
+    return counts
+  }, [doctors])
 
   const visible = useMemo(
     () => (doctors ?? []).filter((d) => !selected || d.department === selected),
@@ -61,7 +61,7 @@ export const DoctorsDirectory = () => {
           subtitle="Choose a department to see its doctors — speciality, degree, experience and where they practised before."
         />
 
-        {departmentsWithDoctors.length > 1 && (
+        {departments.length > 0 && (
           <div className="doctors-directory-filters" role="tablist" aria-label="Departments">
             <button
               type="button"
@@ -72,19 +72,23 @@ export const DoctorsDirectory = () => {
             >
               All departments
             </button>
-            {departmentsWithDoctors.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                role="tab"
-                aria-selected={selected === d.id}
-                className={`doctors-directory-chip${selected === d.id ? ' is-active' : ''}`}
-                onClick={() => choose(d.id)}
-                title={d.description}
-              >
-                {d.label}
-              </button>
-            ))}
+            {departments.map((d) => {
+              const count = doctorCountByDepartment.get(d.id) ?? 0
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected === d.id}
+                  className={`doctors-directory-chip${selected === d.id ? ' is-active' : ''}${count === 0 ? ' is-empty' : ''}`}
+                  onClick={() => choose(d.id)}
+                  title={d.description}
+                >
+                  {d.label}
+                  {doctors !== null && <span className="doctors-directory-chip-count">{count}</span>}
+                </button>
+              )
+            })}
           </div>
         )}
 

@@ -73,7 +73,7 @@ export const Register = () => {
 
   return (
     <div className="page-center login-page">
-      <Card className="login-layout" elevated>
+      <Card className="login-layout login-layout--register" elevated>
         <div className="login-panel">
           <div className="login-brand-row">
             <div className="login-brand">

@@ -6,6 +6,11 @@ import { Doctor } from "../models/Doctor";
 import { Visit } from "../models/Visit";
 import { Patient } from "../models/Patient";
 import { findPatientsByMobile } from "../services/patientService";
+import {
+  hospitalDoctorObjectIds,
+  listHospitalDoctors,
+  type HospitalDoctor
+} from "../services/hospitalDoctorService";
 import { resolveBookingSource } from "../utils/bookingSource";
 
 const router = Router();
@@ -38,6 +43,35 @@ function preferredSlotFromNotes(notes: unknown): string | undefined {
   const match = notes.match(/Preferred time:\s*([^.\n]+)/i);
   const slot = match?.[1]?.trim();
   return slot || undefined;
+}
+
+/** Assistant desk sees every doctor of the hospital; its own linked doctor is kept for availability. */
+async function getAssistantScope(assistantId: mongoose.Types.ObjectId): Promise<{
+  linkedDoctorId?: string;
+  doctors: HospitalDoctor[];
+  doctorIds: mongoose.Types.ObjectId[];
+  doctorsById: Map<string, HospitalDoctor>;
+}> {
+  const [assistantDoc, doctors] = await Promise.all([
+    Doctor.findById(assistantId).select("createdByDoctorId").lean(),
+    listHospitalDoctors()
+  ]);
+  return {
+    linkedDoctorId: (assistantDoc as any)?.createdByDoctorId?.toString(),
+    doctors,
+    doctorIds: hospitalDoctorObjectIds(doctors),
+    doctorsById: new Map(doctors.map((d) => [d.id, d]))
+  };
+}
+
+function mapVisitForAssistant(v: any, doctorsById: Map<string, HospitalDoctor>): Record<string, unknown> {
+  const doctor = doctorsById.get(String(v.doctor));
+  return {
+    ...mapVisitToAppointment(v, doctor?.clinicLatitude, doctor?.clinicLongitude),
+    doctorId: String(v.doctor),
+    doctorName: doctor?.name,
+    doctorDepartment: doctor?.departmentLabel
+  };
 }
 
 function mapVisitToAppointment(
@@ -77,7 +111,7 @@ function mapVisitToAppointment(
     reason: v.reason,
     notes: v.notes,
     source: resolveBookingSource(v),
-    paymentStatus: v.paymentStatus === "PAID" ? "PAID" : "UNPAID",
+    paymentStatus: v.paymentStatus === "PAID" || v.paymentStatus === "FREE" ? v.paymentStatus : "UNPAID",
     patientLatitude: patientLat,
     patientLongitude: patientLng,
     distanceKm: distanceKmValue
@@ -167,7 +201,26 @@ router.get("/doctor/upcoming", async (req, res) => {
   }
 });
 
-// GET /appointments/assistant/doctor-today - for assistant: linked doctor's today appointments (with patient mobile for calling/messaging)
+// GET /appointments/assistant/doctors - every doctor of the hospital (for filters and walk-in referral)
+router.get("/assistant/doctors", async (req, res) => {
+  try {
+    if (req.doctor?.role !== "ASSISTANT") {
+      res.status(403).json({ message: "Only assistants can use this endpoint" });
+      return;
+    }
+    const { linkedDoctorId, doctors } = await getAssistantScope(req.doctor._id);
+    res.status(200).json({
+      linkedDoctorId,
+      doctors: doctors.map(({ clinicLatitude: _lat, clinicLongitude: _lng, ...d }) => d)
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("appointments/assistant/doctors error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /appointments/assistant/doctor-today - for assistant: today's appointments of every hospital doctor
 router.get("/assistant/doctor-today", async (req, res) => {
   try {
     if (req.doctor?.role !== "ASSISTANT") {
@@ -175,32 +228,23 @@ router.get("/assistant/doctor-today", async (req, res) => {
       return;
     }
 
-    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-    const doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
-    if (!doctorId) {
-      res.status(400).json({ message: "Assistant is not linked to a doctor" });
-      return;
-    }
+    const { linkedDoctorId, doctorIds, doctorsById } = await getAssistantScope(req.doctor._id);
 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
     const visits = await Visit.find({
-      doctor: new mongoose.Types.ObjectId(doctorId),
+      doctor: { $in: doctorIds },
       visitDate: { $gte: startOfDay, $lte: endOfDay }
     })
       .sort({ visitDate: 1 })
       .populate("patient", "firstName lastName mobileNumber address")
       .lean();
 
-    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
-    const clinicLat = (doctorDoc as any)?.clinicLatitude;
-    const clinicLng = (doctorDoc as any)?.clinicLongitude;
-
     res.status(200).json({
-      doctorId,
-      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng))
+      doctorId: linkedDoctorId,
+      appointments: visits.map((v) => mapVisitForAssistant(v, doctorsById))
     });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -209,7 +253,7 @@ router.get("/assistant/doctor-today", async (req, res) => {
   }
 });
 
-// GET /appointments/assistant/doctor-upcoming - for assistant: linked doctor's upcoming appointments (after today)
+// GET /appointments/assistant/doctor-upcoming - for assistant: upcoming appointments (after today) of every hospital doctor
 router.get("/assistant/doctor-upcoming", async (req, res) => {
   try {
     if (req.doctor?.role !== "ASSISTANT") {
@@ -217,32 +261,23 @@ router.get("/assistant/doctor-upcoming", async (req, res) => {
       return;
     }
 
-    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-    const doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
-    if (!doctorId) {
-      res.status(400).json({ message: "Assistant is not linked to a doctor" });
-      return;
-    }
+    const { linkedDoctorId, doctorIds, doctorsById } = await getAssistantScope(req.doctor._id);
 
     const now = new Date();
     const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
 
     const visits = await Visit.find({
-      doctor: new mongoose.Types.ObjectId(doctorId),
+      doctor: { $in: doctorIds },
       visitDate: { $gte: startOfTomorrow }
     })
       .sort({ visitDate: 1 })
-      .limit(100)
+      .limit(200)
       .populate("patient", "firstName lastName mobileNumber")
       .lean();
 
-    const doctorDoc = await Doctor.findById(doctorId).select("clinicLatitude clinicLongitude").lean();
-    const clinicLat = (doctorDoc as any)?.clinicLatitude;
-    const clinicLng = (doctorDoc as any)?.clinicLongitude;
-
     res.status(200).json({
-      doctorId,
-      appointments: visits.map((v) => mapVisitToAppointment(v, clinicLat, clinicLng)),
+      doctorId: linkedDoctorId,
+      appointments: visits.map((v) => mapVisitForAssistant(v, doctorsById)),
       total: visits.length
     });
   } catch (error) {
@@ -260,30 +295,26 @@ router.get("/assistant/checked-in-today", async (req, res) => {
       return;
     }
 
-    const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-    const doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
-    if (!doctorId) {
-      res.status(400).json({ message: "Assistant is not linked to a doctor" });
-      return;
-    }
+    const { linkedDoctorId, doctorIds, doctorsById } = await getAssistantScope(req.doctor._id);
 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
     const visits = await Visit.find({
-      doctor: new mongoose.Types.ObjectId(doctorId),
+      doctor: { $in: doctorIds },
       visitDate: { $gte: startOfDay, $lte: endOfDay },
       assistantCheckedInAt: { $exists: true }
     })
       .sort({ assistantCheckedInAt: -1 })
-      .limit(100)
+      .limit(200)
       .populate("patient", "firstName lastName mobileNumber")
       .lean();
 
     res.status(200).json({
-      doctorId,
+      doctorId: linkedDoctorId,
       checkedIn: visits.map((v: any) => ({
+        ...mapVisitForAssistant(v, doctorsById),
         id: (v._id as mongoose.Types.ObjectId).toString(),
         // populate("patient") can return null; avoid crashing with toString on null/undefined
         patientId: v.patient?._id ? v.patient._id.toString() : v.patient ? (v.patient as any).toString?.() : "unknown",
@@ -314,17 +345,19 @@ router.get("/assistant/patient-prefill", async (req, res) => {
       return;
     }
 
-    // Allow both DOCTOR and ASSISTANT to use this endpoint.
-    let doctorId: string | undefined;
+    // Allow both DOCTOR (own visits) and ASSISTANT (visits of every hospital doctor).
+    let doctorIds: mongoose.Types.ObjectId[] = [];
+    let doctorsById = new Map<string, HospitalDoctor>();
     if (req.doctor.role === "DOCTOR") {
-      doctorId = req.doctor._id.toString();
+      doctorIds = [new mongoose.Types.ObjectId(req.doctor._id.toString())];
     } else if (req.doctor.role === "ASSISTANT") {
-      const assistantDoc = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
-      doctorId = (assistantDoc as any)?.createdByDoctorId?.toString();
+      const scope = await getAssistantScope(req.doctor._id);
+      doctorIds = scope.doctorIds;
+      doctorsById = scope.doctorsById;
     }
 
-    if (!doctorId) {
-      res.status(400).json({ message: "Assistant is not linked to a doctor" });
+    if (!doctorIds.length) {
+      res.status(400).json({ message: "No doctors found for this clinic" });
       return;
     }
 
@@ -377,8 +410,13 @@ router.get("/assistant/patient-prefill", async (req, res) => {
       return;
     }
 
-    // Latest visit for this patient with this doctor (any date),
-    // or a specific visit when selected from appointment card.
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // A specific visit when selected from an appointment card; otherwise today's
+    // not-yet-checked-in visit (any hospital doctor), falling back to the latest visit.
     let latestVisit: any = null;
     if (visitId) {
       if (!mongoose.isValidObjectId(visitId)) {
@@ -388,22 +426,29 @@ router.get("/assistant/patient-prefill", async (req, res) => {
       latestVisit = await Visit.findOne({
         _id: new mongoose.Types.ObjectId(visitId),
         patient: patient._id,
-        doctor: new mongoose.Types.ObjectId(doctorId)
+        doctor: { $in: doctorIds }
       }).lean();
     } else {
-      latestVisit = await Visit.findOne({
-        patient: patient._id,
-        doctor: new mongoose.Types.ObjectId(doctorId)
-      })
-        .sort({ visitDate: -1 })
-        .lean();
+      latestVisit =
+        (await Visit.findOne({
+          patient: patient._id,
+          doctor: { $in: doctorIds },
+          visitDate: { $gte: startOfToday, $lte: endOfToday },
+          assistantCheckedInAt: { $exists: false }
+        })
+          .sort({ visitDate: 1 })
+          .lean()) ??
+        (await Visit.findOne({
+          patient: patient._id,
+          doctor: { $in: doctorIds }
+        })
+          .sort({ visitDate: -1 })
+          .lean());
     }
 
     if (req.doctor.role === "ASSISTANT" && latestVisit) {
       const visitDate = new Date(latestVisit.visitDate);
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      if (visitDate >= startOfToday && !latestVisit.assistantCheckedInAt) {
+      if (visitDate >= startOfToday && visitDate <= endOfToday && !latestVisit.assistantCheckedInAt) {
         const checkedInAt = new Date();
         await Visit.updateOne(
           { _id: latestVisit._id },
@@ -432,7 +477,10 @@ router.get("/assistant/patient-prefill", async (req, res) => {
             id: (latestVisit as any)._id.toString(),
             visitDate: latestVisit.visitDate,
             reason: latestVisit.reason,
-            notes: latestVisit.notes
+            notes: latestVisit.notes,
+            doctorId: String(latestVisit.doctor),
+            doctorName: doctorsById.get(String(latestVisit.doctor))?.name,
+            doctorDepartment: doctorsById.get(String(latestVisit.doctor))?.departmentLabel
           }
         : null
     });

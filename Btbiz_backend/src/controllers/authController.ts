@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 
-import { getIo } from "../socket";
+import { getIo, hospitalDeskRoom } from "../socket";
+import { findHospitalDoctor } from "../services/hospitalDoctorService";
+import { getOptionalTenantId } from "../tenant/tenantContext";
 import { Doctor } from "../models/Doctor";
 import {
   completeDoctorPasswordReset,
@@ -775,23 +777,31 @@ export const updateDoctorAvailability = async (
     return;
   }
 
+  const { availabilityStatus, unavailableReason, unavailableUntil, doctorId: requestedDoctorId } = req.body as {
+    availabilityStatus?: "available" | "unavailable" | "busy";
+    unavailableReason?: string;
+    unavailableUntil?: string;
+    /** Assistant only: which hospital doctor to update (defaults to the assistant's own doctor). */
+    doctorId?: string;
+  };
+
   let doctorId: string | undefined;
   if (req.doctor.role === "DOCTOR") {
     doctorId = req.doctor._id?.toString();
+  } else if (requestedDoctorId) {
+    if (!(await findHospitalDoctor(requestedDoctorId))) {
+      res.status(400).json({ message: "Selected doctor is not part of this hospital." });
+      return;
+    }
+    doctorId = requestedDoctorId;
   } else {
     const assistant = await Doctor.findById(req.doctor._id).select("createdByDoctorId").lean();
     doctorId = (assistant as any)?.createdByDoctorId?.toString();
   }
   if (!doctorId) {
-    res.status(401).json({ message: "Unauthorized" });
+    res.status(400).json({ message: "Choose the doctor whose availability you want to update." });
     return;
   }
-
-  const { availabilityStatus, unavailableReason, unavailableUntil } = req.body as {
-    availabilityStatus?: "available" | "unavailable" | "busy";
-    unavailableReason?: string;
-    unavailableUntil?: string;
-  };
 
   if (!availabilityStatus || !["available", "unavailable", "busy"].includes(availabilityStatus)) {
     res.status(400).json({ message: "availabilityStatus must be one of: available, unavailable, busy" });
@@ -808,7 +818,7 @@ export const updateDoctorAvailability = async (
       doctorId,
       { $set: update },
       { new: true }
-    ).select("name availabilityStatus unavailableReason unavailableUntil").lean();
+    ).select("name availabilityStatus unavailableReason unavailableUntil tenantId").lean();
 
     if (!doc) {
       res.status(404).json({ message: "Doctor not found" });
@@ -824,11 +834,16 @@ export const updateDoctorAvailability = async (
         unavailableReason: doc.unavailableReason ?? undefined,
         unavailableUntil: doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined
       };
-      io.to(`assistants-of-doctor:${doctorId}`).emit("doctorAvailabilityChanged", payload);
-      io.to(`doctor:${doctorId}`).emit("doctorAvailabilityChanged", payload);
+      io.to([
+        `assistants-of-doctor:${doctorId}`,
+        `doctor:${doctorId}`,
+        hospitalDeskRoom((doc as any).tenantId),
+        hospitalDeskRoom(getOptionalTenantId())
+      ]).emit("doctorAvailabilityChanged", payload);
     }
 
     res.status(200).json({
+      doctorId,
       availabilityStatus: doc.availabilityStatus,
       unavailableReason: doc.unavailableReason ?? undefined,
       unavailableUntil: doc.unavailableUntil ? new Date(doc.unavailableUntil).toISOString() : undefined

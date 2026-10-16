@@ -6,7 +6,7 @@ import app from "./app";
 import { connectDatabase } from "./config/db";
 import { env } from "./config/env";
 import { Doctor } from "./models/Doctor";
-import { setIo } from "./socket";
+import { hospitalDeskRoom, setIo } from "./socket";
 
 const startServer = async (): Promise<void> => {
   await connectDatabase();
@@ -41,12 +41,16 @@ const startServer = async (): Promise<void> => {
       socket.join(`doctor:${doctorId}`);
       // If this user is an assistant, also join room for their doctor's availability updates
       void Doctor.findById(doctorId)
-        .select("createdByDoctorId")
+        .select("createdByDoctorId role tenantId")
         .lean()
         .then((user) => {
           const createdBy = (user as any)?.createdByDoctorId?.toString();
           if (createdBy) {
             socket.join(`assistants-of-doctor:${createdBy}`);
+          }
+          // Hospital front desk: assistants see availability changes of every doctor.
+          if ((user as any)?.role === "ASSISTANT") {
+            socket.join(hospitalDeskRoom((user as any)?.tenantId));
           }
         });
     }

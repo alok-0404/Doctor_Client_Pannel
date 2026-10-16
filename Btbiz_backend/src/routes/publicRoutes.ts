@@ -26,6 +26,12 @@ import { completedAgeYears } from "../utils/age";
 import { getDailyAppointmentQuotaSnapshot } from "../utils/appointmentQuota";
 import { getDoctorSlotsForDate, isSlotStillAvailable } from "../utils/doctorSlots";
 import { parseBookingSource } from "../utils/bookingSource";
+import {
+  FREE_REVIEW_WINDOW_DAYS,
+  checkReviewEligibility,
+  isReviewConsultation,
+  isReviewWindowEnforced
+} from "../utils/reviewEligibility";
 import { resolveUploadFilePath, uploadFileExists } from "../utils/uploadPath";
 import { DEFAULT_DEPARTMENT_ID, DEPARTMENTS, isValidDepartmentId } from "../constants/departments";
 import {
@@ -76,13 +82,18 @@ function buildBookingConfirmationMessage(data: {
   appointmentDate: string;
   slot?: string;
   consultationLabel: string;
-  paymentStatus: "PAID" | "UNPAID";
+  paymentStatus: "PAID" | "UNPAID" | "FREE";
 }): string {
-  const fee = `₹${BOOKING_CONSULTATION_FEE.toLocaleString("en-IN")}`;
-  const feeLine =
-    data.paymentStatus === "PAID"
+  const isFree = data.paymentStatus === "FREE";
+  const fee = `₹${(isFree ? 0 : BOOKING_CONSULTATION_FEE).toLocaleString("en-IN")}`;
+  const feeLine = isFree
+    ? isReviewWindowEnforced()
+      ? `💳 *Fee:* ${fee} — FREE review (within ${FREE_REVIEW_WINDOW_DAYS} days of your consultation)`
+      : `💳 *Fee:* ${fee} — FREE review`
+    : data.paymentStatus === "PAID"
       ? `💳 *Fee:* ${fee} — PAID (online)`
       : `💳 *Fee:* ${fee} — UNPAID (pay at clinic)`;
+  const receiptStatus = isFree ? "Free review" : data.paymentStatus === "PAID" ? "Paid" : "Due at clinic";
   const when = data.slot
     ? `${formatBookingDate(data.appointmentDate)}, ${data.slot}`
     : formatBookingDate(data.appointmentDate);
@@ -100,7 +111,7 @@ function buildBookingConfirmationMessage(data: {
     "",
     "🧾 *Receipt*",
     `Consultation fee: ${fee}`,
-    `Status: ${data.paymentStatus === "PAID" ? "Paid" : "Due at clinic"}`,
+    `Status: ${receiptStatus}`,
     "",
     "⏰ Please arrive 15 minutes before your slot and show this Booking ID at the reception. Actual consultation time may vary slightly.",
     "🙏 Thank you for choosing *MediGraph*!",
@@ -1808,6 +1819,24 @@ router.post("/patient/medicines", async (req, res) => {
   }
 });
 
+// GET /public/review-eligibility?patientId=&doctorId=&date=YYYY-MM-DD
+// Whether a review with this doctor on this date is inside the free follow-up window.
+router.get("/review-eligibility", async (req, res) => {
+  try {
+    const patientId = String(req.query.patientId ?? "").trim();
+    const doctorId = String(req.query.doctorId ?? "").trim();
+    const date = String(req.query.date ?? "").trim();
+    if (!mongoose.isValidObjectId(patientId) || !mongoose.isValidObjectId(doctorId) || !date) {
+      res.status(400).json({ message: "patientId, doctorId and date are required" });
+      return;
+    }
+    res.status(200).json(await checkReviewEligibility(patientId, doctorId, istCalendarDateStr(date)));
+  } catch (error) {
+    console.error("public /review-eligibility error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // POST /public/appointments/family
 // Create an appointment (Visit) for a specific patientId (family member).
 router.post("/appointments/family", async (req, res) => {
@@ -1877,7 +1906,31 @@ router.post("/appointments/family", async (req, res) => {
     if (body.reason?.trim()) notesParts.push(`Reason: ${body.reason.trim()}`);
 
     const bookingSource = parseBookingSource(body.source) ?? "WEBSITE";
-    const { paymentMode, paymentStatus } = resolveBookingPayment(body);
+    const payment = resolveBookingPayment(body);
+    let paymentMode = payment.paymentMode;
+    let paymentStatus: "PAID" | "UNPAID" | "FREE" = payment.paymentStatus;
+
+    if (isReviewConsultation(body.consultationType)) {
+      const review = await checkReviewEligibility(
+        (patient as any)._id.toString(),
+        body.consultantId,
+        istCalendarDateStr(body.appointmentDate)
+      );
+      if (review.eligible) {
+        paymentStatus = "FREE";
+        paymentMode = undefined;
+      } else if (bookingSource === "WEBSITE") {
+        res.status(409).json({
+          code: "REVIEW_NOT_ELIGIBLE",
+          message:
+            review.reason === "WINDOW_EXPIRED"
+              ? `${FREE_REVIEW_WINDOW_DAYS} days are completed since your last consultation. Please book a New Consultation.`
+              : "No previous consultation found with this doctor. Please book a New Consultation.",
+          review
+        });
+        return;
+      }
+    }
 
     const visit = await createVisitService({
       patientId: (patient as any)._id.toString(),

@@ -1163,6 +1163,20 @@ body {
   background-color: #f1f5f9;
 }
 
+.ui-button-secondary.ui-button-upload {
+  background-color: #e6f6f3;
+  color: var(--med-blue-dark);
+  border: 1.5px solid var(--med-blue-dark);
+  font-weight: 600;
+}
+
+.ui-button-secondary.ui-button-upload:hover:not(:disabled) {
+  background-color: var(--med-blue-dark);
+  color: #ffffff;
+  border-color: var(--med-blue-dark);
+  box-shadow: 0 4px 14px rgba(14, 143, 126, 0.24);
+}
+
 .ui-button--full-width {
   width: 100%;
   max-width: 100%;
@@ -1398,6 +1412,25 @@ body {
       url("https://images.pexels.com/photos/6129682/pexels-photo-6129682.jpeg?auto=compress&cs=tinysrgb&w=1200");
     background-position: center center;
     background-size: cover;
+  }
+
+  /* Long registration form: keep the photo a fixed size and pinned in view instead of
+     stretching it to the full form height. `clip` (not `hidden`) so sticky still works. */
+  .login-layout--register {
+    overflow: clip;
+    align-items: stretch;
+  }
+
+  .login-layout--register .login-image-panel {
+    align-items: flex-start;
+  }
+
+  .login-layout--register .login-image-frame {
+    position: sticky;
+    top: 24px;
+    min-height: 0;
+    height: min(620px, calc(100vh - 48px));
+    background-position: center 30%;
   }
 }
 
@@ -5300,6 +5333,37 @@ body {
   background: #f8fafc;
 }
 
+.book-appointment-required {
+  color: #dc2626;
+}
+
+.book-appointment-select-field--error label {
+  color: #b91c1c;
+}
+
+.book-appointment-select-field--error select,
+.book-appointment-page .book-appointment-select-field--error .book-appointment-calendar {
+  border-color: #ef4444;
+  background-color: #fffbfb;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.book-appointment-page .book-appointment-calendar:focus {
+  outline: none;
+}
+
+.book-appointment-select-field--error select:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+}
+
+.book-appointment-field-error {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #b91c1c;
+}
+
 .book-appointment-field-action {
   display: flex;
   align-items: flex-end;
@@ -5795,6 +5859,37 @@ body {
   padding: 8px 10px;
 }
 
+.book-appointment-review-note {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #334155;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.book-appointment-review-note.is-ok {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.book-appointment-review-note.is-expired {
+  color: #9a3412;
+  background: #fff7ed;
+  border-color: #fdba74;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.book-appointment-review-note.is-expired p {
+  margin: 0;
+}
+
 .appointment-pay-badge {
   display: inline-block;
   margin-left: 4px;
@@ -5805,6 +5900,143 @@ body {
   line-height: 1.6;
   vertical-align: middle;
   border: 1px solid transparent;
+}
+
+.assistant-desk-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assistant-doctor-filter,
+.assistant-walkin-doctor select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  max-width: 100%;
+}
+
+.assistant-availability-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.assistant-availability-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assistant-availability-chip.is-selected {
+  border-color: #0d47a1;
+  box-shadow: 0 0 0 1px #0d47a1;
+}
+
+.assistant-availability-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2e7d32;
+  flex-shrink: 0;
+}
+
+.assistant-availability-chip.is-busy .assistant-availability-dot {
+  background: #ed6c02;
+}
+
+.assistant-availability-chip.is-unavailable .assistant-availability-dot {
+  background: #c62828;
+}
+
+.assistant-availability-chip-name {
+  font-weight: 600;
+}
+
+.assistant-availability-chip-status {
+  text-transform: capitalize;
+  color: #64748b;
+}
+
+.assistant-availability-select-label {
+  display: block;
+  font-size: 12px;
+  color: #627d98;
+  margin-bottom: 4px;
+}
+
+.assistant-availability-select {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+}
+
+.assistant-availability-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.assistant-availability-tag.is-busy {
+  background: #fff3e0;
+  color: #b45309;
+}
+
+.assistant-availability-tag.is-unavailable {
+  background: #fdecea;
+  color: #c62828;
+}
+
+.assistant-walkin-doctor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+.assistant-walkin-doctor label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.assistant-walkin-doctor select {
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.assistant-appointment-doctor {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+
+.assistant-appointment-doctor span {
+  font-weight: 400;
+  color: #64748b;
 }
 
 .assistant-appointment-when {
@@ -5818,6 +6050,12 @@ body {
   color: #166534;
   background: #dcfce7;
   border-color: #86efac;
+}
+
+.appointment-pay-badge.is-free {
+  color: #1e40af;
+  background: #dbeafe;
+  border-color: #93c5fd;
 }
 
 .appointment-pay-badge.is-unpaid {
@@ -8202,6 +8440,26 @@ button.public-home-doctor-btn {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+
+.doctors-directory-chip.is-empty:not(.is-active) {
+  color: #94a3b8;
+}
+
+.doctors-directory-chip-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 18px;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.doctors-directory-chip.is-active .doctors-directory-chip-count {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .doctors-directory-section {
