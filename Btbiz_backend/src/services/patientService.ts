@@ -372,6 +372,7 @@ export const getFullPatientHistory = async (patientId: string) => {
   return {
     patient,
     visits: visitsWithDetails,
+    lastPrescription: buildLastPrescription(documents),
     pharmacyDispensations: pharmacyDispensations.map((d) => ({
       id: (d as any)._id.toString(),
       dispensedBy: (d as any).dispensedBy?.name ?? "Pharmacy",
@@ -459,6 +460,39 @@ export const getFullPatientHistory = async (patientId: string) => {
     }))
   };
 };
+
+/** Latest clinic-verified, released prescription — used to prefill patient lab/pharmacy requests. */
+function buildLastPrescription(documents: unknown[]) {
+  let latest: any = null;
+  for (const d of documents as any[]) {
+    if (!d?.verifiedAt || !d?.verifiedExtract) continue;
+    if (d.patientPublishStatus && d.patientPublishStatus !== "PUBLISHED") continue;
+    if (!latest || new Date(d.verifiedAt).getTime() > new Date(latest.verifiedAt).getTime()) {
+      latest = d;
+    }
+  }
+  if (!latest) return null;
+
+  const extract = latest.verifiedExtract ?? {};
+  const medicines = (Array.isArray(extract.medicines) ? extract.medicines : [])
+    .map((m: any) => ({
+      medicineName: String(m?.medicineName ?? "").trim(),
+      dosage: String(m?.dosage ?? "").trim() || undefined,
+      quantity: String(m?.quantity ?? "").trim() || undefined,
+    }))
+    .filter((m: { medicineName: string }) => m.medicineName.length > 0);
+  const tests = (Array.isArray(extract.tests) ? extract.tests : [])
+    .map((t: any) => ({ testName: String(t?.testName ?? "").trim() }))
+    .filter((t: { testName: string }) => t.testName.length > 0);
+  if (!medicines.length && !tests.length) return null;
+
+  return {
+    documentId: latest._id.toString(),
+    verifiedAt: new Date(latest.verifiedAt).toISOString(),
+    medicines,
+    tests,
+  };
+}
 
 export interface AddDiagnosticTestItem {
   testName: string;

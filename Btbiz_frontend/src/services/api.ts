@@ -965,7 +965,18 @@ export interface FullPatientHistory {
     labPaymentStatus?: 'UNPAID' | 'PARTIAL' | 'PAID'
     labPaidAt?: string
     diagnosticTests?: DiagnosticTestItem[]
+    prescriptions?: Array<{
+      _id: string
+      medicines?: Array<{ _id: string; name: string; dosage?: string; frequency?: string }>
+    }>
   }>
+  /** Latest clinic-verified prescription released to the patient (null when none). */
+  lastPrescription?: {
+    documentId: string
+    verifiedAt: string
+    medicines: Array<{ medicineName: string; dosage?: string; quantity?: string }>
+    tests: Array<{ testName: string }>
+  } | null
   pharmacyDispensations?: PharmacyDispensationSummary[]
   documents: Array<{
     id: string
@@ -1051,7 +1062,8 @@ export const patientPortalService = {
     return res.data as any
   },
   async addMedicine(payload: {
-    medicineName: string
+    medicineName?: string
+    medicines?: Array<{ medicineName: string; dosage?: string; quantity?: number; notes?: string }>
     dosage?: string
     quantity?: number
     notes?: string
@@ -1064,7 +1076,8 @@ export const patientPortalService = {
     return res.data as any
   },
   async addTest(payload: {
-    testName: string
+    testName?: string
+    tests?: Array<{ testName: string; notes?: string }>
     notes?: string
     serviceType?: 'LAB_VISIT' | 'HOME_SERVICE'
     paymentMode?: 'ONLINE' | 'OFFLINE'
@@ -1808,8 +1821,12 @@ export const publicAppointmentService = {
     await api.post('/public/family/send-otp', { mobileNumber })
   },
 
-  async verifyFamilyOtp(mobileNumber: string, otp: string): Promise<void> {
-    await api.post('/public/family/verify-otp', { mobileNumber, otp })
+  async verifyFamilyOtp(mobileNumber: string, otp: string): Promise<{
+    account?: FamilyAccountSummary
+    members?: FamilyMemberSummary[]
+  }> {
+    const res = await api.post('/public/family/verify-otp', { mobileNumber, otp })
+    return res.data as { account?: FamilyAccountSummary; members?: FamilyMemberSummary[] }
   },
 
   async familyLoginOrCreate(mobileNumber: string): Promise<FamilyAccountSummary> {

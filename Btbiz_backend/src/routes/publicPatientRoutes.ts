@@ -522,6 +522,7 @@ router.post(
         dosage,
         quantity,
         notes,
+        medicines,
         serviceType,
         paymentMode,
         expectedFulfillmentMinutes: rawEta,
@@ -531,6 +532,7 @@ router.post(
         dosage?: string;
         quantity?: number;
         notes?: string;
+        medicines?: Array<{ medicineName?: string; dosage?: string; quantity?: number; notes?: string }>;
         serviceType?: "PICKUP" | "HOME_DELIVERY";
         paymentMode?: "ONLINE" | "OFFLINE";
         expectedFulfillmentMinutes?: number | string;
@@ -543,7 +545,17 @@ router.post(
         const n = parseInt(rawEta.trim(), 10);
         if (!Number.isNaN(n)) expectedFulfillmentMinutes = n;
       }
-      if (!medicineName || typeof medicineName !== "string" || !medicineName.trim()) {
+      const sharedNotes = notes?.trim?.() || undefined;
+      const fromArray = Array.isArray(medicines) ? medicines : [];
+      const rows = (fromArray.length > 0 ? fromArray : [{ medicineName, dosage, quantity, notes }])
+        .map((m) => ({
+          medicineName: typeof m?.medicineName === "string" ? m.medicineName.trim() : "",
+          dosage: m?.dosage?.trim?.() || undefined,
+          quantity: typeof m?.quantity === "number" && m.quantity > 0 ? m.quantity : undefined,
+          notes: m?.notes?.trim?.() || sharedNotes,
+        }))
+        .filter((m) => m.medicineName.length > 0);
+      if (!rows.length) {
         res.status(400).json({ message: "medicineName is required" });
         return;
       }
@@ -564,35 +576,40 @@ router.post(
         preferredProvider = new mongoose.Types.ObjectId(preferredProviderId);
       }
 
-      const createPayload: Record<string, unknown> = {
-        patient: patientId,
-        medicineName: medicineName.trim(),
-        dosage: dosage?.trim?.() || undefined,
-        quantity: typeof quantity === "number" ? quantity : undefined,
-        notes: notes?.trim?.() || undefined,
-        source: "patient",
-        serviceType: serviceType === "HOME_DELIVERY" ? "HOME_DELIVERY" : "PICKUP",
-        // Rule: Home delivery always takes "Pay online" in this app.
-        paymentMode: serviceType === "HOME_DELIVERY" ? "ONLINE" : paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE",
-        expectedFulfillmentMinutes:
-          typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
-            ? Math.round(expectedFulfillmentMinutes)
-            : undefined,
-      };
-      if (preferredProvider) {
-        createPayload.preferredProvider = preferredProvider;
-      }
-      const entry = await PatientMedicineRequest.create(createPayload);
+      const requestGroupId =
+        rows.length > 1 ? new mongoose.Types.ObjectId().toString() : undefined;
+      const created = await PatientMedicineRequest.insertMany(
+        rows.map((m) => ({
+          patient: patientId,
+          ...(preferredProvider ? { preferredProvider } : {}),
+          requestGroupId,
+          medicineName: m.medicineName,
+          dosage: m.dosage,
+          quantity: m.quantity,
+          notes: m.notes,
+          source: "patient",
+          serviceType: serviceType === "HOME_DELIVERY" ? "HOME_DELIVERY" : "PICKUP",
+          // Rule: Home delivery always takes "Pay online" in this app.
+          paymentMode: serviceType === "HOME_DELIVERY" ? "ONLINE" : paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE",
+          expectedFulfillmentMinutes:
+            typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
+              ? Math.round(expectedFulfillmentMinutes)
+              : undefined,
+        }))
+      );
+      const entry = created[0]!;
 
       trackEvent({
         eventType: "pharmacy.order.created",
         actorRole: "PATIENT",
         userId: String(patientId),
         route: "/public/patient/medicines",
-        metadata: { requestId: entry._id.toString() },
+        metadata: { requestId: entry._id.toString(), requestGroupId, count: created.length },
       });
 
       res.status(201).json({
+        requestIds: created.map((d) => d._id.toString()),
+        requestGroupId,
         medicine: {
           id: entry._id.toString(),
           medicineName: entry.medicineName,
@@ -717,6 +734,7 @@ router.post(
     try {
       const {
         testName,
+        tests,
         notes,
         serviceType,
         paymentMode,
@@ -725,6 +743,7 @@ router.post(
         preferredProviderId,
       } = req.body as {
         testName?: string;
+        tests?: Array<{ testName?: string; notes?: string }>;
         notes?: string;
         serviceType?: "LAB_VISIT" | "HOME_SERVICE";
         paymentMode?: "ONLINE" | "OFFLINE";
@@ -732,7 +751,15 @@ router.post(
         expectedFulfillmentMinutes?: number;
         preferredProviderId?: string;
       };
-      if (!testName || typeof testName !== "string" || !testName.trim()) {
+      const sharedNotes = notes?.trim?.() || undefined;
+      const fromArray = Array.isArray(tests) ? tests : [];
+      const rows = (fromArray.length > 0 ? fromArray : [{ testName, notes }])
+        .map((t) => ({
+          testName: typeof t?.testName === "string" ? t.testName.trim() : "",
+          notes: t?.notes?.trim?.() || sharedNotes,
+        }))
+        .filter((t) => t.testName.length > 0);
+      if (!rows.length) {
         res.status(400).json({ message: "testName is required" });
         return;
       }
@@ -753,30 +780,38 @@ router.post(
         preferredProvider = new mongoose.Types.ObjectId(preferredProviderId);
       }
 
-      const entry = await PatientTestRequest.create({
-        patient: patientId,
-        preferredProvider,
-        testName: testName.trim(),
-        notes: notes?.trim?.() || undefined,
-        source: "patient",
-        serviceType: serviceType === "HOME_SERVICE" ? "HOME_SERVICE" : "LAB_VISIT",
-        paymentMode: paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE",
-        preferredDateTime: preferredDateTime ? new Date(preferredDateTime) : undefined,
-        expectedFulfillmentMinutes:
-          typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
-            ? Math.round(expectedFulfillmentMinutes)
-            : undefined,
-      });
+      const requestGroupId =
+        rows.length > 1 ? new mongoose.Types.ObjectId().toString() : undefined;
+      const created = await PatientTestRequest.insertMany(
+        rows.map((t) => ({
+          patient: patientId,
+          preferredProvider,
+          requestGroupId,
+          testName: t.testName,
+          notes: t.notes,
+          source: "patient",
+          serviceType: serviceType === "HOME_SERVICE" ? "HOME_SERVICE" : "LAB_VISIT",
+          paymentMode: paymentMode === "ONLINE" ? "ONLINE" : "OFFLINE",
+          preferredDateTime: preferredDateTime ? new Date(preferredDateTime) : undefined,
+          expectedFulfillmentMinutes:
+            typeof expectedFulfillmentMinutes === "number" && expectedFulfillmentMinutes > 0
+              ? Math.round(expectedFulfillmentMinutes)
+              : undefined,
+        }))
+      );
+      const entry = created[0]!;
 
       trackEvent({
         eventType: "lab.order.created",
         actorRole: "PATIENT",
         userId: String(patientId),
         route: "/public/patient/tests",
-        metadata: { requestId: entry._id.toString() },
+        metadata: { requestId: entry._id.toString(), requestGroupId, count: created.length },
       });
 
       res.status(201).json({
+        requestIds: created.map((d) => d._id.toString()),
+        requestGroupId,
         test: {
           id: entry._id.toString(),
           testName: entry.testName,

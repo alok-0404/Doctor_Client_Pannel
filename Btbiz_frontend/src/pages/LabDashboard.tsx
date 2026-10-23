@@ -782,7 +782,15 @@ export const LabDashboard = () => {
   const renderRequestCard = (r: LabOrderRequest) => (
     <div key={r.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10 }}>
       <p style={{ margin: 0, fontWeight: 600 }}>{r.patientName} ({r.patientMobile})</p>
-      <p style={{ margin: '4px 0', fontSize: 13 }}>{r.testName}{r.notes ? ` · ${r.notes}` : ''}</p>
+      <div style={{ margin: '4px 0', fontSize: 13 }}>
+        {getRequestTestNames(r).map((name, idx, all) => (
+          <p key={`${r.id}-${idx}`} style={{ margin: '0 0 2px' }}>
+            {all.length > 1 ? `${idx + 1}. ` : ''}
+            {name}
+          </p>
+        ))}
+        {r.notes ? <p style={{ margin: 0, color: '#64748b' }}>Notes: {r.notes}</p> : null}
+      </div>
       <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
         {r.serviceType === 'HOME_SERVICE' ? 'Home service' : 'Lab visit'} · {r.paymentMode} · {r.paymentStatus} · {r.status}
         {r.preferredDateTime ? ` · Preferred ${new Date(r.preferredDateTime).toLocaleString('en-IN')}` : ''}

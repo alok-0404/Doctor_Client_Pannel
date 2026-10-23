@@ -230,6 +230,60 @@ async function ensureDistinctPatientsPerFamilyAccount(accountId: mongoose.Types.
   }
 }
 
+function serializeFamilyMember(m: any) {
+  return {
+    id: m._id.toString(),
+    fullName: m.fullName,
+    relation: m.relation,
+    gender: m.gender,
+    dateOfBirth: m.dateOfBirth,
+    patientId: m.patient?._id?.toString() ?? null,
+    patient: m.patient
+      ? {
+          id: m.patient._id.toString(),
+          firstName: m.patient.firstName,
+          lastName: m.patient.lastName,
+          mobileNumber: m.patient.mobileNumber,
+          gender: m.patient.gender,
+          dateOfBirth: m.patient.dateOfBirth,
+          address: m.patient.address
+        }
+      : null
+  };
+}
+
+async function loadFamilyMembers(accountId: mongoose.Types.ObjectId) {
+  const fetchMembers = () =>
+    FamilyMember.find({ account: accountId, isDeleted: { $ne: true } })
+      .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
+      .sort({ createdAt: 1 })
+      .lean();
+
+  let members = await fetchMembers();
+  const patientIds = members
+    .map((m: any) => m.patient?._id?.toString())
+    .filter((id): id is string => Boolean(id));
+  if (new Set(patientIds).size !== patientIds.length) {
+    await ensureDistinctPatientsPerFamilyAccount(accountId);
+    members = await fetchMembers();
+  }
+  return members.map(serializeFamilyMember);
+}
+
+async function findOrCreateFamilyAccount(phone: string) {
+  const existing = await FamilyAccount.findOne({ phone }).lean();
+  if (existing) return existing as any;
+  try {
+    return (await FamilyAccount.create({ phone })).toObject() as any;
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      const raced = await FamilyAccount.findOne({ phone }).lean();
+      if (raced) return raced as any;
+    }
+    throw error;
+  }
+}
+
 /** IST calendar date from appointmentDate (YYYY-MM-DD or ISO prefix). */
 function istCalendarDateStr(appointmentDate: string): string {
   const raw = String(appointmentDate ?? "").trim();
@@ -625,21 +679,25 @@ router.post("/family/verify-otp", async (req, res) => {
       res.status(400).json({ message: "Mobile and OTP are required" });
       return;
     }
-    if (code === BOOKING_TEST_OTP) {
-      res.status(200).json({ verified: true });
-      return;
+    if (code !== BOOKING_TEST_OTP) {
+      const session = await PatientOtpSession.findOne({
+        mobile,
+        expiresAt: { $gt: new Date() },
+      });
+      if (!session || !(await bcrypt.compare(code, session.otpHash))) {
+        res.status(400).json({ message: "Invalid or expired OTP" });
+        return;
+      }
+      await PatientOtpSession.deleteOne({ _id: session._id });
     }
 
-    const session = await PatientOtpSession.findOne({
-      mobile,
-      expiresAt: { $gt: new Date() },
+    const account = await findOrCreateFamilyAccount(mobile);
+    const members = await loadFamilyMembers(account._id);
+    res.status(200).json({
+      verified: true,
+      account: { id: account._id.toString(), phone: account.phone },
+      members
     });
-    if (!session || !(await bcrypt.compare(code, session.otpHash))) {
-      res.status(400).json({ message: "Invalid or expired OTP" });
-      return;
-    }
-    await PatientOtpSession.deleteOne({ _id: session._id });
-    res.status(200).json({ verified: true });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("public /family/verify-otp error:", error);
@@ -664,10 +722,7 @@ router.post("/family/login-or-create", async (req, res) => {
       return;
     }
 
-    let accountDoc = await FamilyAccount.findOne({ phone: trimmed });
-    if (!accountDoc) {
-      accountDoc = await FamilyAccount.create({ phone: trimmed });
-    }
+    const accountDoc = await findOrCreateFamilyAccount(trimmed);
 
     res.status(200).json({
       account: {
@@ -708,40 +763,14 @@ router.get("/family/members", async (req, res) => {
       return;
     }
 
-    await ensureDistinctPatientsPerFamilyAccount((account as any)._id);
-
-    const members = await FamilyMember.find({
-      account: (account as any)._id,
-      isDeleted: { $ne: true }
-    })
-      .populate("patient", "firstName lastName mobileNumber gender dateOfBirth address")
-      .sort({ createdAt: 1 })
-      .lean();
+    const members = await loadFamilyMembers((account as any)._id);
 
     res.status(200).json({
       account: {
         id: (account as any)._id.toString(),
         phone: account.phone
       },
-      members: members.map((m: any) => ({
-        id: m._id.toString(),
-        fullName: m.fullName,
-        relation: m.relation,
-        gender: m.gender,
-        dateOfBirth: m.dateOfBirth,
-        patientId: m.patient?._id?.toString() ?? null,
-        patient: m.patient
-          ? {
-              id: m.patient._id.toString(),
-              firstName: m.patient.firstName,
-              lastName: m.patient.lastName,
-              mobileNumber: m.patient.mobileNumber,
-              gender: m.patient.gender,
-              dateOfBirth: m.patient.dateOfBirth,
-              address: m.patient.address
-            }
-          : null
-      }))
+      members
     });
   } catch (error) {
     // eslint-disable-next-line no-console

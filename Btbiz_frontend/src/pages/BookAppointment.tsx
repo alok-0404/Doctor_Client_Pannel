@@ -544,6 +544,15 @@ export const BookAppointment = () => {
 
   const familyMobileValue = `${familyCountryCode}${familyMobile.replace(/\D/g, '').trim()}`
 
+  const applyFamilyAccess = (accountId: string, members: FamilyMemberSummary[]) => {
+    setFamilyMembers(members)
+    setFamilyAccountId(accountId)
+    if (members.length === 1) {
+      handleSelectFamilyMember(members[0].id, members)
+      focusFamilyBookingFields()
+    }
+  }
+
   const handleFamilyLogin = async () => {
     setError(null)
     setFamilyAccountId(null)
@@ -556,13 +565,8 @@ export const BookAppointment = () => {
     }
     try {
       const account = await publicAppointmentService.familyLoginOrCreate(familyMobileValue)
-      setFamilyAccountId(account.id)
       const list = await publicAppointmentService.listFamilyMembers({ accountId: account.id })
-      setFamilyMembers(list.members ?? [])
-      if ((list.members ?? []).length === 1) {
-        handleSelectFamilyMember(list.members[0].id, list.members ?? [])
-        focusFamilyBookingFields()
-      }
+      applyFamilyAccess(account.id, list.members ?? [])
     } catch (err: any) {
       const msg = err?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'Failed to load family members. Please try again.')
@@ -595,8 +599,13 @@ export const BookAppointment = () => {
     }
     setFamilyOtpSending(true)
     try {
-      await publicAppointmentService.verifyFamilyOtp(familyMobileValue, familyOtp.trim())
-      await handleFamilyLogin()
+      const verified = await publicAppointmentService.verifyFamilyOtp(familyMobileValue, familyOtp.trim())
+      if (verified.account?.id && Array.isArray(verified.members)) {
+        setSelectedFamilyMemberId('')
+        applyFamilyAccess(verified.account.id, verified.members)
+      } else {
+        await handleFamilyLogin()
+      }
     } catch (err: any) {
       const msg = err?.response?.data?.message
       setError(typeof msg === 'string' ? msg : 'Invalid or expired OTP.')

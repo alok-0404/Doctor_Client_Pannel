@@ -49,6 +49,27 @@ function apiErrorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
+function splitItemNames(text: string): string[] {
+  return text
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function mergeUniqueNames(existing: string[], incoming: string[]): string[] {
+  const seen = new Set(existing.map((n) => n.toLowerCase()))
+  const out = [...existing]
+  for (const name of incoming) {
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(name)
+  }
+  return out
+}
+
+type PendingMedicineItem = { medicineName: string; dosage?: string; quantity?: number }
+
 function formatDate(d: string | Date | undefined): string {
   if (!d) return '—'
   const dt = typeof d === 'string' ? new Date(d) : d
@@ -375,7 +396,9 @@ export const PatientProfile = () => {
   const [addMedicineEtaMinutes, setAddMedicineEtaMinutes] = useState('')
   const [pharmacyProviders, setPharmacyProviders] = useState<ServiceProviderOption[]>([])
   const [selectedPharmacyProviderId, setSelectedPharmacyProviderId] = useState('')
+  const [pendingMedicines, setPendingMedicines] = useState<PendingMedicineItem[]>([])
   const [addTestName, setAddTestName] = useState('')
+  const [pendingTestNames, setPendingTestNames] = useState<string[]>([])
   const [addTestNotes, setAddTestNotes] = useState('')
   const [addTestServiceType, setAddTestServiceType] = useState<'LAB_VISIT' | 'HOME_SERVICE'>('LAB_VISIT')
   const [addTestPaymentMode, setAddTestPaymentMode] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE')
@@ -720,17 +743,121 @@ export const PatientProfile = () => {
     }
   }
 
+  /** Parses the medicine input; returns null when it cannot be added (error already shown). */
+  const readMedicineInput = (): PendingMedicineItem[] | null => {
+    const names = splitItemNames(addMedicineName)
+    const dosage = addMedicineDosage.trim()
+    if (names.length > 1 && dosage) {
+      toast.error('Dosage can be added for one medicine at a time. Add each medicine separately.')
+      return null
+    }
+    return names.map((medicineName) => ({ medicineName, dosage: dosage || undefined }))
+  }
+
+  const mergePendingMedicines = (
+    existing: PendingMedicineItem[],
+    incoming: PendingMedicineItem[],
+  ): PendingMedicineItem[] => {
+    const seen = new Set(existing.map((m) => m.medicineName.toLowerCase()))
+    const merged = [...existing]
+    for (const m of incoming) {
+      const key = m.medicineName.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(m)
+    }
+    return merged
+  }
+
+  const handleAddMedicineToList = () => {
+    const items = readMedicineInput()
+    if (!items) return
+    if (items.length === 0) {
+      toast.error('Please enter a medicine name.')
+      return
+    }
+    setPendingMedicines((prev) => mergePendingMedicines(prev, items))
+    setAddMedicineName('')
+    setAddMedicineDosage('')
+  }
+
+  const handleAddTestToList = () => {
+    const names = splitItemNames(addTestName)
+    if (names.length === 0) {
+      toast.error('Please enter a test name.')
+      return
+    }
+    setPendingTestNames((prev) => mergeUniqueNames(prev, names))
+    setAddTestName('')
+  }
+
+  const lastPrescription = data.lastPrescription ?? null
+  const lastVisitWithTests = visits.find((v) => (v.diagnosticTests?.length ?? 0) > 0)
+  const testSuggestions: { label: string; names: string[] } | null =
+    lastPrescription && lastPrescription.tests.length > 0
+      ? {
+          label: `Last prescription (${formatDate(lastPrescription.verifiedAt)})`,
+          names: mergeUniqueNames([], lastPrescription.tests.map((t) => t.testName)),
+        }
+      : lastVisitWithTests
+        ? {
+            label: `Last visit tests (${formatDate(lastVisitWithTests.visitDate)})`,
+            names: mergeUniqueNames(
+              [],
+              (lastVisitWithTests.diagnosticTests ?? []).map((t) => t.testName.trim()).filter(Boolean),
+            ),
+          }
+        : null
+  const lastVisitWithMedicines = visits.find((v) =>
+    (v.prescriptions ?? []).some((p) => (p.medicines ?? []).some((m) => m.name?.trim())),
+  )
+  const medicineSuggestions: { label: string; items: PendingMedicineItem[] } | null =
+    lastPrescription && lastPrescription.medicines.length > 0
+      ? {
+          label: `last prescription (${formatDate(lastPrescription.verifiedAt)})`,
+          items: mergePendingMedicines(
+            [],
+            lastPrescription.medicines.map((m) => {
+              const qty = parseInt(m.quantity?.match(/\d+/)?.[0] ?? '', 10)
+              return {
+                medicineName: m.medicineName,
+                dosage: m.dosage,
+                quantity: Number.isFinite(qty) && qty > 0 ? qty : undefined,
+              }
+            }),
+          ),
+        }
+      : lastVisitWithMedicines
+        ? {
+            label: `last visit medicines (${formatDate(lastVisitWithMedicines.visitDate)})`,
+            items: mergePendingMedicines(
+              [],
+              (lastVisitWithMedicines.prescriptions ?? [])
+                .flatMap((p) => p.medicines ?? [])
+                .filter((m) => m.name?.trim())
+                .map((m) => ({
+                  medicineName: m.name.trim(),
+                  dosage: [m.dosage, m.frequency].filter(Boolean).join(' · ') || undefined,
+                })),
+            ),
+          }
+        : null
+  const pendingTestKeys = new Set(pendingTestNames.map((n) => n.toLowerCase()))
+  const pendingMedicineKeys = new Set(pendingMedicines.map((m) => m.medicineName.toLowerCase()))
+
   const handleAddMedicine = async (ev: React.FormEvent) => {
     ev.preventDefault()
-    if (!addMedicineName.trim()) {
+    const typed = readMedicineInput()
+    if (!typed) return
+    const items = mergePendingMedicines(pendingMedicines, typed)
+    if (items.length === 0) {
       toast.error('Please enter a medicine name.')
       return
     }
     setAddingMedicine(true)
     try {
       await patientPortalService.addMedicine({
-        medicineName: addMedicineName.trim(),
-        dosage: addMedicineDosage.trim() || undefined,
+        medicines: items,
         notes: addMedicineNotes.trim() || undefined,
         serviceType: addMedicineServiceType,
         paymentMode: addMedicinePaymentMode,
@@ -741,6 +868,7 @@ export const PatientProfile = () => {
       })
       setAddMedicineName('')
       setAddMedicineDosage('')
+      setPendingMedicines([])
       setAddMedicineNotes('')
       setAddMedicineEtaMinutes('')
       setSelectedPharmacyProviderId('')
@@ -755,14 +883,15 @@ export const PatientProfile = () => {
 
   const handleAddTest = async (ev: React.FormEvent) => {
     ev.preventDefault()
-    if (!addTestName.trim()) {
+    const names = mergeUniqueNames(pendingTestNames, splitItemNames(addTestName))
+    if (names.length === 0) {
       toast.error('Please enter a test name.')
       return
     }
     setAddingTest(true)
     try {
       await patientPortalService.addTest({
-        testName: addTestName.trim(),
+        tests: names.map((testName) => ({ testName })),
         notes: addTestNotes.trim() || undefined,
         serviceType: addTestServiceType,
         paymentMode: addTestPaymentMode,
@@ -771,6 +900,7 @@ export const PatientProfile = () => {
         preferredProviderId: selectedLabProviderId || undefined,
       })
       setAddTestName('')
+      setPendingTestNames([])
       setAddTestNotes('')
       setAddTestPreferredDateTime('')
       setAddTestEtaMinutes('')
@@ -1364,15 +1494,95 @@ export const PatientProfile = () => {
           <Card className="patient-profile-lab-form-card" elevated>
             <h3 className="patient-profile-subtitle">Request a test</h3>
             <form onSubmit={handleAddTest} className="patient-profile-lab-form">
-              <TextField
-                id="lab-test-name"
-                name="addTestName"
-                label="Test name"
-                type="text"
-                placeholder="Add test request (e.g. CBC, Sugar)"
-                value={addTestName}
-                onChange={(e) => setAddTestName(e.target.value)}
-              />
+              {testSuggestions ? (
+                <div className="patient-profile-suggestion-row">
+                  <div className="patient-profile-lab-select-field">
+                    <span className="patient-profile-suggestion-label" id="lab-test-suggestion-label">
+                      Choose from {testSuggestions.label} — tap to select
+                    </span>
+                    <div
+                      className="patient-profile-suggestion-chips"
+                      role="group"
+                      aria-labelledby="lab-test-suggestion-label"
+                    >
+                      {testSuggestions.names.map((name) => {
+                        const selected = pendingTestKeys.has(name.toLowerCase())
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            className={`patient-profile-suggestion-chip${selected ? ' is-selected' : ''}`}
+                            aria-pressed={selected}
+                            onClick={() =>
+                              setPendingTestNames((prev) =>
+                                selected
+                                  ? prev.filter((n) => n.toLowerCase() !== name.toLowerCase())
+                                  : mergeUniqueNames(prev, [name]),
+                              )
+                            }
+                          >
+                            {selected ? '✓ ' : ''}
+                            {name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {testSuggestions.names.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setPendingTestNames((prev) => mergeUniqueNames(prev, testSuggestions.names))}
+                    >
+                      Select all ({testSuggestions.names.length})
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <p className="public-section-text patient-profile-suggestion-empty">
+                  No verified prescription yet. Type the test names below.
+                </p>
+              )}
+              <div className="patient-profile-multi-item-entry">
+                <TextField
+                  id="lab-test-name"
+                  name="addTestName"
+                  label="Test name"
+                  type="text"
+                  placeholder="e.g. CBC, Sugar, Thyroid"
+                  hint="Add one or more tests. Press Enter or '+ Add to list'; comma-separated names are split."
+                  value={addTestName}
+                  onChange={(e) => setAddTestName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAddTestToList()
+                    }
+                  }}
+                />
+                <Button type="button" variant="secondary" onClick={handleAddTestToList}>
+                  + Add to list
+                </Button>
+              </div>
+              {pendingTestNames.length > 0 && (
+                <ul className="patient-profile-pending-items" aria-label="Tests in this request">
+                  {pendingTestNames.map((name, idx) => (
+                    <li key={name} className="patient-profile-pending-item">
+                      <span>
+                        {idx + 1}. {name}
+                      </span>
+                      <button
+                        type="button"
+                        className="patient-profile-pending-item-remove"
+                        aria-label={`Remove ${name}`}
+                        onClick={() => setPendingTestNames((prev) => prev.filter((n) => n !== name))}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <TextField
                 id="lab-test-notes"
                 name="addTestNotes"
@@ -1444,7 +1654,11 @@ export const PatientProfile = () => {
               </div>
               <div className="patient-profile-lab-form-actions">
                 <Button type="submit" disabled={addingTest}>
-                  {addingTest ? 'Adding…' : 'Add test'}
+                  {addingTest
+                    ? 'Adding…'
+                    : pendingTestNames.length > 1
+                      ? `Request ${pendingTestNames.length} tests`
+                      : 'Add test'}
                 </Button>
               </div>
             </form>
@@ -1760,25 +1974,121 @@ export const PatientProfile = () => {
           <Card className="patient-profile-medicine-form-card" elevated>
             <h3 className="patient-profile-subtitle">Request medicine</h3>
             <form onSubmit={handleAddMedicine} className="patient-profile-medicine-form">
-              <TextField
-                id="medicine-request-name"
-                name="addMedicineName"
-                label="Medicine name"
-                type="text"
-                placeholder="Medicine name"
-                value={addMedicineName}
-                onChange={(e) => setAddMedicineName(e.target.value)}
-              />
-              <div className="patient-profile-medicine-form-grid">
+              {medicineSuggestions && medicineSuggestions.items.length > 0 ? (
+                <div className="patient-profile-suggestion-row">
+                  <div className="patient-profile-medicine-select-field">
+                    <span className="patient-profile-suggestion-label" id="medicine-suggestion-label">
+                      Choose from {medicineSuggestions.label} — tap to select
+                    </span>
+                    <div
+                      className="patient-profile-suggestion-chips"
+                      role="group"
+                      aria-labelledby="medicine-suggestion-label"
+                    >
+                      {medicineSuggestions.items.map((m, idx) => {
+                        const key = m.medicineName.toLowerCase()
+                        const selected = pendingMedicineKeys.has(key)
+                        const label = [m.medicineName, m.dosage, m.quantity ? `Qty ${m.quantity}` : '']
+                          .filter(Boolean)
+                          .join(' · ')
+                        return (
+                          <button
+                            key={`${idx}-${m.medicineName}`}
+                            type="button"
+                            className={`patient-profile-suggestion-chip${selected ? ' is-selected' : ''}`}
+                            aria-pressed={selected}
+                            onClick={() =>
+                              setPendingMedicines((prev) =>
+                                selected
+                                  ? prev.filter((p) => p.medicineName.toLowerCase() !== key)
+                                  : mergePendingMedicines(prev, [m]),
+                              )
+                            }
+                          >
+                            {selected ? '✓ ' : ''}
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {medicineSuggestions.items.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setPendingMedicines((prev) => mergePendingMedicines(prev, medicineSuggestions.items))
+                      }
+                    >
+                      Select all ({medicineSuggestions.items.length})
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <p className="public-section-text patient-profile-suggestion-empty">
+                  No prescription medicines yet. Type the medicine names below.
+                </p>
+              )}
+              <div className="patient-profile-multi-item-entry">
+                <TextField
+                  id="medicine-request-name"
+                  name="addMedicineName"
+                  label="Medicine name"
+                  type="text"
+                  placeholder="e.g. Dolo 650"
+                  hint="Add one or more medicines. Press Enter or '+ Add to list' after each."
+                  value={addMedicineName}
+                  onChange={(e) => setAddMedicineName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAddMedicineToList()
+                    }
+                  }}
+                />
                 <TextField
                   id="medicine-request-dosage"
                   name="addMedicineDosage"
                   label="Dosage (optional)"
                   type="text"
-                  placeholder="Dosage (optional)"
+                  placeholder="e.g. 1-0-1"
                   value={addMedicineDosage}
                   onChange={(e) => setAddMedicineDosage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAddMedicineToList()
+                    }
+                  }}
                 />
+                <Button type="button" variant="secondary" onClick={handleAddMedicineToList}>
+                  + Add to list
+                </Button>
+              </div>
+              {pendingMedicines.length > 0 && (
+                <ul className="patient-profile-pending-items" aria-label="Medicines in this request">
+                  {pendingMedicines.map((m, idx) => (
+                    <li key={m.medicineName} className="patient-profile-pending-item">
+                      <span>
+                        {idx + 1}. {m.medicineName}
+                        {m.dosage ? ` · ${m.dosage}` : ''}
+                        {m.quantity ? ` · Qty ${m.quantity}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="patient-profile-pending-item-remove"
+                        aria-label={`Remove ${m.medicineName}`}
+                        onClick={() =>
+                          setPendingMedicines((prev) => prev.filter((p) => p.medicineName !== m.medicineName))
+                        }
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="patient-profile-medicine-form-grid">
                 <TextField
                   id="medicine-request-notes"
                   name="addMedicineNotes"
@@ -1846,7 +2156,11 @@ export const PatientProfile = () => {
               </div>
               <div className="patient-profile-medicine-form-actions">
                 <Button type="submit" disabled={addingMedicine}>
-                  {addingMedicine ? 'Adding…' : 'Add medicine'}
+                  {addingMedicine
+                    ? 'Adding…'
+                    : pendingMedicines.length > 1
+                      ? `Request ${pendingMedicines.length} medicines`
+                      : 'Add medicine'}
                 </Button>
               </div>
             </form>
