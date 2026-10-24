@@ -90,7 +90,6 @@ export const MedicineDashboard = () => {
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null)
   const [substituteDraftByRequest, setSubstituteDraftByRequest] = useState<Record<string, { name: string; notes: string }>>({})
   const hiddenRequestIdsRef = useRef<Set<string>>(new Set())
-  const authWarningShownRef = useRef(false)
   const pharmacyWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const loadPatientProfile = async (p: PatientSummary) => {
@@ -320,15 +319,10 @@ export const MedicineDashboard = () => {
         const nextKey = JSON.stringify(next)
         return prevKey === nextKey ? prev : next
       })
-      authWarningShownRef.current = false
     } catch (err: unknown) {
       const e = err as { response?: { status?: number } }
       if (e?.response?.status === 401) {
         setIncomingRequests([])
-        if (!authWarningShownRef.current) {
-          toast.error('Pharmacy session expired or unauthorized. Please login again as Pharmacy.')
-          authWarningShownRef.current = true
-        }
         return
       }
       if (!silent) {

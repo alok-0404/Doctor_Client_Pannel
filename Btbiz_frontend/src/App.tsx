@@ -26,6 +26,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { ProtectedPatientRoute } from './components/ProtectedPatientRoute'
 import { DoctorNotificationListener } from './components/DoctorNotificationListener'
 import { GlobalBackButton } from './components/GlobalBackButton'
+import { SessionExpiredDialog } from './components/SessionExpiredDialog'
 import HandwritingExtractor from './components/HandwritingExtractor'
 
 export const App = () => {
@@ -183,6 +184,7 @@ export const App = () => {
         className="medigraph-toastify-container"
         toastClassName="medigraph-toastify-toast"
       />
+      <SessionExpiredDialog />
     </>
   )
 }

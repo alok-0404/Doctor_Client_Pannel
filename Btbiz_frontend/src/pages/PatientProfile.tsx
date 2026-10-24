@@ -490,8 +490,6 @@ export const PatientProfile = () => {
           } catch {
             // ignore cache cleanup errors
           }
-          patientStorage.clear()
-          window.location.replace('/patient-login')
           return
         }
         if (e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message ?? '')) {

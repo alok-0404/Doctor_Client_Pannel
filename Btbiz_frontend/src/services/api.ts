@@ -1,7 +1,8 @@
-import axios from 'axios'
+import axios, { type AxiosInstance } from 'axios'
 import { toast } from 'react-toastify'
 import { authStorage } from '../utils/authStorage'
 import { patientStorage } from '../utils/patientStorage'
+import { isSessionExpiry401, sessionExpiry, type SessionKind } from '../utils/sessionExpiry'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -60,6 +61,21 @@ patientApi.interceptors.request.use((config) => {
   }
   return config
 })
+
+function watchForExpiredSession(instance: AxiosInstance, kind: SessionKind): void {
+  instance.interceptors.response.use(undefined, (error: unknown) => {
+    if (axios.isAxiosError(error)) {
+      const hadAuthHeader = !!error.config?.headers?.Authorization
+      if (isSessionExpiry401(error.response?.status, error.config?.url, hadAuthHeader)) {
+        sessionExpiry.notify(kind)
+      }
+    }
+    return Promise.reject(error)
+  })
+}
+
+watchForExpiredSession(api, 'staff')
+watchForExpiredSession(patientApi, 'patient')
 
 /** Shown when opening a clinic-verified document (in-tab banner was unreliable under strict CSP). */
 const ASSISTANT_VERIFIED_DOCUMENT_TOAST =

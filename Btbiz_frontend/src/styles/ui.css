@@ -272,6 +272,7 @@ body {
   width: 100%;
   padding-left: 20px;
   padding-right: 24px;
+  box-sizing: border-box;
 }
 
 .app-layout--with-sidebar .staff-clinic-setup-bar {
@@ -1630,6 +1631,10 @@ body {
   backdrop-filter: blur(4px);
 }
 
+.dialog-backdrop--session {
+  z-index: 10000;
+}
+
 .dialog-card {
   width: 100%;
   max-width: 360px;
@@ -2262,20 +2267,18 @@ body {
 }
 
 .patient-summary-row-address {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
-  align-items: start;
-  justify-content: start;
-  margin-bottom: 10px;
+  gap: 12px;
+  align-items: flex-start;
 }
 
 .patient-summary-row-address dt {
+  flex-shrink: 0;
   line-height: 1.45;
 }
 
 .patient-summary-row-address dd {
   min-width: 0;
+  text-align: right;
   overflow-wrap: break-word;
   word-break: break-word;
   line-height: 1.45;
